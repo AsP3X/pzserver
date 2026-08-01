@@ -3,6 +3,7 @@
 --
 
 local JSON = require("ZM_JSON")
+require("ZM_Utils")
 
 ZM_PlayerTracker = {}
 
@@ -56,14 +57,10 @@ function ZM_PlayerTracker.exportPositions()
         return false
     end
 
-    local writer = getFileWriter(POSITIONS_FILE, true, false)
-    if not writer then
+    if not ZM_Utils.writeRawFile(POSITIONS_FILE, jsonStr) then
         print("[ZomboidManager] ERROR: cannot write player positions")
         return false
     end
-
-    writer:write(jsonStr)
-    writer:close()
 
     return true
 end

@@ -121,6 +121,11 @@ local function onServerStarted()
     -- Initialize money deposit system
     ZM_MoneyDeposit.init()
 
+    -- Probe Lua bridge writes (logs document folder + which strategy works)
+    if ZM_Utils and ZM_Utils.selfTestBridge then
+        ZM_Utils.selfTestBridge()
+    end
+
     -- Export game state immediately so it's available even when server is paused
     if ZM_GameState.export() then
         print("[ZomboidManager] Exported initial game state")

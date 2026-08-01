@@ -23,23 +23,31 @@ class InventoryReader
      */
     public function getPlayerInventory(string $username): ?array
     {
-        $filePath = $this->inventoryDir.'/'.$username.'.json';
+        // Nested path (preferred) or flat fallback if Lua cannot write subdirs
+        $candidates = [
+            $this->inventoryDir.'/'.$username.'.json',
+            dirname($this->inventoryDir).'/inventory_'.$username.'.json',
+        ];
 
-        if (! file_exists($filePath)) {
-            return null;
+        foreach ($candidates as $filePath) {
+            if (! is_file($filePath)) {
+                continue;
+            }
+
+            $content = file_get_contents($filePath);
+            if ($content === false) {
+                continue;
+            }
+
+            $data = json_decode($content, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                continue;
+            }
+
+            return $data;
         }
 
-        $content = file_get_contents($filePath);
-        if ($content === false) {
-            return null;
-        }
-
-        $data = json_decode($content, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            return null;
-        }
-
-        return $data;
+        return null;
     }
 
     /**
@@ -49,19 +57,26 @@ class InventoryReader
      */
     public function listPlayers(): array
     {
-        if (! is_dir($this->inventoryDir)) {
-            return [];
+        $names = [];
+
+        if (is_dir($this->inventoryDir)) {
+            $files = glob($this->inventoryDir.'/*.json') ?: [];
+            foreach ($files as $file) {
+                $names[] = pathinfo($file, PATHINFO_FILENAME);
+            }
         }
 
-        $files = glob($this->inventoryDir.'/*.json');
-        if ($files === false) {
-            return [];
+        // Flat fallback inventory_<user>.json next to inventory/
+        $parent = dirname($this->inventoryDir);
+        $flat = glob($parent.'/inventory_*.json') ?: [];
+        foreach ($flat as $file) {
+            $base = pathinfo($file, PATHINFO_FILENAME); // inventory_AsP3X
+            if (str_starts_with($base, 'inventory_')) {
+                $names[] = substr($base, strlen('inventory_'));
+            }
         }
 
-        return array_map(
-            fn (string $file) => pathinfo($file, PATHINFO_FILENAME),
-            $files
-        );
+        return array_values(array_unique($names));
     }
 
     /**

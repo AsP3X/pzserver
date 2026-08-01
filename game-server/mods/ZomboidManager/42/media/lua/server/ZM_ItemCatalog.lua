@@ -5,6 +5,7 @@
 --
 
 local JSON = require("ZM_JSON")
+require("ZM_Utils")
 
 ZM_ItemCatalog = {}
 
@@ -93,17 +94,8 @@ function ZM_ItemCatalog.export()
         return 0
     end
 
-    local writer = getFileWriter(CATALOG_FILE, true, false)
-    if not writer then
+    if not ZM_Utils.writeRawFile(CATALOG_FILE, jsonStr) then
         print("[ZomboidManager] ERROR: cannot open file writer for item catalog")
-        return 0
-    end
-
-    local writeOk, writeErr = pcall(function() writer:write(jsonStr) end)
-    writer:close()
-
-    if not writeOk then
-        print("[ZomboidManager] ERROR writing item catalog: " .. tostring(writeErr))
         return 0
     end
 

@@ -106,16 +106,21 @@ function ZM_InventoryExporter.exportPlayer(player)
         return false
     end
 
-    local writer = getFileWriter(INVENTORY_DIR .. "/" .. username .. ".json", true, false)
-    if not writer then
-        print("[ZomboidManager] ERROR: cannot open file writer for " .. username)
-        return false
+    -- Prefer nested inventory/<user>.json; fall back to flat inventory_<user>.json
+    -- if getFileWriter rejects subdirectories on this host.
+    local relPath = INVENTORY_DIR .. "/" .. username .. ".json"
+    if ZM_Utils.writeRawFile(relPath, jsonStr) then
+        return true
     end
 
-    writer:write(jsonStr)
-    writer:close()
+    local flatPath = "inventory_" .. username .. ".json"
+    if ZM_Utils.writeRawFile(flatPath, jsonStr) then
+        print("[ZomboidManager] Wrote inventory via flat path: " .. flatPath)
+        return true
+    end
 
-    return true
+    print("[ZomboidManager] ERROR: cannot open file writer for " .. username)
+    return false
 end
 
 local EXPORT_REQUESTS_FILE = "export_requests.json"

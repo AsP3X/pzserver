@@ -4,6 +4,7 @@
 --
 
 require("ZM_JSON")
+require("ZM_Utils")
 
 ZM_GameState = {}
 
@@ -127,6 +128,10 @@ function ZM_GameState.export()
     if not encOk then
         print("[ZomboidManager] GameState: JSON encode error: " .. tostring(jsonStr))
         return false
+    end
+
+    if ZM_Utils and ZM_Utils.writeRawFile then
+        return ZM_Utils.writeRawFile("game_state.json", jsonStr)
     end
 
     local writer = getFileWriter("game_state.json", true, false)

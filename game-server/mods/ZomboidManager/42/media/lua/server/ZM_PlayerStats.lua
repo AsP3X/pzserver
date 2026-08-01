@@ -4,6 +4,7 @@
 --
 
 local JSON = require("ZM_JSON")
+require("ZM_Utils")
 
 ZM_PlayerStats = {}
 
@@ -117,14 +118,10 @@ function ZM_PlayerStats.exportAll()
         return 0
     end
 
-    local writer = getFileWriter(STATS_FILE, true, false)
-    if not writer then
+    if not ZM_Utils.writeRawFile(STATS_FILE, jsonStr) then
         print("[ZomboidManager] ERROR: cannot write player stats")
         return 0
     end
-
-    writer:write(jsonStr)
-    writer:close()
 
     return #playerStats
 end
