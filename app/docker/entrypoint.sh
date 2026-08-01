@@ -88,10 +88,22 @@ fi
 # ── APP_KEY generation ───────────────────────────────────────────────
 if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "base64:" ]; then
     echo "[entrypoint] Generating APP_KEY..."
-    APP_KEY=$(php artisan key:generate --show --no-interaction)
+    APP_KEY=$(php artisan key:generate --show --no-interaction 2>/dev/null || true)
     export APP_KEY
     echo "[entrypoint] APP_KEY=$APP_KEY"
     echo "[entrypoint] Add this to your .env to persist across restarts."
+fi
+
+# ── Fail fast on invalid dotenv (unquoted spaces etc.) ─────────────
+if ! php artisan about --no-interaction >/dev/null 2>&1; then
+    echo "[entrypoint] FATAL: Laravel cannot load the environment."
+    echo "[entrypoint] Usually app/.env has unquoted spaces, e.g.:"
+    echo "[entrypoint]   PZ_SERVER_NAME=RedSun Survival"
+    echo "[entrypoint] Must be:"
+    echo "[entrypoint]   PZ_SERVER_NAME=\"RedSun Survival\""
+    echo "[entrypoint] On the host run: ./scripts/fix-dotenv.sh && docker restart pz-app"
+    php artisan about --no-interaction 2>&1 | head -20 || true
+    # still start nginx so logs are visible, but mark clearly
 fi
 
 # ── Package discovery ──────────────────────────────────────────────
