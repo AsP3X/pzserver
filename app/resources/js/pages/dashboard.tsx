@@ -50,6 +50,20 @@ import { fetchAction } from '@/lib/fetch-action';
 import { dashboard } from '@/routes';
 import type { BreadcrumbItem, DashboardData } from '@/types';
 
+type ChecklistData = {
+    overall_ok: boolean;
+    items: Array<{ id: string; label: string; ok: boolean; detail: string; severity: string }>;
+    backup: { last_at: string | null; age_hours: number | null; stale: boolean };
+    resources: { memory_usage: string | null; memory_limit: string | null; cpu_percent: number | null } | null;
+    pending_deposits: number;
+};
+
+type BridgeHealthSummary = {
+    healthy: boolean;
+    issues: string[];
+    pending_deposits: number;
+};
+
 export default function Dashboard({
     server,
     auto_restart,
@@ -60,7 +74,9 @@ export default function Dashboard({
     game_events,
     server_totals,
     connection,
-}: DashboardData) {
+    checklist,
+    bridge_health,
+}: DashboardData & { checklist?: ChecklistData; bridge_health?: BridgeHealthSummary }) {
     const { t } = useTranslation();
     const breadcrumbs: BreadcrumbItem[] = [{ title: t('admin.dashboard.title'), href: dashboard().url }];
     const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -104,6 +120,61 @@ export default function Dashboard({
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={t('admin.dashboard.title')} />
             <div className="flex h-full flex-1 flex-col gap-6 overflow-x-auto p-4 lg:p-6">
+                <Deferred data={['checklist', 'bridge_health']} fallback={null}>
+                    {(checklist || bridge_health) && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                            {bridge_health && (
+                                <Card className={bridge_health.healthy ? 'border-green-500/30' : 'border-red-500/40'}>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-base">Lua bridge</CardTitle>
+                                        <CardDescription>
+                                            {bridge_health.healthy ? 'Writable and healthy' : 'Repair recommended'}
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="flex flex-wrap items-center gap-2 text-sm">
+                                        <Badge variant={bridge_health.healthy ? 'default' : 'destructive'}>
+                                            {bridge_health.healthy ? 'OK' : 'Issues'}
+                                        </Badge>
+                                        <span className="text-muted-foreground">
+                                            pending deposits: {bridge_health.pending_deposits}
+                                        </span>
+                                        <Button asChild size="sm" variant="outline" className="ml-auto">
+                                            <Link href="/admin/bridge">Open Lua Bridge</Link>
+                                        </Button>
+                                    </CardContent>
+                                </Card>
+                            )}
+                            {checklist && (
+                                <Card>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-base">Deploy checklist</CardTitle>
+                                        <CardDescription>
+                                            {checklist.overall_ok ? 'Critical checks passed' : 'Critical issues remain'}
+                                            {checklist.resources?.memory_usage
+                                                ? ` · RAM ${checklist.resources.memory_usage}${checklist.resources.memory_limit ? ` / ${checklist.resources.memory_limit}` : ''}`
+                                                : ''}
+                                            {checklist.resources?.cpu_percent != null
+                                                ? ` · CPU ${checklist.resources.cpu_percent}%`
+                                                : ''}
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-1 text-sm">
+                                        {checklist.items.slice(0, 5).map((item) => (
+                                            <div key={item.id} className="flex justify-between gap-2">
+                                                <span className="truncate">{item.label}</span>
+                                                <Badge variant={item.ok ? 'default' : 'destructive'}>{item.ok ? 'OK' : 'Fail'}</Badge>
+                                            </div>
+                                        ))}
+                                        {checklist.backup.stale && (
+                                            <p className="text-amber-600 text-xs">Backup is stale or missing.</p>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </div>
+                    )}
+                </Deferred>
+
                 {/* Server Status Banner */}
                 <div className={`flex flex-col gap-3 overflow-hidden rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between ${statusBgClass}`}>
                     <div className="flex min-w-0 flex-wrap items-center gap-3">

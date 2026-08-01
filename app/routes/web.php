@@ -32,6 +32,8 @@ Route::middleware(['auth'])->group(function () {
         Route::get('my/wallet', [ShopController::class, 'myWallet'])->name('my.wallet');
         Route::post('deposit', [ShopController::class, 'requestDeposit'])->name('deposit')->middleware('throttle:3,1');
         Route::get('deposit/status', [ShopController::class, 'depositStatus'])->name('deposit.status')->middleware('throttle:30,1');
+        Route::get('deposit/preview', [ShopController::class, 'depositPreview'])->name('deposit.preview')->middleware('throttle:30,1');
+        Route::post('rewards/daily', [ShopController::class, 'claimDailyReward'])->name('rewards.daily')->middleware('throttle:5,1');
         Route::get('purchase/{purchaseId}/status', [ShopController::class, 'purchaseStatus'])->name('purchase.status')->middleware('throttle:30,1');
         Route::post('bundle/{slug}/purchase', [ShopController::class, 'purchaseBundle'])->name('bundle.purchase')->middleware('throttle:10,1');
         Route::post('{slug}/purchase', [ShopController::class, 'purchaseItem'])->name('purchase')->middleware('throttle:10,1');
@@ -95,6 +97,15 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         // Server Logs
         Route::get('logs', [Admin\LogController::class, 'index'])->name('logs');
         Route::get('logs/fetch', [Admin\LogController::class, 'fetch'])->name('logs.fetch');
+
+        // Lua bridge health, repair, deposit recovery
+        Route::get('bridge', [Admin\BridgeController::class, 'index'])->name('bridge');
+        Route::get('bridge/health', [Admin\BridgeController::class, 'health'])->name('bridge.health');
+        Route::post('bridge/repair', [Admin\BridgeController::class, 'repair'])->name('bridge.repair')->middleware('throttle:admin-sensitive');
+        Route::post('bridge/rates', [Admin\BridgeController::class, 'updateRates'])->name('bridge.rates')->middleware('throttle:admin-sensitive');
+        Route::post('bridge/deposits/simulate', [Admin\BridgeController::class, 'simulateDeposit'])->name('bridge.deposits.simulate')->middleware('throttle:admin-sensitive');
+        Route::post('bridge/deposits/{id}/cancel', [Admin\BridgeController::class, 'cancelDeposit'])->name('bridge.deposits.cancel')->middleware('throttle:admin-sensitive');
+        Route::post('bridge/deposits/{id}/force-credit', [Admin\BridgeController::class, 'forceCredit'])->name('bridge.deposits.force-credit')->middleware('throttle:admin-sensitive');
 
         // Discord Webhook
         Route::get('discord', [Admin\DiscordWebhookController::class, 'index'])->name('discord');

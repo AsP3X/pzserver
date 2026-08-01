@@ -126,7 +126,18 @@ return [
     */
     'money_deposit' => [
         'money_value' => (int) env('PZ_MONEY_VALUE', 1),
-        'stack_value' => (int) env('PZ_MONEY_STACK_VALUE', 10),
+        // MoneyBundle is crafted from 100x Money in vanilla; override via env or Admin → Lua Bridge
+        'bundle_value' => (int) env('PZ_MONEY_BUNDLE_VALUE', env('PZ_MONEY_STACK_VALUE', 100)),
+        'stack_value' => (int) env('PZ_MONEY_STACK_VALUE', 100), // legacy alias
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Player rewards
+    |--------------------------------------------------------------------------
+    */
+    'rewards' => [
+        'daily_coins' => (int) env('PZ_DAILY_REWARD_COINS', 25),
     ],
 
     /*

@@ -72,6 +72,11 @@ class DiscordWebhookService
         'shop.bundle.delete' => ['color' => 0xE74C3C, 'emoji' => "\u{1F4E6}", 'title' => 'Shop Bundle Deleted'],
         'shop.promotion.create' => ['color' => 0x2ECC71, 'emoji' => "\u{1F3F7}", 'title' => 'Promotion Created'],
         'shop.promotion.delete' => ['color' => 0xE74C3C, 'emoji' => "\u{1F3F7}", 'title' => 'Promotion Deleted'],
+        'shop.deposit.credited' => ['color' => 0xF1C40F, 'emoji' => "\u{1F4B0}", 'title' => 'Money Deposit Credited'],
+        'shop.purchase.completed' => ['color' => 0x3498DB, 'emoji' => "\u{1F6D2}", 'title' => 'Shop Purchase'],
+        'shop.reward.daily' => ['color' => 0x9B59B6, 'emoji' => "\u{1F381}", 'title' => 'Daily Reward Claimed'],
+        'player.death' => ['color' => 0x95A5A6, 'emoji' => "\u{1F480}", 'title' => 'Player Death'],
+        'bridge.repair' => ['color' => 0x1ABC9C, 'emoji' => "\u{1F527}", 'title' => 'Lua Bridge Repaired'],
     ];
 
     /**

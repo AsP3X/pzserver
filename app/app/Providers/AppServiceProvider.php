@@ -60,8 +60,35 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         $this->configureRateLimiting();
         $this->validateApiKeyLength();
+        $this->loadMoneyDepositRateOverrides();
 
         AuditLog::observe(AuditLogObserver::class);
+    }
+
+    /**
+     * Admin-editable rates stored in storage/app/money_deposit_rates.json.
+     */
+    protected function loadMoneyDepositRateOverrides(): void
+    {
+        $path = storage_path('app/money_deposit_rates.json');
+        if (! is_file($path)) {
+            return;
+        }
+
+        try {
+            $data = json_decode((string) file_get_contents($path), true);
+            if (! is_array($data)) {
+                return;
+            }
+            if (isset($data['money_value'])) {
+                config(['zomboid.money_deposit.money_value' => (int) $data['money_value']]);
+            }
+            if (isset($data['bundle_value'])) {
+                config(['zomboid.money_deposit.bundle_value' => (int) $data['bundle_value']]);
+            }
+        } catch (\Throwable) {
+            // ignore corrupt override file
+        }
     }
 
     protected function configureDefaults(): void

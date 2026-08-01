@@ -126,6 +126,30 @@ function PromoRibbon({ promotions }: { promotions: ActivePromotion[] }) {
 
 // ── Main Page ────────────────────────────────────────────────────────
 
+type DepositPreview = {
+    username: string;
+    money_count: number;
+    bundle_count: number;
+    estimated_coins: number;
+    rates: { money_value: number; bundle_value: number };
+    inventory_found: boolean;
+    inventory_age_seconds: number | null;
+};
+
+type DailyReward = {
+    available: boolean;
+    claimed_today: boolean;
+    coins: number;
+    next_claim_at: string | null;
+    last_claim_at: string | null;
+};
+
+type DeliveryQueue = {
+    pending_count: number;
+    position: number | null;
+    total_pending: number;
+};
+
 type Props = {
     categories: ShopCategory[];
     items: ShopItem[];
@@ -136,6 +160,9 @@ type Props = {
     hasPzAccount: boolean;
     pendingDeposit: boolean;
     lastDepositResult: DepositResult | null;
+    depositPreview?: DepositPreview | null;
+    dailyReward?: DailyReward | null;
+    deliveryQueue?: DeliveryQueue | null;
 };
 
 export default function ShopIndex({
@@ -148,6 +175,9 @@ export default function ShopIndex({
     hasPzAccount,
     pendingDeposit: initialPendingDeposit,
     lastDepositResult: initialLastDepositResult,
+    depositPreview: initialDepositPreview = null,
+    dailyReward: initialDailyReward = null,
+    deliveryQueue: initialDeliveryQueue = null,
 }: Props) {
     const { auth } = usePage().props;
     const isAuthenticated = !!auth.user;
@@ -170,6 +200,10 @@ export default function ShopIndex({
     const [lastDepositResult, setLastDepositResult] = useState(initialLastDepositResult);
     const [depositCooldown, setDepositCooldown] = useState(0);
     const [depositError, setDepositError] = useState<string | null>(null);
+    const [depositPreview, setDepositPreview] = useState(initialDepositPreview);
+    const [dailyReward, setDailyReward] = useState(initialDailyReward);
+    const [deliveryQueue, setDeliveryQueue] = useState(initialDeliveryQueue);
+    const [rewardLoading, setRewardLoading] = useState(false);
     const dismissedResultIds = useRef<Set<string>>(new Set());
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const purchasePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -233,6 +267,9 @@ export default function ShopIndex({
                 setLastDepositResult(data.lastDepositResult);
             }
             if (data.balance != null) setBalance(data.balance);
+            if (data.depositPreview) setDepositPreview(data.depositPreview);
+            if (data.deliveryQueue) setDeliveryQueue(data.deliveryQueue);
+            if (data.dailyReward) setDailyReward(data.dailyReward);
         } catch { /* ignore */ }
     }, []);
 
@@ -329,11 +366,35 @@ export default function ShopIndex({
         try {
             const res = await fetch('/shop/deposit', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' } });
             const json = await res.json().catch(() => ({}));
-            if (res.ok) { toast.success(t('shop.deposit_request_sent')); setPendingDeposit(true); setLastDepositResult(null); }
+            if (res.ok) {
+                toast.success(t('shop.deposit_request_sent'));
+                setPendingDeposit(true);
+                setLastDepositResult(null);
+                if (json.preview) setDepositPreview(json.preview);
+            }
             else if (res.status === 429) { startCooldown(parseInt(res.headers.get('Retry-After') || '60', 10)); setDepositError(t('shop.too_many_requests')); }
             else { setDepositError(json.error || json.message || `Request failed (${res.status})`); }
         } catch { setDepositError(t('shop.network_error')); }
         setDepositLoading(false);
+    }
+
+    async function handleClaimDaily() {
+        setRewardLoading(true);
+        const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+        try {
+            const res = await fetch('/shop/rewards/daily', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' } });
+            const json = await res.json().catch(() => ({}));
+            if (res.ok && json.ok) {
+                toast.success(json.message || t('shop.daily_claimed'));
+                if (json.balance != null) setBalance(json.balance);
+                setDailyReward((prev) => prev ? { ...prev, available: false, claimed_today: true } : prev);
+            } else {
+                toast.error(json.message || t('shop.daily_failed'));
+            }
+        } catch {
+            toast.error(t('shop.network_error'));
+        }
+        setRewardLoading(false);
     }
 
     // ── Render ────────────────────────────────────────────────────────
@@ -366,6 +427,44 @@ export default function ShopIndex({
 
                 <PromoRibbon promotions={activePromotions} />
 
+                {/* Daily reward + delivery queue (mobile-friendly stack) */}
+                {(isAuthenticated || deliveryQueue?.pending_count) && (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {isAuthenticated && dailyReward && (
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-base">{t('shop.daily_reward_title')}</CardTitle>
+                                    <CardDescription>{t('shop.daily_reward_desc', { coins: String(dailyReward.coins) })}</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <Button
+                                        className="w-full sm:w-auto"
+                                        disabled={!dailyReward.available || rewardLoading}
+                                        onClick={handleClaimDaily}
+                                    >
+                                        {rewardLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <Coins className="mr-1.5 size-4 text-amber-500" />}
+                                        {dailyReward.claimed_today ? t('shop.daily_claimed_today') : t('shop.claim_daily', { coins: String(dailyReward.coins) })}
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        )}
+                        {deliveryQueue && deliveryQueue.pending_count > 0 && (
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-base">{t('shop.delivery_queue_title')}</CardTitle>
+                                    <CardDescription>
+                                        {t('shop.delivery_queue_desc', {
+                                            position: String(deliveryQueue.position ?? '—'),
+                                            total: String(deliveryQueue.total_pending),
+                                            count: String(deliveryQueue.pending_count),
+                                        })}
+                                    </CardDescription>
+                                </CardHeader>
+                            </Card>
+                        )}
+                    </div>
+                )}
+
                 {/* Deposit */}
                 <Card>
                     <CardHeader>
@@ -385,16 +484,40 @@ export default function ShopIndex({
                                     <li>{t('shop.deposit_step_3')}</li>
                                     <li>{t('shop.deposit_step_4')}</li>
                                 </ol>
-                                <div className="flex gap-3 pt-1">
-                                    <Badge variant="outline" className="text-xs"><Coins className="mr-1 size-3 text-amber-500" />{t('shop.money_rate')}</Badge>
-                                    <Badge variant="outline" className="text-xs"><Coins className="mr-1 size-3 text-amber-500" />{t('shop.bundle_rate')}</Badge>
+                                <div className="flex flex-wrap gap-2 pt-1">
+                                    <Badge variant="outline" className="text-xs">
+                                        <Coins className="mr-1 size-3 text-amber-500" />
+                                        1 Money = {depositPreview?.rates.money_value ?? 1} coins
+                                    </Badge>
+                                    <Badge variant="outline" className="text-xs">
+                                        <Coins className="mr-1 size-3 text-amber-500" />
+                                        1 Bundle = {depositPreview?.rates.bundle_value ?? 100} coins
+                                    </Badge>
                                 </div>
+                                {depositPreview && (
+                                    <div className="bg-muted/40 mt-2 rounded-md p-2 text-xs">
+                                        {depositPreview.inventory_found ? (
+                                            <>
+                                                Preview: <strong>{depositPreview.money_count}</strong> Money +{' '}
+                                                <strong>{depositPreview.bundle_count}</strong> Bundle ≈{' '}
+                                                <strong>{depositPreview.estimated_coins}</strong> coins
+                                                {depositPreview.inventory_age_seconds != null && (
+                                                    <span className="text-muted-foreground">
+                                                        {' '}(snapshot {Math.round(depositPreview.inventory_age_seconds)}s ago)
+                                                    </span>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <span className="text-muted-foreground">No inventory snapshot yet — stay online so the server can export it.</span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                             <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-4">
                                 {!isAuthenticated ? (
                                     <>
                                         <p className="text-muted-foreground text-center text-sm">{t('shop.login_to_deposit')}</p>
-                                        <Button size="sm" onClick={() => router.visit('/login?redirect=/shop')}>{t('auth.login')}</Button>
+                                        <Button size="sm" className="w-full sm:w-auto" onClick={() => router.visit('/login?redirect=/shop')}>{t('auth.login')}</Button>
                                     </>
                                 ) : !hasPzAccount ? (
                                     <p className="text-muted-foreground text-center text-sm">{t('shop.link_pz_account')}</p>
@@ -405,7 +528,7 @@ export default function ShopIndex({
                                         <p className="text-muted-foreground text-center text-xs">{t('shop.stay_online')}</p>
                                     </>
                                 ) : (
-                                    <Button onClick={handleDeposit} disabled={depositLoading || depositCooldown > 0}>
+                                    <Button className="w-full sm:w-auto" onClick={handleDeposit} disabled={depositLoading || depositCooldown > 0}>
                                         {depositLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" />
                                             : depositCooldown > 0 ? <Clock className="mr-1.5 size-4" />
                                             : <ArrowDownToLine className="mr-1.5 size-4" />}
@@ -413,18 +536,18 @@ export default function ShopIndex({
                                     </Button>
                                 )}
                                 {depositError && !pendingDeposit && (
-                                    <div className="flex items-center gap-2 rounded-md bg-red-50 px-3 py-1.5 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                                        <XCircle className="size-3.5 shrink-0" />
-                                        <span className="flex-1">{depositError}</span>
+                                    <div className="flex w-full items-start gap-2 rounded-md bg-red-50 px-3 py-1.5 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                        <XCircle className="mt-0.5 size-3.5 shrink-0" />
+                                        <span className="flex-1 break-words">{depositError}</span>
                                         <button type="button" onClick={() => setDepositError(null)} className="shrink-0 rounded p-0.5 hover:bg-black/10 dark:hover:bg-white/10" aria-label="Dismiss"><X className="size-3.5" /></button>
                                     </div>
                                 )}
                                 {lastDepositResult && !pendingDeposit && (
-                                    <div className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs ${lastDepositResult.status === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'}`}>
-                                        {lastDepositResult.status === 'success' ? <CheckCircle className="size-3.5 shrink-0" /> : <XCircle className="size-3.5 shrink-0" />}
-                                        <span className="flex-1">
+                                    <div className={`flex w-full items-start gap-2 rounded-md px-3 py-1.5 text-xs ${lastDepositResult.status === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'}`}>
+                                        {lastDepositResult.status === 'success' ? <CheckCircle className="mt-0.5 size-3.5 shrink-0" /> : <XCircle className="mt-0.5 size-3.5 shrink-0" />}
+                                        <span className="flex-1 break-words">
                                             {lastDepositResult.status === 'success'
-                                                ? t('shop.deposit_success', { coins: String(lastDepositResult.total_coins), money: String(lastDepositResult.money_count), bundles: String(lastDepositResult.bundle_count ?? 0) })
+                                                ? `${t('shop.deposit_success', { coins: String(lastDepositResult.total_coins), money: String(lastDepositResult.money_count), bundles: String(lastDepositResult.bundle_count ?? 0) })}${(lastDepositResult as DepositResult & { credited?: boolean }).credited === false ? '' : ' ✓'}`
                                                 : lastDepositResult.message || t('shop.deposit_failed')}
                                         </span>
                                         <button type="button" onClick={dismissDepositResult} className="shrink-0 rounded p-0.5 hover:bg-black/10 dark:hover:bg-white/10" aria-label="Dismiss"><X className="size-3.5" /></button>
@@ -438,10 +561,15 @@ export default function ShopIndex({
                 {/* Pending purchase */}
                 {pendingPurchaseId && (
                     <div className="flex items-center gap-3 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 dark:border-blue-700 dark:bg-blue-950/40">
-                        <Loader2 className="size-5 animate-spin text-blue-500" />
-                        <div>
+                        <Loader2 className="size-5 shrink-0 animate-spin text-blue-500" />
+                        <div className="min-w-0">
                             <p className="text-sm font-medium text-blue-800 dark:text-blue-200">{t('shop.delivering_items')}</p>
-                            <p className="text-xs text-blue-600 dark:text-blue-400">{t('shop.payment_on_delivery')}</p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400">
+                                {t('shop.payment_on_delivery')}
+                                {deliveryQueue?.position != null && (
+                                    <> · queue #{deliveryQueue.position}/{deliveryQueue.total_pending}</>
+                                )}
+                            </p>
                         </div>
                     </div>
                 )}

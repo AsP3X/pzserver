@@ -10,6 +10,8 @@ use App\Models\ShopItem;
 use App\Models\ShopPromotion;
 use App\Models\ShopPurchase;
 use App\Models\WhitelistEntry;
+use App\Services\DailyRewardService;
+use App\Services\DeliveryQueueManager;
 use App\Services\InventoryReader;
 use App\Services\ItemIconResolver;
 use App\Services\MoneyDepositManager;
@@ -34,6 +36,8 @@ class ShopController extends Controller
         private readonly OnlinePlayersReader $onlinePlayersReader,
         private readonly InventoryReader $inventoryReader,
         private readonly ShopDeliveryService $deliveryService,
+        private readonly DailyRewardService $dailyRewardService,
+        private readonly DeliveryQueueManager $deliveryQueueManager,
     ) {}
 
     /**
@@ -84,6 +88,9 @@ class ShopController extends Controller
         $hasPzAccount = false;
         $pendingDeposit = false;
         $lastDepositResult = null;
+        $depositPreview = null;
+        $dailyReward = null;
+        $deliveryQueue = null;
 
         if ($user) {
             $whitelistEntry = WhitelistEntry::query()
@@ -92,10 +99,16 @@ class ShopController extends Controller
                 ->first();
 
             $hasPzAccount = $whitelistEntry !== null;
+            $dailyReward = $this->dailyRewardService->statusFor($user);
 
             if ($hasPzAccount) {
                 $pendingDeposit = $this->depositManager->hasPendingRequest($whitelistEntry->pz_username);
                 $lastDepositResult = $this->depositManager->getLastResult($whitelistEntry->pz_username);
+                $depositPreview = $this->depositManager->previewForUsername(
+                    $whitelistEntry->pz_username,
+                    $this->inventoryReader,
+                );
+                $deliveryQueue = $this->deliveryQueueManager->queueStatusForUsername($whitelistEntry->pz_username);
             }
         }
 
@@ -109,6 +122,9 @@ class ShopController extends Controller
             'hasPzAccount' => $hasPzAccount,
             'pendingDeposit' => $pendingDeposit,
             'lastDepositResult' => $lastDepositResult,
+            'depositPreview' => $depositPreview,
+            'dailyReward' => $dailyReward,
+            'deliveryQueue' => $deliveryQueue,
         ]);
     }
 
@@ -364,12 +380,58 @@ class ShopController extends Controller
             return response()->json(['error' => 'You must be online in-game to deposit money. Log in to the server and try again.'], 422);
         }
 
-        $entry = $this->depositManager->createRequest($whitelistEntry->pz_username);
+        // Refresh inventory snapshot for better preview accuracy before deposit
+        $this->inventoryReader->requestExport($whitelistEntry->pz_username);
+
+        $entry = $this->depositManager->createRequest(
+            $whitelistEntry->pz_username,
+            $user->id,
+            'web',
+            false,
+        );
+
+        $preview = $this->depositManager->previewForUsername(
+            $whitelistEntry->pz_username,
+            $this->inventoryReader,
+        );
 
         return response()->json([
             'message' => 'Deposit request created. Make sure you are online in-game — your money will be collected within ~15 seconds.',
             'request_id' => $entry['id'],
+            'preview' => $preview,
         ]);
+    }
+
+    /**
+     * Preview deposit amounts from last inventory snapshot.
+     */
+    public function depositPreview(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $whitelistEntry = WhitelistEntry::query()
+            ->where('user_id', $user->id)
+            ->where('active', true)
+            ->first();
+
+        if (! $whitelistEntry) {
+            return response()->json(['error' => 'No linked PZ account found'], 422);
+        }
+
+        $this->inventoryReader->requestExport($whitelistEntry->pz_username);
+
+        return response()->json(
+            $this->depositManager->previewForUsername($whitelistEntry->pz_username, $this->inventoryReader)
+        );
+    }
+
+    /**
+     * Claim daily login reward coins.
+     */
+    public function claimDailyReward(Request $request): JsonResponse
+    {
+        $result = $this->dailyRewardService->claim($request->user());
+
+        return response()->json($result, $result['ok'] ? 200 : 422);
     }
 
     /**
@@ -403,6 +465,12 @@ class ShopController extends Controller
             'pendingDeposit' => $this->depositManager->hasPendingRequest($whitelistEntry->pz_username),
             'lastDepositResult' => $this->depositManager->getLastResult($whitelistEntry->pz_username),
             'balance' => $this->walletService->getBalance($user),
+            'depositPreview' => $this->depositManager->previewForUsername(
+                $whitelistEntry->pz_username,
+                $this->inventoryReader,
+            ),
+            'deliveryQueue' => $this->deliveryQueueManager->queueStatusForUsername($whitelistEntry->pz_username),
+            'dailyReward' => $this->dailyRewardService->statusFor($user),
         ]);
     }
 

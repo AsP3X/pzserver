@@ -9,7 +9,9 @@ use App\Models\ScheduledRestartTime;
 use App\Models\GameEvent;
 use App\Models\PlayerStat;
 use App\Models\ServerSetting;
+use App\Services\DeployChecklistService;
 use App\Services\GameStateReader;
+use App\Services\LuaBridgeHealthService;
 use App\Services\PlayerStatsService;
 use App\Services\ServerStatusResolver;
 use Inertia\Inertia;
@@ -21,6 +23,8 @@ class DashboardController extends Controller
         private readonly ServerStatusResolver $statusResolver,
         private readonly GameStateReader $gameStateReader,
         private readonly PlayerStatsService $playerStatsService,
+        private readonly DeployChecklistService $checklistService,
+        private readonly LuaBridgeHealthService $bridgeHealth,
     ) {}
 
     public function __invoke(): Response
@@ -139,6 +143,16 @@ class DashboardController extends Controller
                 ->all()),
             'server_totals' => Inertia::defer(fn () => $this->playerStatsService->getServerStats()),
             'connection' => ServerSetting::instance()->only('server_ip', 'server_port'),
+            'checklist' => Inertia::defer(fn () => $this->checklistService->checklist()),
+            'bridge_health' => Inertia::defer(function () {
+                $s = $this->bridgeHealth->status();
+
+                return [
+                    'healthy' => $s['healthy'],
+                    'issues' => $s['issues'],
+                    'pending_deposits' => $s['pending_deposits'],
+                ];
+            }),
         ]);
     }
 

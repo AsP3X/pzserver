@@ -96,6 +96,62 @@ class DockerManager
     }
 
     /**
+     * One-shot container resource stats (non-streaming).
+     *
+     * @return array{memory_usage: ?string, memory_limit: ?string, cpu_percent: ?float, raw: array<string, mixed>}|null
+     */
+    public function getContainerStats(): ?array
+    {
+        $response = $this->request('GET', "/containers/{$this->containerName}/stats", [
+            'query' => ['stream' => 'false', 'one-shot' => 'true'],
+            'timeout' => 10,
+        ]);
+
+        if ($response === null || $response === []) {
+            return null;
+        }
+
+        $memUsage = (int) ($response['memory_stats']['usage'] ?? 0);
+        $memLimit = (int) ($response['memory_stats']['limit'] ?? 0);
+
+        $cpuPercent = null;
+        $cpuStats = $response['cpu_stats'] ?? [];
+        $preCpu = $response['precpu_stats'] ?? [];
+        $cpuDelta = (float) (($cpuStats['cpu_usage']['total_usage'] ?? 0) - ($preCpu['cpu_usage']['total_usage'] ?? 0));
+        $systemDelta = (float) (($cpuStats['system_cpu_usage'] ?? 0) - ($preCpu['system_cpu_usage'] ?? 0));
+        $onlineCpus = (int) ($cpuStats['online_cpus'] ?? count($cpuStats['cpu_usage']['percpu_usage'] ?? []) ?: 1);
+        if ($systemDelta > 0 && $cpuDelta >= 0) {
+            $cpuPercent = round(($cpuDelta / $systemDelta) * $onlineCpus * 100, 1);
+        }
+
+        return [
+            'memory_usage' => $this->formatBytes($memUsage),
+            'memory_limit' => $memLimit > 0 ? $this->formatBytes($memLimit) : null,
+            'cpu_percent' => $cpuPercent,
+            'raw' => [
+                'mem_usage' => $memUsage,
+                'mem_limit' => $memLimit,
+            ],
+        ];
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        if ($bytes >= 1073741824) {
+            return round($bytes / 1073741824, 2).' GB';
+        }
+        if ($bytes >= 1048576) {
+            return round($bytes / 1048576, 2).' MB';
+        }
+        if ($bytes >= 1024) {
+            return round($bytes / 1024, 2).' KB';
+        }
+
+        return $bytes.' B';
+    }
+
+
+    /**
      * @return array<string, mixed>|null
      */
     private function request(string $method, string $path, array $options = []): ?array

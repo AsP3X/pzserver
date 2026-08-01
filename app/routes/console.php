@@ -32,6 +32,14 @@ Schedule::command('zomboid:process-shop-deliveries')->everyMinute();
 
 Schedule::command('zomboid:process-money-deposits')->everyMinute();
 
+// Keep Lua bridge world-writable (PHP + game share the bind mount)
+Schedule::command('zomboid:heal-lua-bridge')->everyFiveMinutes();
+
+// Periodic B42 catalog touch so shop item metadata stays fresh after updates
+Schedule::command('zomboid:refresh-item-catalog')
+    ->dailyAt('05:15')
+    ->runInBackground();
+
 Schedule::command('zomboid:generate-map-tiles')
     ->everyThirtyMinutes()
     ->when(fn () => ! is_dir(config('zomboid.map.tiles_path').'/html/map_data/base/layer0_files'))

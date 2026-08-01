@@ -6,6 +6,9 @@
 -- If the result write fails after removal, items are restored so the player is not
 -- charged without a wallet credit (PHP polls results for up to ~120s).
 --
+-- Counts/removes recursively in nested bags (not just main inv + backpack).
+-- Coin rates from money_deposit_config.json when present (Admin → Lua Bridge).
+--
 
 require("ZM_Utils")
 require("ZM_InventoryExporter")
@@ -14,9 +17,26 @@ ZM_MoneyDeposit = {}
 
 local REQUESTS_FILE = "deposit_requests.json"
 local RESULTS_FILE = "deposit_results.json"
+local RATES_FILE = "money_deposit_config.json"
 local MAX_RESULTS = 200
 
---- Read existing results file
+local function loadRates()
+    local moneyValue = 1
+    local bundleValue = 100
+    local data = ZM_Utils.readJsonFile(RATES_FILE)
+    if data then
+        if data.money_value ~= nil then
+            moneyValue = tonumber(data.money_value) or moneyValue
+        end
+        if data.bundle_value ~= nil then
+            bundleValue = tonumber(data.bundle_value) or bundleValue
+        elseif data.stack_value ~= nil then
+            bundleValue = tonumber(data.stack_value) or bundleValue
+        end
+    end
+    return moneyValue, bundleValue
+end
+
 local function readResults()
     local data = ZM_Utils.readJsonFile(RESULTS_FILE)
     if data then
@@ -25,19 +45,14 @@ local function readResults()
     return {version = 1, updated_at = "", results = {}}
 end
 
---- Write results to file, trimming oldest entries if over cap.
---- @return boolean
 local function writeResults(results)
     results.updated_at = ZM_Utils.getTimestamp()
-
     while results.results and #results.results > MAX_RESULTS do
         table.remove(results.results, 1)
     end
-
     return ZM_Utils.writeJsonFile(RESULTS_FILE, results)
 end
 
---- Find online player by username
 local function findPlayer(username)
     local players = getOnlinePlayers()
     if not players then
@@ -52,7 +67,68 @@ local function findPlayer(username)
     return nil
 end
 
---- Count money items in a container (without removing)
+--- Walk all item containers reachable from the player (inventory + nested bags).
+local function collectContainers(player)
+    local containers = {}
+    local seen = {}
+
+    local function addContainer(container)
+        if not container then
+            return
+        end
+        -- identity via tostring of userdata
+        local key = tostring(container)
+        if seen[key] then
+            return
+        end
+        seen[key] = true
+        table.insert(containers, container)
+
+        local items = container:getItems()
+        if not items then
+            return
+        end
+        for i = 0, items:size() - 1 do
+            local item = items:get(i)
+            if item and item.getItemContainer then
+                local nested = item:getItemContainer()
+                if nested then
+                    addContainer(nested)
+                end
+            end
+        end
+    end
+
+    addContainer(player:getInventory())
+
+    -- Worn clothing bags / fanny packs etc.
+    if player.getWornItems then
+        local worn = player:getWornItems()
+        if worn then
+            for i = 0, worn:size() - 1 do
+                local wornItem = worn:get(i)
+                local item = wornItem
+                if wornItem and wornItem.getItem then
+                    item = wornItem:getItem()
+                end
+                if item and item.getItemContainer then
+                    local c = item:getItemContainer()
+                    if c then
+                        addContainer(c)
+                    end
+                end
+            end
+        end
+    end
+
+    local backpack = player:getClothingItem_Back()
+    if backpack and backpack:getItemContainer() then
+        addContainer(backpack:getItemContainer())
+    end
+
+    return containers
+end
+
 local function countMoneyInContainer(container)
     local money = 0
     local bundles = 0
@@ -77,28 +153,18 @@ local function countMoneyInContainer(container)
     return money, bundles
 end
 
---- Count total money items across all player containers
 local function countAllMoney(player)
     local totalMoney = 0
     local totalBundles = 0
-
-    local inventory = player:getInventory()
-    local m, b = countMoneyInContainer(inventory)
-    totalMoney = totalMoney + m
-    totalBundles = totalBundles + b
-
-    local backpack = player:getClothingItem_Back()
-    if backpack and backpack:getItemContainer() then
-        m, b = countMoneyInContainer(backpack:getItemContainer())
+    local containers = collectContainers(player)
+    for _, container in ipairs(containers) do
+        local m, b = countMoneyInContainer(container)
         totalMoney = totalMoney + m
         totalBundles = totalBundles + b
     end
-
     return totalMoney, totalBundles
 end
 
---- Remove all items of a given type from a container using getFirstType loop.
---- Returns number actually removed.
 local function removeAllOfType(container, fullType)
     if not container then
         return 0
@@ -123,21 +189,13 @@ local function removeAllOfType(container, fullType)
     return removed
 end
 
---- Remove all Money and MoneyBundle items from a player.
---- Returns money_removed, bundles_removed
 local function removeMoney(player)
     local moneyRemoved = 0
     local bundlesRemoved = 0
-
-    local inventory = player:getInventory()
-    moneyRemoved = moneyRemoved + removeAllOfType(inventory, "Base.Money")
-    bundlesRemoved = bundlesRemoved + removeAllOfType(inventory, "Base.MoneyBundle")
-
-    local backpack = player:getClothingItem_Back()
-    if backpack and backpack:getItemContainer() then
-        local bagContainer = backpack:getItemContainer()
-        moneyRemoved = moneyRemoved + removeAllOfType(bagContainer, "Base.Money")
-        bundlesRemoved = bundlesRemoved + removeAllOfType(bagContainer, "Base.MoneyBundle")
+    local containers = collectContainers(player)
+    for _, container in ipairs(containers) do
+        moneyRemoved = moneyRemoved + removeAllOfType(container, "Base.Money")
+        bundlesRemoved = bundlesRemoved + removeAllOfType(container, "Base.MoneyBundle")
     end
 
     if isServer() then
@@ -158,7 +216,6 @@ local function removeMoney(player)
     return moneyRemoved, bundlesRemoved
 end
 
---- Restore money items to player inventory (used when result write fails after removal).
 local function restoreMoney(player, moneyCount, bundleCount)
     if not player then
         return
@@ -198,18 +255,15 @@ local function restoreMoney(player, moneyCount, bundleCount)
         .. " after failed deposit_results write")
 end
 
---- Append one result and flush to disk. Returns true if persisted.
 local function appendAndWriteResult(results, result)
     table.insert(results.results, result)
     if writeResults(results) then
         return true
     end
-    -- Roll back in-memory append so a later successful write does not re-credit a failed persist
     table.remove(results.results, #results.results)
     return false
 end
 
---- Process all pending deposit requests
 function ZM_MoneyDeposit.process()
     local requests = ZM_Utils.readJsonFile(REQUESTS_FILE)
     if not requests or not requests.requests then
@@ -227,6 +281,7 @@ function ZM_MoneyDeposit.process()
         return 0
     end
 
+    local moneyValue, bundleValue = loadRates()
     local results = readResults()
     local processed = 0
 
@@ -275,27 +330,24 @@ function ZM_MoneyDeposit.process()
                         print("[ZomboidManager] WARNING: Money deposit removal incomplete for "
                             .. req.username .. " — " .. moneyAfter .. " Money + " .. bundlesAfter
                             .. " MoneyBundle remaining")
-                        -- Leave remaining items; do not credit partial removals
                         if didRemove then
-                            -- Put back what we already took so inventory is consistent
                             restoreMoney(player, moneyRemoved, bundlesRemoved)
                             didRemove = false
                             moneyRemoved = 0
                             bundlesRemoved = 0
                         end
                     else
-                        local moneyValue = 1
-                        local bundleValue = 100
                         local totalCoins = (moneyRemoved * moneyValue) + (bundlesRemoved * bundleValue)
-
                         result.status = "success"
                         result.money_count = moneyRemoved
                         result.bundle_count = bundlesRemoved
+                        result.stack_count = bundlesRemoved
                         result.total_coins = totalCoins
 
                         print("[ZomboidManager] Money deposit: " .. req.username .. " deposited "
                             .. moneyRemoved .. " Money + " .. bundlesRemoved
-                            .. " MoneyBundle = " .. totalCoins .. " coins")
+                            .. " MoneyBundle = " .. totalCoins .. " coins (rates "
+                            .. moneyValue .. "/" .. bundleValue .. ")")
                     end
                 end
             end
@@ -307,10 +359,8 @@ function ZM_MoneyDeposit.process()
                     .. " — will retry next cycle; restoring items if any were removed")
                 if didRemove and player then
                     restoreMoney(player, moneyRemoved, bundlesRemoved)
-                    -- Re-export so web inventory matches after restore
                     ZM_InventoryExporter.exportPlayer(player)
                 end
-                -- Do not mark processed; leave request pending for retry
             else
                 processed = processed + 1
                 processedIds[req.id] = true
@@ -324,9 +374,9 @@ function ZM_MoneyDeposit.process()
     return processed
 end
 
---- Initialize the money deposit system
 function ZM_MoneyDeposit.init()
-    print("[ZomboidManager] Money deposit system initialized")
+    local mv, bv = loadRates()
+    print("[ZomboidManager] Money deposit system initialized (money=" .. mv .. " bundle=" .. bv .. ")")
 end
 
 return ZM_MoneyDeposit

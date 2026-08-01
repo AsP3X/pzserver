@@ -1,5 +1,5 @@
 import { Head, usePoll } from '@inertiajs/react';
-import { Circle, Clock, Map, Package, Users } from 'lucide-react';
+import { Circle, Clock, Map, Package, Skull, Users } from 'lucide-react';
 import { GameStateWidget } from '@/components/game-state-widget';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,12 +8,22 @@ import { useTranslation } from '@/hooks/use-translation';
 import PublicLayout from '@/layouts/public-layout';
 import type { StatusPageData } from '@/types';
 
+type KillFeedEvent = {
+    id: number | string;
+    event_type: string;
+    player: string | null;
+    target: string | null;
+    details: Record<string, unknown> | null;
+    created_at: string | null;
+};
+
 export default function Status({
     server,
     game_state,
     mods,
     server_name,
-}: StatusPageData) {
+    kill_feed = [],
+}: StatusPageData & { kill_feed?: KillFeedEvent[] }) {
     usePoll(5000, { only: ['server', 'game_state'] });
     const { t } = useTranslation();
     const ping = usePing('/ping', 15000);
@@ -188,6 +198,44 @@ export default function Status({
                             </CardContent>
                         </Card>
                     </div>
+
+                    {/* Kill / activity feed */}
+                    <Card className="mt-6">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Skull className="size-5" />
+                                {t('status.kill_feed_title')}
+                            </CardTitle>
+                            <CardDescription>{t('status.kill_feed_desc')}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {kill_feed.length > 0 ? (
+                                <div className="max-h-80 space-y-2 overflow-y-auto">
+                                    {kill_feed.map((ev) => (
+                                        <div
+                                            key={String(ev.id)}
+                                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2 text-sm"
+                                        >
+                                            <div className="min-w-0">
+                                                <Badge variant="secondary" className="mr-2 text-xs">
+                                                    {ev.event_type}
+                                                </Badge>
+                                                <span className="font-medium">{ev.player ?? '—'}</span>
+                                                {ev.target && (
+                                                    <span className="text-muted-foreground"> → {ev.target}</span>
+                                                )}
+                                            </div>
+                                            <span className="text-muted-foreground shrink-0 text-xs">
+                                                {ev.created_at ? new Date(ev.created_at).toLocaleString() : ''}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-muted-foreground text-sm">{t('status.kill_feed_empty')}</p>
+                            )}
+                        </CardContent>
+                    </Card>
                 </main>
             </PublicLayout>
         </>

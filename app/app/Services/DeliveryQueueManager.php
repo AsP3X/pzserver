@@ -105,6 +105,38 @@ class DeliveryQueueManager
     }
 
     /**
+     * Queue position / pending deliveries for a player (1-based position among pending entries).
+     *
+     * @return array{pending_count: int, position: ?int, total_pending: int, entries: list<array<string, mixed>>}
+     */
+    public function queueStatusForUsername(string $username): array
+    {
+        $queue = $this->readQueue();
+        $pending = array_values(array_filter(
+            $queue['entries'] ?? [],
+            fn ($e) => ($e['status'] ?? 'pending') === 'pending',
+        ));
+
+        $mine = [];
+        $position = null;
+        foreach ($pending as $i => $entry) {
+            if (($entry['username'] ?? '') === $username) {
+                if ($position === null) {
+                    $position = $i + 1;
+                }
+                $mine[] = $entry;
+            }
+        }
+
+        return [
+            'pending_count' => count($mine),
+            'position' => $position,
+            'total_pending' => count($pending),
+            'entries' => $mine,
+        ];
+    }
+
+    /**
      * Check if the player is currently online.
      */
     private function isPlayerOnline(string $username): bool

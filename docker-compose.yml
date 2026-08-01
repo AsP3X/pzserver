@@ -8,6 +8,11 @@ services:
     restart: unless-stopped
     # Allow clean world save on stop (PZ needs time to flush chunks)
     stop_grace_period: 60s
+    # Architecture note: the game UID and Laravel www-data both write the shared
+    # Lua bridge under ./data/zomboid/Lua. Prefer world-writable files (0666) and
+    # non-sticky dirs (0777) via zomboid:heal-lua-bridge. Optionally align UIDs
+    # with user: "${PZ_SHARED_UID:-1000}:${PZ_SHARED_GID:-1000}" on app+game when
+    # your host image supports a non-root game process (not all do).
     ports:
       - "${PZ_GAME_PORT:-16261}:${PZ_GAME_PORT:-16261}/udp"
       - "${PZ_DIRECT_PORT:-16262}:${PZ_DIRECT_PORT:-16262}/udp"

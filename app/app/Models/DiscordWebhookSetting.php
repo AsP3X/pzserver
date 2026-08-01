@@ -83,6 +83,12 @@ class DiscordWebhookSetting extends Model
             // Player
             'player.kick' => ['label' => 'Player Kicked', 'default' => true, 'group' => 'Player'],
             'player.ban' => ['label' => 'Player Banned', 'default' => true, 'group' => 'Player'],
+            'player.death' => ['label' => 'Player Death', 'default' => false, 'group' => 'Player'],
+
+            // Shop / economy
+            'shop.deposit.credited' => ['label' => 'In-Game Deposit Credited', 'default' => true, 'group' => 'Shop'],
+            'shop.purchase.completed' => ['label' => 'Shop Purchase Completed', 'default' => false, 'group' => 'Shop'],
+            'shop.reward.daily' => ['label' => 'Daily Reward Claimed', 'default' => false, 'group' => 'Shop'],
         ];
     }
 }

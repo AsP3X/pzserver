@@ -6,6 +6,7 @@ import {
     Coins,
     Crosshair,
     Languages,
+    Link2,
     Timer,
     Gamepad2,
     LayoutGrid,
@@ -62,6 +63,7 @@ export function AppSidebar() {
                 { title: t('nav.auto_restart'), href: '/admin/auto-restart', icon: Timer },
                 { title: t('nav.rcon_console'), href: '/admin/rcon', icon: Terminal },
                 { title: t('nav.server_logs'), href: '/admin/logs', icon: Activity },
+                { title: t('nav.lua_bridge'), href: '/admin/bridge', icon: Link2 },
             ],
         },
         {
