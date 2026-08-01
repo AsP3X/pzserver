@@ -64,12 +64,6 @@ $PZ_GAME_PORT   = if ($env:PZ_GAME_PORT)   { $env:PZ_GAME_PORT }   else { "16261
 $PZ_DIRECT_PORT = if ($env:PZ_DIRECT_PORT) { $env:PZ_DIRECT_PORT } else { "16262" }
 $APP_PORT       = if ($env:APP_PORT)       { $env:APP_PORT }       else { "8000" }
 
-# ── Named volumes for nuke (game data is bind-mounted under ./data/) ─
-$Volumes = @(
-    "pz-postgres", "pz-app-vendor", "pz-app-node-modules", "pz-app-build",
-    "pz-redis", "pz-caddy-data", "pz-caddy-config"
-)
-
 # ── Helpers ─────────────────────────────────────────────────────────
 function Ensure-DataDirs {
     $dirs = @(
@@ -77,7 +71,14 @@ function Ensure-DataDirs {
         "data\zomboid\Lua",
         "data\server",
         "data\backups",
-        "data\map-tiles"
+        "data\map-tiles",
+        "data\postgres",
+        "data\redis",
+        "data\app-vendor",
+        "data\app-node-modules",
+        "data\app-build",
+        "data\caddy-data",
+        "data\caddy-config"
     )
     foreach ($d in $dirs) {
         if (-not (Test-Path $d)) {
@@ -200,10 +201,8 @@ function Confirm-AdminPrivileges {
 }
 
 function Ensure-DbVolume {
-    if (-not (Test-VolumeExists "pz-postgres")) {
-        Write-Host "Creating Postgres volume pz-postgres..." -ForegroundColor Yellow
-        docker volume create pz-postgres | Out-Null
-    }
+    # Postgres is bind-mounted at ./data/postgres
+    Ensure-DataDirs
 }
 
 # ── Commands ────────────────────────────────────────────────────────
@@ -352,27 +351,22 @@ function Do-DbCheck {
 
 function Do-DbInit {
     Assert-DockerEnvironment
-    if (Test-VolumeExists "pz-postgres") {
-        Write-Host "Volume pz-postgres already exists - keeping existing data."
-    } else {
-        Write-Host "Creating Postgres volume pz-postgres (empty database)."
-        docker volume create pz-postgres | Out-Null
-        Write-Host "Volume created. Run '.\make.ps1 up' to start services."
-    }
+    Ensure-DataDirs
+    Write-Host "Postgres data dir: ./data/postgres (bind mount). Run '.\make.ps1 up' to start."
 }
 
 function Do-DbReset {
     Assert-DockerEnvironment
-    Write-Host "WARNING: This will PERMANENTLY delete Postgres data volume pz-postgres." -ForegroundColor Red
+    Write-Host "WARNING: This will PERMANENTLY delete ./data/postgres." -ForegroundColor Red
     $confirm = Read-Host "Type RESET_DB and press Enter to continue"
     if ($confirm -ne "RESET_DB") {
         Write-Host "Cancelled."
         return
     }
     Invoke-Compose @("down")
-    docker volume rm pz-postgres 2>$null
-    docker volume create pz-postgres | Out-Null
-    Write-Host "Postgres volume recreated. Run '.\make.ps1 up' to start with an empty DB."
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data\postgres"
+    New-Item -ItemType Directory -Force -Path "data\postgres" | Out-Null
+    Write-Host "Postgres data dir recreated. Run '.\make.ps1 up' to start with an empty DB."
 }
 
 function Do-DbBackup {
@@ -425,17 +419,14 @@ function Do-Nuke {
         Write-Host "Cancelled."
         return
     }
-    Invoke-Compose @("down", "-v", "--remove-orphans")
-    foreach ($vol in $Volumes) {
-        docker volume rm $vol 2>$null | Out-Null
-    }
-    # Remove leftover pz-* volumes
+    Invoke-Compose @("down", "--remove-orphans")
+    # Remove leftover legacy named volumes (if any from older installs)
     $remaining = @(docker volume ls -q --filter "name=pz-" 2>$null)
     if ($remaining) {
         Write-Host "Removing leftover volumes: $remaining"
         $remaining | ForEach-Object { docker volume rm $_ 2>$null | Out-Null }
     }
-    # Wipe host-mapped game data (bind mounts)
+    # Wipe all host bind-mount data
     if (Test-Path "data") {
         Write-Host "Removing host data directory ./data ..." -ForegroundColor Yellow
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data"
@@ -443,7 +434,7 @@ function Do-Nuke {
     }
     Remove-Item -Force -ErrorAction SilentlyContinue .env, app\.env, .firewall.conf
     Remove-Item -Force -ErrorAction SilentlyContinue caddy\Caddyfile, caddy\certs\cert.pem, caddy\certs\key.pem
-    Write-Host "Nuke complete. Volumes, ./data, and config removed." -ForegroundColor Green
+    Write-Host "Nuke complete. ./data and config removed." -ForegroundColor Green
 }
 
 # ── Firewall (Windows Firewall via netsh) ───────────────────────────

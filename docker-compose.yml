@@ -39,9 +39,10 @@ services:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     volumes:
       - ./app:/var/www/html
-      - app-vendor:/var/www/html/vendor
-      - app-node-modules:/var/www/html/node_modules
-      - app-build:/var/www/html/public/build
+      # Host-mapped app runtime dirs (seeded from image on first boot if empty)
+      - ${PZ_APP_VENDOR_HOST:-./data/app-vendor}:/var/www/html/vendor
+      - ${PZ_APP_NODE_MODULES_HOST:-./data/app-node-modules}:/var/www/html/node_modules
+      - ${PZ_APP_BUILD_HOST:-./data/app-build}:/var/www/html/public/build
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
       - ${PZ_SERVER_HOST:-./data/server}:/pz-server:ro
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
@@ -90,7 +91,7 @@ services:
     command: php artisan queue:work redis --tries=3 --timeout=600 --sleep=3
     volumes:
       - ./app:/var/www/html
-      - app-vendor:/var/www/html/vendor
+      - ${PZ_APP_VENDOR_HOST:-./data/app-vendor}:/var/www/html/vendor
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
       - ${PZ_SERVER_HOST:-./data/server}:/pz-server:ro
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
@@ -130,7 +131,7 @@ services:
     restart: unless-stopped
     # Not published on the host — app/queue reach it via DNS name "db" on pzserver-internal.
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ${PZ_POSTGRES_HOST:-./data/postgres}:/var/lib/postgresql/data
       - ./db/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
     environment:
       POSTGRES_DB: ${DB_DATABASE:-zomboid}
@@ -152,7 +153,7 @@ services:
     container_name: pz-redis
     restart: unless-stopped
     volumes:
-      - redis-data:/data
+      - ${PZ_REDIS_HOST:-./data/redis}:/data
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     command: /bin/sh -c 'set -- --appendonly yes; [ -n "$$REDIS_PASSWORD" ] && set -- "$$@" --requirepass "$$REDIS_PASSWORD"; exec redis-server "$$@"'
@@ -192,8 +193,8 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/certs:/etc/caddy/certs:ro
-      - caddy-data:/data
-      - caddy-config:/config
+      - ${PZ_CADDY_DATA_HOST:-./data/caddy-data}:/data
+      - ${PZ_CADDY_CONFIG_HOST:-./data/caddy-config}:/config
     depends_on:
       - app
     networks:
@@ -217,26 +218,16 @@ networks:
     internal: true
 
 # -----------------------------------------------------------------------------
-# Volumes (app/runtime only — game data is bind-mounted under ./data/)
+# All persistent data is bind-mounted under ./data/ (no named Docker volumes).
 # -----------------------------------------------------------------------------
-# Host paths (override via .env):
-#   PZ_DATA_HOST=./data/zomboid      saves, Server/*.ini, logs, Lua bridge
-#   PZ_SERVER_HOST=./data/server     SteamCMD dedicated server install
-#   PZ_BACKUPS_HOST=./data/backups   world/config backups from the panel
-#   PZ_MAP_TILES_HOST=./data/map-tiles
-volumes:
-  app-vendor:
-    name: pz-app-vendor
-  app-node-modules:
-    name: pz-app-node-modules
-  app-build:
-    name: pz-app-build
-  postgres-data:
-    name: pz-postgres
-    external: true
-  redis-data:
-    name: pz-redis
-  caddy-data:
-    name: pz-caddy-data
-  caddy-config:
-    name: pz-caddy-config
+#   ./data/zomboid           game saves, Server/*.ini, Lua bridge
+#   ./data/server            SteamCMD dedicated server install
+#   ./data/backups           panel backups
+#   ./data/map-tiles         map tiles
+#   ./data/postgres          PostgreSQL data
+#   ./data/redis             Redis AOF/data
+#   ./data/app-vendor        Composer vendor (seeded from image if empty)
+#   ./data/app-node-modules  npm modules (seeded from image if empty)
+#   ./data/app-build         Vite public/build (seeded from image if empty)
+#   ./data/caddy-data        Caddy certificates / storage
+#   ./data/caddy-config      Caddy config state

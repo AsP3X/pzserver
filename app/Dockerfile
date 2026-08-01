@@ -65,6 +65,13 @@ RUN APP_KEY=base64:dGVtcG9yYXJ5LWJ1aWxkLWtleS1mb3ItZG9ja2VyMTIzNA== \
     DB_DATABASE=":memory:" \
     npm run build
 
+# Seed copies for host bind mounts (./data/app-vendor etc.). Empty bind mounts
+# hide image layers; entrypoint copies these when the host dirs are empty.
+RUN mkdir -p /opt/pz-seed \
+    && cp -a /var/www/html/vendor /opt/pz-seed/vendor \
+    && cp -a /var/www/html/node_modules /opt/pz-seed/node_modules \
+    && cp -a /var/www/html/public/build /opt/pz-seed/build
+
 # Set permissions
 RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache

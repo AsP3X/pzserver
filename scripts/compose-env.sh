@@ -75,15 +75,20 @@ pz_ensure_data_dirs() {
     "${PZ_REPO_ROOT}/data/zomboid/Lua" \
     "${PZ_REPO_ROOT}/data/server" \
     "${PZ_REPO_ROOT}/data/backups" \
-    "${PZ_REPO_ROOT}/data/map-tiles"
+    "${PZ_REPO_ROOT}/data/map-tiles" \
+    "${PZ_REPO_ROOT}/data/postgres" \
+    "${PZ_REPO_ROOT}/data/redis" \
+    "${PZ_REPO_ROOT}/data/app-vendor" \
+    "${PZ_REPO_ROOT}/data/app-node-modules" \
+    "${PZ_REPO_ROOT}/data/app-build" \
+    "${PZ_REPO_ROOT}/data/caddy-data" \
+    "${PZ_REPO_ROOT}/data/caddy-config"
   chmod -R a+rwX "${PZ_REPO_ROOT}/data" 2>/dev/null || true
 }
 
+# Kept for callers; Postgres is a bind mount under ./data/postgres now.
 pz_ensure_db_volume() {
-  if ! docker volume inspect pz-postgres >/dev/null 2>&1; then
-    echo "Creating Postgres volume pz-postgres..."
-    docker volume create pz-postgres >/dev/null
-  fi
+  mkdir -p "${PZ_REPO_ROOT}/data/postgres"
 }
 
 # Public edge network is external (often shared with Traefik/NPM/other stacks).

@@ -678,19 +678,15 @@ fi
 sed -i "s|^LOG_STACK=.*|LOG_STACK=daily|" app/.env 2>/dev/null || true
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Ensure database volume exists
-# ══════════════════════════════════════════════════════════════════════════════
-if ! docker volume inspect pz-postgres >/dev/null 2>&1; then
-    echo "Creating Postgres volume..."
-    docker volume create pz-postgres >/dev/null
-fi
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Host bind-mount dirs for game data (not Docker named volumes)
+# Host bind-mount dirs (all persistent data under ./data/ — no named volumes)
 # ══════════════════════════════════════════════════════════════════════════════
 echo "Ensuring host data directories (./data/*)..."
-mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
-# Game container may run as root/steam — make host dirs writable
+mkdir -p \
+    data/zomboid/Lua data/server data/backups data/map-tiles \
+    data/postgres data/redis \
+    data/app-vendor data/app-node-modules data/app-build \
+    data/caddy-data data/caddy-config
+# Containers may run as various UIDs — make host dirs writable
 chmod -R a+rwX data 2>/dev/null || true
 
 echo "Ensuring Docker network proxy-network exists..."
@@ -718,18 +714,10 @@ for dir in app/bootstrap/cache app/storage app/storage/logs app/storage/framewor
     fi
 done
 
-# Remove build/cache volumes that may have stale state from a previous run
-# (host ./data and Postgres volume are intentionally preserved)
-for vol in pz-caddy-data pz-caddy-config pz-app-vendor pz-app-node-modules pz-app-build; do
+# Remove legacy named volumes from older installs (data now lives under ./data/)
+for vol in pz-caddy-data pz-caddy-config pz-app-vendor pz-app-node-modules pz-app-build pz-postgres pz-redis; do
     docker volume rm "$vol" 2>/dev/null || true
 done
-
-# Verify no stale pz- volumes are stuck (Docker can leave ghosts after down -v)
-STALE=$(docker volume ls -q --filter name=pz-caddy --filter name=pz-app-vendor --filter name=pz-app-node --filter name=pz-app-build 2>/dev/null || true)
-if [ -n "$STALE" ]; then
-    echo -e "${YELLOW}Cleaning leftover volumes...${NC}"
-    echo "$STALE" | xargs docker volume rm 2>/dev/null || true
-fi
 
 pz_up
 

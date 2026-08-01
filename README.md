@@ -101,9 +101,9 @@ NPM Proxy Host example:
 - Scheme: `http`
 - Docker network: `proxy-network`
 
-### Host-mapped game data (`./data/`)
+### Host-mapped data (`./data/`)
 
-Game files are **bind-mounted folders**, not Docker named volumes:
+**All** persistent stack data is bind-mounted under `./data/` (no Docker named volumes):
 
 | Host path | Contents |
 |-----------|----------|
@@ -111,17 +111,15 @@ Game files are **bind-mounted folders**, not Docker named volumes:
 | `./data/server/` | SteamCMD dedicated server install (~7 GB) |
 | `./data/backups/` | Panel backups |
 | `./data/map-tiles/` | Map tiles for the web map |
+| `./data/postgres/` | PostgreSQL database files |
+| `./data/redis/` | Redis AOF / data |
+| `./data/app-vendor/` | Composer `vendor/` (seeded from image if empty) |
+| `./data/app-node-modules/` | npm `node_modules/` (seeded if empty) |
+| `./data/app-build/` | Vite `public/build` (seeded if empty) |
+| `./data/caddy-data/` | Caddy certs/storage (if `WEB_PROXY_MODE=caddy`) |
+| `./data/caddy-config/` | Caddy config state |
 
-Override locations in `.env` (e.g. put worlds on another disk):
-
-```env
-PZ_DATA_HOST=./data/zomboid
-PZ_SERVER_HOST=./data/server
-PZ_BACKUPS_HOST=./data/backups
-PZ_MAP_TILES_HOST=./data/map-tiles
-```
-
-Postgres/Redis/Caddy still use named volumes (app infrastructure only).
+Override any path in `.env` (e.g. put worlds on another disk).
 
 ### What must never be committed
 
@@ -129,7 +127,7 @@ These are generated on the host and are gitignored:
 
 - `.env`, `app/.env`
 - `.firewall.conf`, `ACCESS.local.txt`
-- `./data/**` (worlds, binaries, backups)
+- `./data/**` (worlds, DB, binaries, backups)
 
 ---
 

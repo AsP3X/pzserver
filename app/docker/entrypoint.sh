@@ -10,6 +10,38 @@ for var in DB_PASSWORD PZ_RCON_PASSWORD ADMIN_PASSWORD PZ_ADMIN_PASSWORD; do
     fi
 done
 
+# ── Seed host bind mounts from image (first boot) ─────────────────
+# Named volumes auto-copy image content; bind mounts start empty and
+# would otherwise hide vendor/node_modules/build from the image.
+seed_bind_mount() {
+    dest="$1"
+    src="$2"
+    marker="$3"
+    label="$4"
+    if [ ! -d "$src" ]; then
+        return 0
+    fi
+    need_seed=0
+    if [ -n "$marker" ] && [ ! -e "$dest/$marker" ]; then
+        need_seed=1
+    elif [ -z "$marker" ]; then
+        # empty-directory check
+        if [ ! -d "$dest" ] || [ -z "$(ls -A "$dest" 2>/dev/null)" ]; then
+            need_seed=1
+        fi
+    fi
+    if [ "$need_seed" -eq 1 ]; then
+        echo "[entrypoint] Seeding $label from image into host bind mount..."
+        mkdir -p "$dest"
+        cp -a "$src"/. "$dest"/
+        echo "[entrypoint] Seeded $label."
+    fi
+}
+
+seed_bind_mount /var/www/html/vendor /opt/pz-seed/vendor autoload.php "Composer vendor"
+seed_bind_mount /var/www/html/node_modules /opt/pz-seed/node_modules "" "npm node_modules"
+seed_bind_mount /var/www/html/public/build /opt/pz-seed/build manifest.json "Vite public/build"
+
 # ── Storage permissions ──────────────────────────────────────────────
 # Bind mounts override Dockerfile permissions — fix at runtime
 # Only target directories and runtime files, skip .gitignore to avoid git noise

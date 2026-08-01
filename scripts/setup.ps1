@@ -817,19 +817,15 @@ $appEnv = Set-EnvValue $appEnv "LOG_STACK" "daily"
 Write-FileUtf8NoBom "app\.env" $appEnv
 
 # ══════════════════════════════════════════════════════════════════════
-# Ensure database volume exists
-# ══════════════════════════════════════════════════════════════════════
-docker volume inspect pz-postgres 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Creating Postgres volume..."
-    docker volume create pz-postgres | Out-Null
-}
-
-# ══════════════════════════════════════════════════════════════════════
-# Host bind-mount dirs for game data (not Docker named volumes)
+# Host bind-mount dirs (all persistent data under ./data/ — no named volumes)
 # ══════════════════════════════════════════════════════════════════════
 Write-Host "Ensuring host data directories (./data/*)..."
-foreach ($d in @("data\zomboid", "data\zomboid\Lua", "data\server", "data\backups", "data\map-tiles")) {
+foreach ($d in @(
+    "data\zomboid", "data\zomboid\Lua", "data\server", "data\backups", "data\map-tiles",
+    "data\postgres", "data\redis",
+    "data\app-vendor", "data\app-node-modules", "data\app-build",
+    "data\caddy-data", "data\caddy-config"
+)) {
     if (-not (Test-Path $d)) {
         New-Item -ItemType Directory -Force -Path $d | Out-Null
     }
@@ -848,16 +844,9 @@ Write-Host ""
 Write-Host "Starting services..." -ForegroundColor White
 & docker @ComposeArgs down 2>$null
 
-# Remove build/cache volumes (preserve host ./data and Postgres volume)
-foreach ($vol in @("pz-caddy-data", "pz-caddy-config", "pz-app-vendor", "pz-app-node-modules", "pz-app-build")) {
+# Remove legacy named volumes from older installs (data now lives under ./data/)
+foreach ($vol in @("pz-caddy-data", "pz-caddy-config", "pz-app-vendor", "pz-app-node-modules", "pz-app-build", "pz-postgres", "pz-redis")) {
     docker volume rm $vol 2>$null | Out-Null
-}
-
-# Clean leftover stale volumes
-$stale = @(docker volume ls -q --filter name=pz-caddy --filter name=pz-app-vendor --filter name=pz-app-node --filter name=pz-app-build 2>$null)
-if ($stale) {
-    Write-Host "Cleaning leftover volumes..." -ForegroundColor Yellow
-    $stale | ForEach-Object { docker volume rm $_ 2>$null | Out-Null }
 }
 
 # Start services

@@ -47,20 +47,13 @@ init:
 
 setup: init
 
-db-check:
-	@docker volume inspect pz-postgres >/dev/null 2>&1 || \
-		(echo "Creating Postgres volume pz-postgres..."; \
-		docker volume create pz-postgres >/dev/null)
+db-check: ensure-data-dirs
 
-db-init:
-	@docker volume inspect pz-postgres >/dev/null 2>&1 && \
-		(echo "Volume pz-postgres already exists - keeping existing data."; exit 0) || true
-	@echo "Creating Postgres volume pz-postgres (empty database)."
-	@docker volume create pz-postgres >/dev/null
-	@echo "Volume created. Run 'make up' to start services."
+db-init: ensure-data-dirs
+	@echo "Postgres data dir: ./data/postgres (bind mount). Run 'make up' to start."
 
 db-reset:
-	@echo "WARNING: This will PERMANENTLY delete Postgres data volume pz-postgres."
+	@echo "WARNING: This will PERMANENTLY delete ./data/postgres."
 	@echo "Type RESET_DB and press Enter to continue:"
 	@read confirm; \
 	if [ "$$confirm" != "RESET_DB" ]; then \
@@ -68,9 +61,9 @@ db-reset:
 		exit 1; \
 	fi
 	@$(COMPOSE) down
-	@docker volume rm pz-postgres 2>/dev/null || true
-	@docker volume create pz-postgres >/dev/null
-	@echo "Postgres volume recreated. Run 'make up' to start with an empty DB."
+	@rm -rf data/postgres
+	@mkdir -p data/postgres
+	@echo "Postgres data dir recreated. Run 'make up' to start with an empty DB."
 
 # ── Informational output ────────────────────────────────────────────
 info:
@@ -119,49 +112,46 @@ info:
 # ── Core commands ────────────────────────────────────────────────────
 # Default startup keeps the admin UI local-only and does not change firewall rules.
 
-# Host bind-mount dirs for game data (see PZ_*_HOST in .env.example)
+# Host bind-mount dirs (all persistent data lives under ./data/)
 ensure-data-dirs:
-	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
+	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
+		data/postgres data/redis data/app-vendor data/app-node-modules data/app-build \
+		data/caddy-data data/caddy-config
 
 # Public edge network is external; create if the host does not already have it
 ensure-networks:
 	@docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network >/dev/null
 
-up: db-check ensure-data-dirs ensure-networks
+up: ensure-data-dirs ensure-networks
 	$(COMPOSE) up -d --build
 
 down:
 	$(COMPOSE) down
 
-# Named Docker volumes only (game worlds live under ./data/)
-VOLUMES := pz-postgres pz-app-vendor pz-app-node-modules pz-app-build \
-	pz-redis pz-caddy-data pz-caddy-config
-
 nuke:
-	@echo "WARNING: This will destroy ALL data (database, ./data game files, backups, config)."
+	@echo "WARNING: This will destroy ALL data under ./data/ plus env/config."
 	@echo "Type NUKE_ALL and press Enter to continue:"
 	@read confirm; \
 	if [ "$$confirm" != "NUKE_ALL" ]; then \
 		echo "Cancelled."; \
 		exit 1; \
 	fi
-	$(COMPOSE) down -v --remove-orphans
-	@for vol in $(VOLUMES); do \
-		docker volume rm $$vol 2>/dev/null || true; \
-	done
+	$(COMPOSE) down --remove-orphans
 	@REMAINING=$$(docker volume ls -q --filter name=pz- 2>/dev/null); \
 	if [ -n "$$REMAINING" ]; then \
-		echo "Removing leftover volumes: $$REMAINING"; \
+		echo "Removing leftover legacy volumes: $$REMAINING"; \
 		echo "$$REMAINING" | xargs docker volume rm 2>/dev/null || true; \
 	fi
 	@rm -rf data
-	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
+	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
+		data/postgres data/redis data/app-vendor data/app-node-modules data/app-build \
+		data/caddy-data data/caddy-config
 	@rm -f .env app/.env .firewall.conf
 	@rm -f caddy/Caddyfile caddy/certs/cert.pem caddy/certs/key.pem
 	@for dir in app/bootstrap/cache app/storage/logs app/storage/framework/cache app/storage/framework/sessions app/storage/framework/views; do \
 		chown -R $$(id -u):$$(id -g) $$dir 2>/dev/null || sudo chown -R $$(id -u):$$(id -g) $$dir 2>/dev/null || true; \
 	done
-	@echo "Nuke complete. Volumes, ./data, and config removed."
+	@echo "Nuke complete. ./data and config removed."
 
 build:
 	$(COMPOSE) build
