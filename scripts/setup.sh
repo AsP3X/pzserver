@@ -218,7 +218,12 @@ case "$web_mode_choice" in
         echo -ne "  Public URL for the panel (optional, e.g. https://pz.example.com) ${DIM}[skip]${NC}: "
         read -r npm_url || true
         if [ -n "$npm_url" ]; then
-            APP_URL="$npm_url"
+            # Accept bare hostnames and normalize to https://...
+            case "$npm_url" in
+                http://*|https://*) APP_URL="$npm_url" ;;
+                *) APP_URL="https://${npm_url}" ;;
+            esac
+            echo -e "  ${DIM}APP_URL set to ${APP_URL}${NC}"
         fi
         ;;
     2)

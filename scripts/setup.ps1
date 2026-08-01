@@ -365,8 +365,15 @@ if ($webModeChoice -eq "1") {
     $CADDY_TLS = "`ttls internal"
     Write-Host "  Nginx Proxy Manager mode" -ForegroundColor Green
     Write-Host "  In NPM: Proxy Host -> http://pz-app:8000 on network proxy-network" -ForegroundColor DarkGray
-    $npmUrl = Read-Host "  Public URL for the panel (optional) [skip]"
-    if (-not [string]::IsNullOrWhiteSpace($npmUrl)) { $APP_URL = $npmUrl }
+    $npmUrl = Read-Host "  Public URL for the panel (optional, e.g. https://pz.example.com) [skip]"
+    if (-not [string]::IsNullOrWhiteSpace($npmUrl)) {
+        if ($npmUrl -match '^https?://') {
+            $APP_URL = $npmUrl
+        } else {
+            $APP_URL = "https://$npmUrl"
+        }
+        Write-Host "  APP_URL set to $APP_URL" -ForegroundColor DarkGray
+    }
 } else {
     $WEB_PROXY_MODE = "caddy"
     $ADMIN_PUBLIC_ENABLED = $true
