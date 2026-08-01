@@ -94,6 +94,21 @@ function Ensure-Networks {
     }
 }
 
+$script:StackContainers = @(
+    "pz-app", "pz-queue", "pz-game-server", "pz-db",
+    "pz-redis", "pz-docker-proxy", "pz-caddy"
+)
+
+function Remove-StackContainers {
+    foreach ($name in $script:StackContainers) {
+        docker container inspect $name 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Removing leftover container: $name" -ForegroundColor Yellow
+            docker rm -f $name 2>$null | Out-Null
+        }
+    }
+}
+
 function Invoke-Compose {
     param([string[]]$Arguments)
     Assert-DockerEnvironment
@@ -102,6 +117,7 @@ function Invoke-Compose {
     if ($Arguments.Count -gt 0 -and $Arguments[0] -in @("up", "run")) {
         Ensure-Networks
         Write-Host "  Web proxy mode: $(Get-WebProxyMode)" -ForegroundColor DarkGray
+        Remove-StackContainers
     }
     # For "down", include all web overlays + caddy profile so containers always stop
     $baseArgs = $script:ComposeArgs
@@ -114,6 +130,13 @@ function Invoke-Compose {
             "-f", "docker-compose.web-npm.yml",
             "--profile", "caddy"
         )
+        $downArgs = @("down", "--remove-orphans") + @($Arguments | Select-Object -Skip 1)
+        $allArgs = $baseArgs + $downArgs
+        Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
+        & docker @allArgs 2>$null
+        Remove-StackContainers
+        Write-Host "Stack stopped." -ForegroundColor Green
+        return
     }
     $allArgs = $baseArgs + $Arguments
     Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray

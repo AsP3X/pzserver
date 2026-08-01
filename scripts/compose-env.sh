@@ -95,24 +95,54 @@ pz_ensure_networks() {
   fi
 }
 
+# Fixed container names used by this stack (must match docker-compose.yml)
+PZ_STACK_CONTAINERS=(
+  pz-app
+  pz-queue
+  pz-game-server
+  pz-db
+  pz-redis
+  pz-docker-proxy
+  pz-caddy
+)
+
+# Remove leftover containers by name (survives compose project / profile mismatches)
+pz_force_remove_stack_containers() {
+  local name
+  for name in "${PZ_STACK_CONTAINERS[@]}"; do
+    if docker container inspect "$name" >/dev/null 2>&1; then
+      echo "  Removing leftover container: ${name}"
+      docker rm -f "$name" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 pz_up() {
   pz_ensure_db_volume
   pz_ensure_data_dirs
   pz_ensure_networks
   pz_load_web_mode
+  # Avoid "name already in use" after partial deploys / mode switches
+  pz_force_remove_stack_containers
   echo "Web proxy mode: ${WEB_PROXY_MODE}"
-  pz_compose up -d --build
+  pz_compose up -d --build --remove-orphans
 }
 
 pz_down() {
-  # Include all profiles so caddy is removed even if mode changed
+  echo "Stopping compose project (all web modes / profiles)..."
+  # Include every overlay + caddy profile so nothing is left behind when WEB_PROXY_MODE changes
   docker compose \
     -f "${PZ_REPO_ROOT}/docker-compose.yml" \
     -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}" \
     -f "${PZ_REPO_ROOT}/docker-compose.web-caddy.yml" \
     -f "${PZ_REPO_ROOT}/docker-compose.web-npm.yml" \
     --profile caddy \
-    down "$@"
+    down --remove-orphans "$@" 2>/dev/null || true
+
+  # Compose may miss containers created under another project name / cwd / old mode
+  echo "Cleaning fixed-name stack containers..."
+  pz_force_remove_stack_containers
+  echo "Stack stopped."
 }
 
 pz_ps() {
