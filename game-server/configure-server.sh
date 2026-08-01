@@ -379,8 +379,10 @@ fi
 chmod 666 "$INI_FILE" 2>/dev/null || true
 [ -f "$SANDBOX_FILE" ] && chmod 666 "$SANDBOX_FILE" 2>/dev/null || true
 
-# Fix JVM heap units if the image wrote bare -Xmx8192 (bytes) into the json
+# Fix JVM heap + wrap ProjectZomboid64 so -Xmx always has a unit (m/g).
+# Steam validate restores the real binary each boot; we re-wrap here (after Steam).
 if [ -f /home/steam/fix-heap.sh ]; then
+    echo "[configure-server] Applying JVM heap fix / ProjectZomboid64 wrapper..."
     bash /home/steam/fix-heap.sh || true
 fi
 

@@ -3,14 +3,10 @@
 # Patches run_server.sh to run configure-server.sh AFTER SteamCMD validate
 # but BEFORE start_server.
 #
-# ZomboidManager is loaded as a proper PZ mod (added to Mods= line by
-# configure-server.sh). This ensures both server and client Lua files are
-# distributed to connecting players. DoLuaChecksum=false prevents checksum
-# errors. Source files are mounted at /home/steam/Zomboid/mods/ZomboidManager/.
+# Also installs a ProjectZomboid64 wrapper so JVM -Xmx always has a unit
+# (fixes "Too small maximum heap" when the image writes -Xmx8192 without m).
 
 # --- Root-only init: fix volume permissions ---
-# The renegademaster image has no 'steam' user — it runs as root natively.
-# Just ensure volume directories are writable (for shared lua-bridge volume).
 if [ "$(id -u)" = "0" ]; then
     echo "[entrypoint] Fixing volume permissions..."
     chmod -R 1777 /home/steam/Zomboid/Lua 2>/dev/null || true
@@ -22,8 +18,7 @@ fi
 CONFIGURE_SCRIPT="/home/steam/configure-server.sh"
 FIX_HEAP_SCRIPT="/home/steam/fix-heap.sh"
 
-# Normalize MAX_RAM so renegademaster does not write bare -Xmx8192 (bytes).
-# Pure digits → treat as megabytes.
+# Normalize MAX_RAM: pure digits → megabytes
 if [ -n "${MAX_RAM:-}" ]; then
     _ram=$(printf '%s' "$MAX_RAM" | tr -d '[:space:]')
     if printf '%s' "$_ram" | grep -Eq '^[0-9]+$'; then
@@ -33,49 +28,33 @@ if [ -n "${MAX_RAM:-}" ]; then
         export MAX_RAM="$_ram"
     fi
 fi
+# Some image scripts only keep digits — also export a form they might pass through
+export PZ_MAX_RAM="${PZ_MAX_RAM:-$MAX_RAM}"
 
 # Clean up previously injected ZM files and empty mod directory from base game.
-# ZomboidManager is loaded from Zomboid/mods/, not the base game directory.
-# An empty ZomboidManager dir in the base game mods shadows the real mod.
 for dir in /home/steam/ZomboidDedicatedServer/media/lua/server /home/steam/ZomboidDedicatedServer/media/lua/client; do
     if ls "$dir"/ZM_*.lua 1>/dev/null 2>&1; then
         rm -f "$dir"/ZM_*.lua
         echo "[entrypoint] Cleaned up old injected ZM files from $dir"
     fi
 done
-# Note: ZomboidManager Workshop cache at steamapps/workshop/content/108600/3685323705
-# is populated by configure-server.sh — do NOT delete it here.
 
-if [ -f "$CONFIGURE_SCRIPT" ] && ! grep -q "configure-server.sh" /home/steam/run_server.sh; then
+if [ -f "$CONFIGURE_SCRIPT" ] && ! grep -q "configure-server.sh" /home/steam/run_server.sh 2>/dev/null; then
     sed -i '/^start_server$/i bash '"$CONFIGURE_SCRIPT" /home/steam/run_server.sh
     echo "[entrypoint] Patched run_server.sh to run configure-server.sh before start"
 fi
 
-# Fix JVM heap units after image writes ProjectZomboid64.json, before Java starts.
-# Image often turns MAX_RAM=8192m into -Xmx8192 (8192 bytes → "Too small maximum heap").
+# Heap fix: configure-server installs ProjectZomboid64 wrapper after Steam update.
+# Also inject an extra call before start_server for safety.
 if [ -f "$FIX_HEAP_SCRIPT" ]; then
     chmod +x "$FIX_HEAP_SCRIPT" 2>/dev/null || true
-    bash "$FIX_HEAP_SCRIPT" || true
-    # Run fix-heap immediately before start_server (after image rewrites json inside start_server
-    # we also patch start_server body if present — see below).
     if ! grep -q "fix-heap.sh" /home/steam/run_server.sh 2>/dev/null; then
         sed -i '/^start_server$/i bash /home/steam/fix-heap.sh' /home/steam/run_server.sh
         echo "[entrypoint] Patched run_server.sh to run fix-heap.sh before start_server"
     fi
-    # If start_server is a shell function that edits json then launches java, inject fix-heap
-    # just before the ProjectZomboid64 binary is invoked.
-    if grep -q 'ProjectZomboid64' /home/steam/run_server.sh 2>/dev/null \
-        && ! grep -q 'fix-heap.sh &&' /home/steam/run_server.sh 2>/dev/null; then
-        sed -i -E 's|(\./ProjectZomboid64)|bash /home/steam/fix-heap.sh \&\& \1|g' /home/steam/run_server.sh || true
-        echo "[entrypoint] Patched ProjectZomboid64 invocation to run fix-heap first"
-    fi
 fi
 
-# Branch override from shared volume (written by web UI / setup wizard).
-# Falls back to the GAME_VERSION env var (set by docker-compose from
-# PZ_STEAM_BRANCH). Always export so child shells (run_server.sh, SteamCMD)
-# see the value — without this, the renegademaster image silently defaults
-# to the stable "public" branch when GAME_VERSION isn't re-exported here.
+# Branch override from shared volume
 OVERRIDE_FILE="/home/steam/Zomboid/.steam_branch"
 if [ -f "$OVERRIDE_FILE" ]; then
     GAME_VERSION=$(tr -d '[:space:]' < "$OVERRIDE_FILE")
@@ -84,26 +63,17 @@ fi
 export GAME_VERSION="${GAME_VERSION:-public}"
 echo "[entrypoint] Steam branch: $GAME_VERSION"
 
-# Force update flag from shared volume (written by web UI)
 FORCE_FILE="/home/steam/Zomboid/.force_update"
 if [ -f "$FORCE_FILE" ]; then
     echo "[entrypoint] Force update flag detected"
     rm -f "$FORCE_FILE"
-    # Remove server binary to force SteamCMD re-download
     rm -f /home/steam/ZomboidDedicatedServer/ProjectZomboid64
+    rm -f /home/steam/ZomboidDedicatedServer/ProjectZomboid64.real
 fi
 
-# configure-server.sh owns mod state via .mod_state. Strip the renegademaster
-# image's MOD_NAMES/MOD_WORKSHOP_IDS env vars unconditionally so its
-# start_server cannot overwrite our INI after configure-server.sh has run.
-# First-boot seeding now happens via PZ_MOD_IDS/PZ_WORKSHOP_IDS in
-# configure-server.sh, the same path ARM64 uses.
 unset MOD_NAMES
 unset MOD_WORKSHOP_IDS
 
-# Snapshot current Mods/WorkshopItems from INI before handing off to
-# run_server.sh (which may overwrite them). configure-server.sh uses this
-# as a last-resort fallback when no .mod_state file exists yet.
 INI_FILE="/home/steam/Zomboid/Server/${SERVERNAME:-${SERVER_NAME:-ZomboidServer}}.ini"
 MOD_STATE_BACKUP="/home/steam/Zomboid/Server/.mod_state_backup"
 if [ -f "$INI_FILE" ]; then
