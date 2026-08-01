@@ -645,6 +645,11 @@ mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
 # Game container may run as root/steam — make host dirs writable
 chmod -R a+rwX data 2>/dev/null || true
 
+echo "Ensuring Docker network proxy-network exists..."
+if ! docker network inspect proxy-network >/dev/null 2>&1; then
+    docker network create proxy-network >/dev/null
+fi
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Stop existing services and clean stale state
 # ══════════════════════════════════════════════════════════════════════════════

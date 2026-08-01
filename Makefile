@@ -104,7 +104,11 @@ info:
 ensure-data-dirs:
 	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
 
-up: db-check ensure-data-dirs
+# Public edge network is external; create if the host does not already have it
+ensure-networks:
+	@docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network >/dev/null
+
+up: db-check ensure-data-dirs ensure-networks
 	$(COMPOSE) up -d --build
 
 down:

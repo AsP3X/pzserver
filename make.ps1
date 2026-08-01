@@ -58,10 +58,21 @@ function Ensure-DataDirs {
     }
 }
 
+function Ensure-Networks {
+    docker network inspect proxy-network 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Creating external Docker network: proxy-network" -ForegroundColor Yellow
+        docker network create proxy-network | Out-Null
+    }
+}
+
 function Invoke-Compose {
     param([string[]]$Arguments)
     Assert-DockerEnvironment
     Ensure-DataDirs
+    if ($Arguments.Count -gt 0 -and $Arguments[0] -in @("up", "run")) {
+        Ensure-Networks
+    }
     $allArgs = $script:ComposeArgs + $Arguments
     Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
     & docker @allArgs

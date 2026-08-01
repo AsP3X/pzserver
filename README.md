@@ -71,6 +71,15 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 .\deploy.ps1 -Init    # re-run setup wizard
 ```
 
+### Docker networks
+
+| Network | Type | Services |
+|---------|------|----------|
+| **`proxy-network`** | external (public edge) | `game-server`, `caddy` |
+| **`pzserver-internal`** | internal (private) | `app`, `queue`, `db`, `redis`, `docker-socket-proxy`, + `game-server` / `caddy` for RCON/upstream |
+
+`proxy-network` is shared with your reverse-proxy stack when present. Deploy creates it if missing.
+
 ### Host-mapped game data (`./data/`)
 
 Game files are **bind-mounted folders**, not Docker named volumes:

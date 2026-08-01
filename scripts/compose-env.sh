@@ -46,9 +46,20 @@ pz_ensure_db_volume() {
   fi
 }
 
+# Public edge network is external (often shared with Traefik/NPM/other stacks).
+# Create it if missing so first deploy works on a bare host.
+pz_ensure_networks() {
+  if ! docker network inspect proxy-network >/dev/null 2>&1; then
+    echo "Creating external Docker network: proxy-network"
+    docker network create proxy-network >/dev/null
+  fi
+  # pzserver-internal is created by Compose (internal: true)
+}
+
 pz_up() {
   pz_ensure_db_volume
   pz_ensure_data_dirs
+  pz_ensure_networks
   pz_compose up -d --build
 }
 

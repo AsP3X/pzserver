@@ -15,7 +15,10 @@ services:
       # Host-mapped game data (saves, Server/*.ini, logs, Lua bridge, etc.)
       - ${PZ_DATA_HOST:-./data/zomboid}:/home/steam/Zomboid
     networks:
-      - zomboid-net
+      # Public: Steam / player traffic path (and outbound SteamCMD)
+      - proxy-network
+      # Private: RCON from app/queue only
+      - pzserver-internal
 
   # ---------------------------------------------------------------------------
   # Laravel Application — API + Web Dashboard
@@ -32,6 +35,7 @@ services:
       redis:
         condition: service_healthy
     ports:
+      # Localhost-only admin (not on the public Docker network)
       - "127.0.0.1:${APP_PORT:-8000}:8000"
       - "127.0.0.1:5173:5173"
     volumes:
@@ -68,8 +72,7 @@ services:
       - SETGID
       - DAC_OVERRIDE
     networks:
-      - zomboid-net
-      - backend-net
+      - pzserver-internal
 
   # ---------------------------------------------------------------------------
   # Queue Worker — Processes backup jobs, restart jobs, etc.
@@ -117,8 +120,7 @@ services:
       - SETGID
       - DAC_OVERRIDE
     networks:
-      - zomboid-net
-      - backend-net
+      - pzserver-internal
 
   # ---------------------------------------------------------------------------
   # PostgreSQL — Primary database
@@ -127,8 +129,7 @@ services:
     image: postgres:16-alpine
     container_name: pz-db
     restart: unless-stopped
-    # Not published on the host — app/queue reach it via the backend-net DNS name "db".
-    # Avoids conflicts with a local Postgres install on :5432.
+    # Not published on the host — app/queue reach it via DNS name "db" on pzserver-internal.
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./db/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
@@ -142,8 +143,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - backend-net
-      - zomboid-net
+      - pzserver-internal
 
   # ---------------------------------------------------------------------------
   # Redis — Queue, cache, rate limiting
@@ -163,7 +163,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - backend-net
+      - pzserver-internal
 
   # ---------------------------------------------------------------------------
   # Docker Socket Proxy — Restricted Docker API access for app/queue
@@ -179,10 +179,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - backend-net
+      - pzserver-internal
 
   # ---------------------------------------------------------------------------
-  # Caddy — Reverse proxy with automatic TLS
+  # Caddy — Reverse proxy with automatic TLS (public edge)
   # ---------------------------------------------------------------------------
   caddy:
     image: caddy:2.11.2-alpine
@@ -199,20 +199,24 @@ services:
     depends_on:
       - app
     networks:
-      - zomboid-net
+      # Public edge (shared reverse-proxy network)
+      - proxy-network
+      # Reach app on the private network
+      - pzserver-internal
 
 # -----------------------------------------------------------------------------
 # Networks
 # -----------------------------------------------------------------------------
+# proxy-network      — public / shared edge (join existing proxy stack; external)
+# pzserver-internal  — private stack network (db, redis, app, queue, RCON)
 networks:
-  zomboid-net:
-    driver: bridge
-    # Not internal — game-server needs internet for SteamCMD + Steam master servers
-    # RCON security: port not published to host, only accessible between containers
-  backend-net:
+  proxy-network:
+    name: proxy-network
+    external: true
+  pzserver-internal:
+    name: pzserver-internal
     driver: bridge
     internal: true
-    # Internal — db and redis never accessible from host or internet
 
 # -----------------------------------------------------------------------------
 # Volumes (app/runtime only — game data is bind-mounted under ./data/)

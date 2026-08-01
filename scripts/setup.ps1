@@ -790,6 +790,12 @@ foreach ($d in @("data\zomboid", "data\zomboid\Lua", "data\server", "data\backup
     }
 }
 
+Write-Host "Ensuring Docker network proxy-network exists..."
+docker network inspect proxy-network 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    docker network create proxy-network | Out-Null
+}
+
 # ══════════════════════════════════════════════════════════════════════
 # Stop existing services and clean stale state
 # ══════════════════════════════════════════════════════════════════════
