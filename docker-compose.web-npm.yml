@@ -2,15 +2,24 @@
 # Used when WEB_PROXY_MODE=npm
 #
 # In NPM, create a Proxy Host:
-#   Forward hostname: pz-app
+#   Domain names:     pz.example.com
+#   Scheme:           http          ← NOT https
+#   Forward hostname: pz-app        ← container name (also aliased below)
 #   Forward port:     8000
-#   Scheme:           http
-#   Network:          proxy-network (same as this stack)
+#   Websockets:       ON
+#   SSL:              Let's Encrypt on the PUBLIC side only
 #
 # Caddy is not started (no profile "caddy"). Nothing binds host :80/:443.
+#
+# Debug from NPM container:
+#   docker exec nginx-proxy-manager curl -sI http://pz-app:8000/
 
 services:
   app:
     networks:
-      - proxy-network
-      - pzserver-internal
+      pzserver-internal:
+      proxy-network:
+        # Stable DNS names for reverse proxies on the shared edge network
+        aliases:
+          - pz-app
+          - pzserver-app
