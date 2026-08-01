@@ -71,6 +71,10 @@ function Set-EnvValue {
     $escapedKey = [regex]::Escape($Key)
     # In -replace, $ in the replacement is a backreference - escape it
     $safeValue = $Value -replace '\$', '$$'
+    # Quote values that contain whitespace (dotenv requires this)
+    if ($safeValue -match '\s' -and $safeValue -notmatch '^".*"$' -and $safeValue -notmatch "^'.*'$") {
+        $safeValue = '"' + ($safeValue -replace '"', '\"') + '"'
+    }
     return $Content -replace "(?m)^${escapedKey}=.*", "${Key}=${safeValue}"
 }
 

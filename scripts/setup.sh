@@ -652,7 +652,7 @@ sed \
 echo "Creating app/.env from ${APP_TEMPLATE}..."
 
 sed \
-    -e "s|^PZ_SERVER_NAME=.*|PZ_SERVER_NAME=${PZ_SERVER_NAME}|" \
+    -e "s|^PZ_SERVER_NAME=.*|PZ_SERVER_NAME=\"${PZ_SERVER_NAME}\"|" \
     -e "s|^PZ_RCON_PASSWORD=.*|PZ_RCON_PASSWORD=${RCON_PASS}|" \
     -e "s|^APP_ENV=.*|APP_ENV=${APP_ENV}|" \
     -e "s|^APP_KEY=.*|APP_KEY=base64:${APP_SECRET}|" \
