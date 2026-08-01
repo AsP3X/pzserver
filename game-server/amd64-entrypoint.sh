@@ -9,10 +9,17 @@
 # --- Root-only init: fix volume permissions ---
 if [ "$(id -u)" = "0" ]; then
     echo "[entrypoint] Fixing volume permissions..."
-    chmod -R 1777 /home/steam/Zomboid/Lua 2>/dev/null || true
+    mkdir -p /home/steam/Zomboid/Lua/inventory \
+             /home/steam/Zomboid/Server \
+             /home/steam/Zomboid/db \
+             /home/steam/Zomboid/Saves 2>/dev/null || true
+    # Lua bridge must be world-writable (game + Laravel app)
+    chmod -R 1777 /home/steam/Zomboid/Lua 2>/dev/null || chmod -R 777 /home/steam/Zomboid/Lua 2>/dev/null || true
     chmod 777 /home/steam/Zomboid/Server 2>/dev/null || true
     chmod 777 /home/steam/Zomboid/db 2>/dev/null || true
     chmod 777 /home/steam/Zomboid/Saves 2>/dev/null || true
+    # Parent bind mount sometimes arrives as 755 root-only on host
+    chmod 777 /home/steam/Zomboid 2>/dev/null || true
 fi
 
 CONFIGURE_SCRIPT="/home/steam/configure-server.sh"

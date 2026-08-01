@@ -69,13 +69,14 @@ for dir in "$PZ_DATA/Saves" "$PZ_DATA/db"; do
 done
 
 # ── Lua bridge permissions ────────────────────────────────────────────
-# Shared volume between game server and app — both www-data and steam (UID 1001)
+# Shared volume between game server and app — both www-data and steam/root
 # need write access. Using world-writable with sticky bit (1777) so either
-# container can write regardless of who created the files. chown doesn't work
-# here because the game server recreates files as UID 1001 after app startup.
+# container can write regardless of who created the files.
 LUA_BRIDGE_DIR="${LUA_BRIDGE_PATH:-/lua-bridge}"
+mkdir -p "$LUA_BRIDGE_DIR/inventory" 2>/dev/null || true
 if [ -d "$LUA_BRIDGE_DIR" ]; then
-    chmod -R 1777 "$LUA_BRIDGE_DIR" 2>/dev/null || true
+    chmod -R 1777 "$LUA_BRIDGE_DIR" 2>/dev/null || chmod -R 777 "$LUA_BRIDGE_DIR" 2>/dev/null || true
+    find "$LUA_BRIDGE_DIR" -type f -exec chmod 666 {} + 2>/dev/null || true
 fi
 
 # ── Backup directory permissions ─────────────────────────────────────

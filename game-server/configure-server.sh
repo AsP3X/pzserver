@@ -368,10 +368,27 @@ if printf 'Mods=%s\nWorkshopItems=%s\n' "$APPLIED_MODS" "$APPLIED_WORKSHOP" > "$
     echo "[configure-server] Wrote .mod_state_applied snapshot"
 fi
 
-# Pre-create Lua bridge directories for inventory exports
-mkdir -p "${PZ_CONFIG_DIR}/Lua/inventory" 2>/dev/null || echo "[configure-server] WARNING: Cannot create Lua/inventory directory (permission denied)"
-if [ -d "${PZ_CONFIG_DIR}/Lua/inventory" ]; then
-    echo "[configure-server] Lua bridge directories created"
+# Pre-create Lua bridge directories for inventory / stats / position exports.
+# PZ getFileWriter() cannot create intermediate dirs and fails with:
+#   "cannot open file writer for <player>" / "cannot write export_requests.json"
+# when Lua/ or Lua/inventory is missing or not world-writable (bind mounts).
+LUA_DIR="${PZ_CONFIG_DIR}/Lua"
+mkdir -p "${LUA_DIR}/inventory" 2>/dev/null \
+    || echo "[configure-server] WARNING: Cannot create ${LUA_DIR}/inventory"
+# Sticky world-writable so game (root/steam) and app (www-data) can both write
+chmod 1777 "${LUA_DIR}" 2>/dev/null || chmod 777 "${LUA_DIR}" 2>/dev/null || true
+chmod 1777 "${LUA_DIR}/inventory" 2>/dev/null || chmod 777 "${LUA_DIR}/inventory" 2>/dev/null || true
+# Touch placeholder files so mounts exist and stay writable
+for f in export_requests.json player_stats.json players_live.json game_state.json items_catalog.json; do
+    if [ ! -f "${LUA_DIR}/${f}" ]; then
+        : > "${LUA_DIR}/${f}" 2>/dev/null || true
+    fi
+    chmod 666 "${LUA_DIR}/${f}" 2>/dev/null || true
+done
+# Existing files under inventory/
+chmod 666 "${LUA_DIR}/inventory"/* 2>/dev/null || true
+if [ -d "${LUA_DIR}/inventory" ]; then
+    echo "[configure-server] Lua bridge directories ready at ${LUA_DIR} (mode $(stat -c '%a' "${LUA_DIR}" 2>/dev/null || echo '?'))"
 fi
 
 # Ensure config files are world-readable/writable so both steam (game server)
