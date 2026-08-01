@@ -44,7 +44,30 @@ class MoneyDepositManager
 
         $this->writeJsonFileAtomic($this->requestsPath, $data);
 
+        // Ensure the game can open deposit_results.json (0644 www-data files cause timeouts).
+        $this->ensureResultsFileWritable();
+
         return $entry;
+    }
+
+    /**
+     * Make sure deposit_results.json exists and is world-writable for the game UID.
+     */
+    private function ensureResultsFileWritable(): void
+    {
+        if (! file_exists($this->resultsPath)) {
+            LuaBridgeFile::writeJsonAtomic($this->resultsPath, [
+                'version' => 1,
+                'updated_at' => date('c'),
+                'results' => [],
+            ]);
+
+            return;
+        }
+
+        LuaBridgeFile::makeWorldWritable(dirname($this->resultsPath));
+        LuaBridgeFile::makeWorldWritable($this->resultsPath);
+        LuaBridgeFile::makeWorldWritable($this->requestsPath);
     }
 
     /**
@@ -151,7 +174,7 @@ class MoneyDepositManager
                 'money_count' => 0,
                 'stack_count' => 0,
                 'total_coins' => 0,
-                'message' => 'Deposit timed out. Make sure you are online in-game and the server is running.',
+                'message' => 'Deposit timed out. Stay online in-game with Money/MoneyBundle in inventory. If this keeps happening, the Lua bridge cannot write deposit_results.json — on the host run: ./scripts/fix-lua-perms.sh',
                 'processed_at' => date('c'),
             ];
         }

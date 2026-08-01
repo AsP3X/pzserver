@@ -43,7 +43,7 @@ function ZM_Utils.readJsonFile(path)
     return data
 end
 
---- Write data to a JSON file
+--- Write data to a JSON file (retries — bind-mount permission glitches are common)
 function ZM_Utils.writeJsonFile(path, data)
     local ok, jsonStr = pcall(JSON.encode, data)
     if not ok then
@@ -51,15 +51,22 @@ function ZM_Utils.writeJsonFile(path, data)
         return false
     end
 
-    local writer = getFileWriter(path, true, false)
-    if not writer then
-        print("[ZomboidManager] ERROR: cannot write " .. path)
-        return false
+    local attempts = 3
+    for attempt = 1, attempts do
+        local writer = getFileWriter(path, true, false)
+        if writer then
+            writer:write(jsonStr)
+            writer:close()
+            return true
+        end
+        if attempt < attempts then
+            print("[ZomboidManager] ERROR: cannot write " .. path .. " (attempt " .. attempt .. "/" .. attempts .. "), retrying...")
+        else
+            print("[ZomboidManager] ERROR: cannot write " .. path .. " after " .. attempts .. " attempts — check Lua/ directory permissions (must be 0777 dirs, 0666 files, no sticky bit)")
+        end
     end
 
-    writer:write(jsonStr)
-    writer:close()
-    return true
+    return false
 end
 
 return ZM_Utils

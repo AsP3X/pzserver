@@ -2,6 +2,10 @@
 -- ZM_MoneyDeposit.lua — Reads deposit_requests.json, removes Base.Money/MoneyBundle
 -- from player inventories, writes deposit_results.json
 --
+-- Safety: money is only considered deposited if deposit_results.json was written.
+-- If the result write fails after removal, items are restored so the player is not
+-- charged without a wallet credit (PHP polls results for up to ~120s).
+--
 
 require("ZM_Utils")
 require("ZM_InventoryExporter")
@@ -21,7 +25,8 @@ local function readResults()
     return {version = 1, updated_at = "", results = {}}
 end
 
---- Write results to file, trimming oldest entries if over cap
+--- Write results to file, trimming oldest entries if over cap.
+--- @return boolean
 local function writeResults(results)
     results.updated_at = ZM_Utils.getTimestamp()
 
@@ -29,7 +34,7 @@ local function writeResults(results)
         table.remove(results.results, 1)
     end
 
-    ZM_Utils.writeJsonFile(RESULTS_FILE, results)
+    return ZM_Utils.writeJsonFile(RESULTS_FILE, results)
 end
 
 --- Find online player by username
@@ -99,21 +104,17 @@ local function removeAllOfType(container, fullType)
         return 0
     end
     local removed = 0
-    -- Use getFirstType in a loop — each call finds the next instance
-    -- This avoids index-shifting issues entirely
     while true do
         local item = container:getFirstType(fullType)
         if not item then
             break
         end
-        -- DoRemoveItem is the reliable server-side removal method
         if container.DoRemoveItem then
             container:DoRemoveItem(item)
         else
             container:Remove(item)
         end
         removed = removed + 1
-        -- Safety: prevent infinite loop if removal isn't working
         if removed > 10000 then
             print("[ZomboidManager] WARNING: hit safety limit removing " .. fullType)
             break
@@ -139,7 +140,6 @@ local function removeMoney(player)
         bundlesRemoved = bundlesRemoved + removeAllOfType(bagContainer, "Base.MoneyBundle")
     end
 
-    -- Tell the client to remove the items for instant UI update
     if isServer() then
         if moneyRemoved > 0 then
             sendServerCommand(player, "ZomboidManager", "removeItem", {
@@ -158,6 +158,57 @@ local function removeMoney(player)
     return moneyRemoved, bundlesRemoved
 end
 
+--- Restore money items to player inventory (used when result write fails after removal).
+local function restoreMoney(player, moneyCount, bundleCount)
+    if not player then
+        return
+    end
+    local inventory = player:getInventory()
+    if not inventory then
+        return
+    end
+
+    moneyCount = moneyCount or 0
+    bundleCount = bundleCount or 0
+
+    for _ = 1, moneyCount do
+        inventory:AddItem("Base.Money")
+    end
+    for _ = 1, bundleCount do
+        inventory:AddItem("Base.MoneyBundle")
+    end
+
+    if isServer() then
+        if moneyCount > 0 then
+            sendServerCommand(player, "ZomboidManager", "addItem", {
+                item_type = "Base.Money",
+                count = tostring(moneyCount),
+            })
+        end
+        if bundleCount > 0 then
+            sendServerCommand(player, "ZomboidManager", "addItem", {
+                item_type = "Base.MoneyBundle",
+                count = tostring(bundleCount),
+            })
+        end
+    end
+
+    print("[ZomboidManager] Restored " .. moneyCount .. " Money + " .. bundleCount
+        .. " MoneyBundle to " .. (player:getUsername() or "?")
+        .. " after failed deposit_results write")
+end
+
+--- Append one result and flush to disk. Returns true if persisted.
+local function appendAndWriteResult(results, result)
+    table.insert(results.results, result)
+    if writeResults(results) then
+        return true
+    end
+    -- Roll back in-memory append so a later successful write does not re-credit a failed persist
+    table.remove(results.results, #results.results)
+    return false
+end
+
 --- Process all pending deposit requests
 function ZM_MoneyDeposit.process()
     local requests = ZM_Utils.readJsonFile(REQUESTS_FILE)
@@ -165,7 +216,6 @@ function ZM_MoneyDeposit.process()
         return 0
     end
 
-    -- Early exit: check if any entries are pending
     local hasPending = false
     for _, req in ipairs(requests.requests) do
         if req.status == "pending" then
@@ -180,7 +230,6 @@ function ZM_MoneyDeposit.process()
     local results = readResults()
     local processed = 0
 
-    -- Build set of already-processed IDs
     local processedIds = {}
     if results.results then
         for _, r in ipairs(results.results) do
@@ -196,35 +245,45 @@ function ZM_MoneyDeposit.process()
                 status = "failed",
                 money_count = 0,
                 stack_count = 0,
+                bundle_count = 0,
                 total_coins = 0,
                 message = nil,
                 processed_at = ZM_Utils.getTimestamp(),
             }
 
             local player = findPlayer(req.username)
+            local moneyRemoved = 0
+            local bundlesRemoved = 0
+            local didRemove = false
+
             if not player then
                 result.message = "player not online"
             else
-                -- Step 1: Count money BEFORE removal
                 local moneyBefore, bundlesBefore = countAllMoney(player)
 
                 if moneyBefore == 0 and bundlesBefore == 0 then
                     result.message = "no money items found"
                 else
-                    -- Step 2: Remove all money items
-                    local moneyRemoved, bundlesRemoved = removeMoney(player)
+                    moneyRemoved, bundlesRemoved = removeMoney(player)
+                    didRemove = (moneyRemoved > 0 or bundlesRemoved > 0)
 
-                    -- Step 3: Verify removal — count money AFTER removal
                     local moneyAfter, bundlesAfter = countAllMoney(player)
 
                     if moneyAfter > 0 or bundlesAfter > 0 then
-                        -- Some items were NOT removed — report failure
-                        -- Do NOT credit coins since items are still in inventory
-                        result.message = "removal failed: " .. moneyAfter .. " Money, " .. bundlesAfter .. " MoneyBundle still in inventory"
-                        print("[ZomboidManager] WARNING: Money deposit removal incomplete for " .. req.username .. " — " .. moneyAfter .. " Money + " .. bundlesAfter .. " MoneyBundle remaining")
+                        result.message = "removal failed: " .. moneyAfter .. " Money, " .. bundlesAfter
+                            .. " MoneyBundle still in inventory"
+                        print("[ZomboidManager] WARNING: Money deposit removal incomplete for "
+                            .. req.username .. " — " .. moneyAfter .. " Money + " .. bundlesAfter
+                            .. " MoneyBundle remaining")
+                        -- Leave remaining items; do not credit partial removals
+                        if didRemove then
+                            -- Put back what we already took so inventory is consistent
+                            restoreMoney(player, moneyRemoved, bundlesRemoved)
+                            didRemove = false
+                            moneyRemoved = 0
+                            bundlesRemoved = 0
+                        end
                     else
-                        -- All items successfully removed — report success
-                        -- Money = 1 coin, MoneyBundle = 100 coins (crafted from 100x Money)
                         local moneyValue = 1
                         local bundleValue = 100
                         local totalCoins = (moneyRemoved * moneyValue) + (bundlesRemoved * bundleValue)
@@ -234,21 +293,32 @@ function ZM_MoneyDeposit.process()
                         result.bundle_count = bundlesRemoved
                         result.total_coins = totalCoins
 
-                        print("[ZomboidManager] Money deposit: " .. req.username .. " deposited " .. moneyRemoved .. " Money + " .. bundlesRemoved .. " MoneyBundle = " .. totalCoins .. " coins")
+                        print("[ZomboidManager] Money deposit: " .. req.username .. " deposited "
+                            .. moneyRemoved .. " Money + " .. bundlesRemoved
+                            .. " MoneyBundle = " .. totalCoins .. " coins")
                     end
-
-                    -- Re-export inventory so the web reflects the change immediately
-                    ZM_InventoryExporter.exportPlayer(player)
                 end
             end
 
-            table.insert(results.results, result)
-            processed = processed + 1
+            local written = appendAndWriteResult(results, result)
+            if not written then
+                print("[ZomboidManager] CRITICAL: deposit result not written for "
+                    .. tostring(req.username) .. " id=" .. tostring(req.id)
+                    .. " — will retry next cycle; restoring items if any were removed")
+                if didRemove and player then
+                    restoreMoney(player, moneyRemoved, bundlesRemoved)
+                    -- Re-export so web inventory matches after restore
+                    ZM_InventoryExporter.exportPlayer(player)
+                end
+                -- Do not mark processed; leave request pending for retry
+            else
+                processed = processed + 1
+                processedIds[req.id] = true
+                if player then
+                    ZM_InventoryExporter.exportPlayer(player)
+                end
+            end
         end
-    end
-
-    if processed > 0 then
-        writeResults(results)
     end
 
     return processed
