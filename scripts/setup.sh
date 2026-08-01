@@ -638,6 +638,14 @@ if ! docker volume inspect pz-postgres >/dev/null 2>&1; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Host bind-mount dirs for game data (not Docker named volumes)
+# ══════════════════════════════════════════════════════════════════════════════
+echo "Ensuring host data directories (./data/*)..."
+mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
+# Game container may run as root/steam — make host dirs writable
+chmod -R a+rwX data 2>/dev/null || true
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Stop existing services and clean stale state
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
@@ -654,7 +662,7 @@ for dir in app/bootstrap/cache app/storage app/storage/logs app/storage/framewor
 done
 
 # Remove build/cache volumes that may have stale state from a previous run
-# (game data, DB, and backups are intentionally preserved)
+# (host ./data and Postgres volume are intentionally preserved)
 for vol in pz-caddy-data pz-caddy-config pz-app-vendor pz-app-node-modules pz-app-build; do
     docker volume rm "$vol" 2>/dev/null || true
 done

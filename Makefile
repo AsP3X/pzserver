@@ -99,18 +99,23 @@ info:
 
 # ── Core commands ────────────────────────────────────────────────────
 # Default startup keeps the admin UI local-only and does not change firewall rules.
-up: db-check
+
+# Host bind-mount dirs for game data (see PZ_*_HOST in .env.example)
+ensure-data-dirs:
+	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
+
+up: db-check ensure-data-dirs
 	$(COMPOSE) up -d --build
 
 down:
 	$(COMPOSE) down
 
+# Named Docker volumes only (game worlds live under ./data/)
 VOLUMES := pz-postgres pz-app-vendor pz-app-node-modules pz-app-build \
-	pz-server-files pz-data pz-redis pz-backups pz-lua-bridge pz-map-tiles \
-	pz-caddy-data pz-caddy-config
+	pz-redis pz-caddy-data pz-caddy-config
 
 nuke:
-	@echo "WARNING: This will destroy ALL data (database, game saves, backups, config)."
+	@echo "WARNING: This will destroy ALL data (database, ./data game files, backups, config)."
 	@echo "Type NUKE_ALL and press Enter to continue:"
 	@read confirm; \
 	if [ "$$confirm" != "NUKE_ALL" ]; then \
@@ -126,12 +131,14 @@ nuke:
 		echo "Removing leftover volumes: $$REMAINING"; \
 		echo "$$REMAINING" | xargs docker volume rm 2>/dev/null || true; \
 	fi
+	@rm -rf data
+	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles
 	@rm -f .env app/.env .firewall.conf
 	@rm -f caddy/Caddyfile caddy/certs/cert.pem caddy/certs/key.pem
 	@for dir in app/bootstrap/cache app/storage/logs app/storage/framework/cache app/storage/framework/sessions app/storage/framework/views; do \
 		chown -R $$(id -u):$$(id -g) $$dir 2>/dev/null || sudo chown -R $$(id -u):$$(id -g) $$dir 2>/dev/null || true; \
 	done
-	@echo "Nuke complete. All volumes and config removed."
+	@echo "Nuke complete. Volumes, ./data, and config removed."
 
 build:
 	$(COMPOSE) build

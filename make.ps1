@@ -36,17 +36,32 @@ $PZ_GAME_PORT   = if ($env:PZ_GAME_PORT)   { $env:PZ_GAME_PORT }   else { "16261
 $PZ_DIRECT_PORT = if ($env:PZ_DIRECT_PORT) { $env:PZ_DIRECT_PORT } else { "16262" }
 $APP_PORT       = if ($env:APP_PORT)       { $env:APP_PORT }       else { "8000" }
 
-# ── Volume list for nuke ────────────────────────────────────────────
+# ── Named volumes for nuke (game data is bind-mounted under ./data/) ─
 $Volumes = @(
     "pz-postgres", "pz-app-vendor", "pz-app-node-modules", "pz-app-build",
-    "pz-server-files", "pz-data", "pz-redis", "pz-backups", "pz-lua-bridge",
-    "pz-map-tiles", "pz-caddy-data", "pz-caddy-config"
+    "pz-redis", "pz-caddy-data", "pz-caddy-config"
 )
 
 # ── Helpers ─────────────────────────────────────────────────────────
+function Ensure-DataDirs {
+    $dirs = @(
+        "data\zomboid",
+        "data\zomboid\Lua",
+        "data\server",
+        "data\backups",
+        "data\map-tiles"
+    )
+    foreach ($d in $dirs) {
+        if (-not (Test-Path $d)) {
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+        }
+    }
+}
+
 function Invoke-Compose {
     param([string[]]$Arguments)
     Assert-DockerEnvironment
+    Ensure-DataDirs
     $allArgs = $script:ComposeArgs + $Arguments
     Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
     & docker @allArgs
@@ -344,9 +359,15 @@ function Do-Nuke {
         Write-Host "Removing leftover volumes: $remaining"
         $remaining | ForEach-Object { docker volume rm $_ 2>$null | Out-Null }
     }
+    # Wipe host-mapped game data (bind mounts)
+    if (Test-Path "data") {
+        Write-Host "Removing host data directory ./data ..." -ForegroundColor Yellow
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data"
+        Ensure-DataDirs
+    }
     Remove-Item -Force -ErrorAction SilentlyContinue .env, app\.env, .firewall.conf
     Remove-Item -Force -ErrorAction SilentlyContinue caddy\Caddyfile, caddy\certs\cert.pem, caddy\certs\key.pem
-    Write-Host "Nuke complete. All volumes and config removed." -ForegroundColor Green
+    Write-Host "Nuke complete. Volumes, ./data, and config removed." -ForegroundColor Green
 }
 
 # ── Firewall (Windows Firewall via netsh) ───────────────────────────

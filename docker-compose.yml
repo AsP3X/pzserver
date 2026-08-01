@@ -12,8 +12,8 @@ services:
       - "${PZ_GAME_PORT:-16261}:${PZ_GAME_PORT:-16261}/udp"
       - "${PZ_DIRECT_PORT:-16262}:${PZ_DIRECT_PORT:-16262}/udp"
     volumes:
-      - zomboid-data:/home/steam/Zomboid
-      - lua-bridge:/home/steam/Zomboid/Lua
+      # Host-mapped game data (saves, Server/*.ini, logs, Lua bridge, etc.)
+      - ${PZ_DATA_HOST:-./data/zomboid}:/home/steam/Zomboid
     networks:
       - zomboid-net
 
@@ -39,11 +39,12 @@ services:
       - app-vendor:/var/www/html/vendor
       - app-node-modules:/var/www/html/node_modules
       - app-build:/var/www/html/public/build
-      - zomboid-data:/pz-data
-      - zomboid-server:/pz-server:ro
-      - backup-data:/backups
-      - lua-bridge:/lua-bridge
-      - map-tiles:/map-tiles
+      - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
+      - ${PZ_SERVER_HOST:-./data/server}:/pz-server:ro
+      - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
+      # Same Lua dir the game writes into (subdir of PZ_DATA_HOST)
+      - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
+      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles
     env_file: ./app/.env
     environment:
       DB_HOST: ${DB_HOST:-db}
@@ -88,11 +89,11 @@ services:
     volumes:
       - ./app:/var/www/html
       - app-vendor:/var/www/html/vendor
-      - zomboid-data:/pz-data
-      - zomboid-server:/pz-server:ro
-      - backup-data:/backups
-      - lua-bridge:/lua-bridge
-      - map-tiles:/map-tiles
+      - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
+      - ${PZ_SERVER_HOST:-./data/server}:/pz-server:ro
+      - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
+      - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
+      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles
     env_file: ./app/.env
     environment:
       DB_HOST: ${DB_HOST:-db}
@@ -214,8 +215,13 @@ networks:
     # Internal — db and redis never accessible from host or internet
 
 # -----------------------------------------------------------------------------
-# Volumes
+# Volumes (app/runtime only — game data is bind-mounted under ./data/)
 # -----------------------------------------------------------------------------
+# Host paths (override via .env):
+#   PZ_DATA_HOST=./data/zomboid      saves, Server/*.ini, logs, Lua bridge
+#   PZ_SERVER_HOST=./data/server     SteamCMD dedicated server install
+#   PZ_BACKUPS_HOST=./data/backups   world/config backups from the panel
+#   PZ_MAP_TILES_HOST=./data/map-tiles
 volumes:
   app-vendor:
     name: pz-app-vendor
@@ -223,21 +229,11 @@ volumes:
     name: pz-app-node-modules
   app-build:
     name: pz-app-build
-  zomboid-server:
-    name: pz-server-files
-  zomboid-data:
-    name: pz-data
   postgres-data:
     name: pz-postgres
     external: true
   redis-data:
     name: pz-redis
-  backup-data:
-    name: pz-backups
-  lua-bridge:
-    name: pz-lua-bridge
-  map-tiles:
-    name: pz-map-tiles
   caddy-data:
     name: pz-caddy-data
   caddy-config:

@@ -71,13 +71,35 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 .\deploy.ps1 -Init    # re-run setup wizard
 ```
 
+### Host-mapped game data (`./data/`)
+
+Game files are **bind-mounted folders**, not Docker named volumes:
+
+| Host path | Contents |
+|-----------|----------|
+| `./data/zomboid/` | Saves, `Server/*.ini`, logs, Lua bridge |
+| `./data/server/` | SteamCMD dedicated server install (~7 GB) |
+| `./data/backups/` | Panel backups |
+| `./data/map-tiles/` | Map tiles for the web map |
+
+Override locations in `.env` (e.g. put worlds on another disk):
+
+```env
+PZ_DATA_HOST=./data/zomboid
+PZ_SERVER_HOST=./data/server
+PZ_BACKUPS_HOST=./data/backups
+PZ_MAP_TILES_HOST=./data/map-tiles
+```
+
+Postgres/Redis/Caddy still use named volumes (app infrastructure only).
+
 ### What must never be committed
 
 These are generated on the host and are gitignored:
 
 - `.env`, `app/.env`
 - `.firewall.conf`, `ACCESS.local.txt`
-- Docker volumes (saves, DB, Steam files)
+- `./data/**` (worlds, binaries, backups)
 
 ---
 

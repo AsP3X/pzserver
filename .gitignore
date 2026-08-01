@@ -46,6 +46,10 @@ db-backups/
 game-server/data/
 backups/*.tar.gz
 
+# Host-mapped PZ data (bind mounts — do not commit worlds/binaries)
+/data/**
+!/data/**/.gitkeep
+
 # Node (frontend - future)
 node_modules/
 

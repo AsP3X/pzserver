@@ -781,13 +781,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ══════════════════════════════════════════════════════════════════════
+# Host bind-mount dirs for game data (not Docker named volumes)
+# ══════════════════════════════════════════════════════════════════════
+Write-Host "Ensuring host data directories (./data/*)..."
+foreach ($d in @("data\zomboid", "data\zomboid\Lua", "data\server", "data\backups", "data\map-tiles")) {
+    if (-not (Test-Path $d)) {
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+    }
+}
+
+# ══════════════════════════════════════════════════════════════════════
 # Stop existing services and clean stale state
 # ══════════════════════════════════════════════════════════════════════
 Write-Host ""
 Write-Host "Starting services..." -ForegroundColor White
 & docker @ComposeArgs down 2>$null
 
-# Remove build/cache volumes (preserve data, DB, backups)
+# Remove build/cache volumes (preserve host ./data and Postgres volume)
 foreach ($vol in @("pz-caddy-data", "pz-caddy-config", "pz-app-vendor", "pz-app-node-modules", "pz-app-build")) {
     docker volume rm $vol 2>$null | Out-Null
 }
