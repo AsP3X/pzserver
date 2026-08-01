@@ -41,6 +41,7 @@ services:
       - ./game-server/mods/ZomboidManager:/home/steam/Zomboid/mods/ZomboidManager:ro
       - ./game-server/amd64-entrypoint.sh:/home/steam/amd64-entrypoint.sh:ro
       - ./game-server/configure-server.sh:/home/steam/configure-server.sh:ro
+      - ./game-server/fix-heap.sh:/home/steam/fix-heap.sh:ro
     healthcheck:
       # Check RCON TCP port in /proc/net — proves game server is fully loaded
       # (ss/netstat not available in renegademaster image)

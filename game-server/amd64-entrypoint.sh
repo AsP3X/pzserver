@@ -20,6 +20,19 @@ if [ "$(id -u)" = "0" ]; then
 fi
 
 CONFIGURE_SCRIPT="/home/steam/configure-server.sh"
+FIX_HEAP_SCRIPT="/home/steam/fix-heap.sh"
+
+# Normalize MAX_RAM so renegademaster does not write bare -Xmx8192 (bytes).
+# Pure digits → treat as megabytes.
+if [ -n "${MAX_RAM:-}" ]; then
+    _ram=$(printf '%s' "$MAX_RAM" | tr -d '[:space:]')
+    if printf '%s' "$_ram" | grep -Eq '^[0-9]+$'; then
+        export MAX_RAM="${_ram}m"
+        echo "[entrypoint] MAX_RAM normalized to ${MAX_RAM}"
+    else
+        export MAX_RAM="$_ram"
+    fi
+fi
 
 # Clean up previously injected ZM files and empty mod directory from base game.
 # ZomboidManager is loaded from Zomboid/mods/, not the base game directory.
@@ -36,6 +49,26 @@ done
 if [ -f "$CONFIGURE_SCRIPT" ] && ! grep -q "configure-server.sh" /home/steam/run_server.sh; then
     sed -i '/^start_server$/i bash '"$CONFIGURE_SCRIPT" /home/steam/run_server.sh
     echo "[entrypoint] Patched run_server.sh to run configure-server.sh before start"
+fi
+
+# Fix JVM heap units after image writes ProjectZomboid64.json, before Java starts.
+# Image often turns MAX_RAM=8192m into -Xmx8192 (8192 bytes → "Too small maximum heap").
+if [ -f "$FIX_HEAP_SCRIPT" ]; then
+    chmod +x "$FIX_HEAP_SCRIPT" 2>/dev/null || true
+    bash "$FIX_HEAP_SCRIPT" || true
+    # Run fix-heap immediately before start_server (after image rewrites json inside start_server
+    # we also patch start_server body if present — see below).
+    if ! grep -q "fix-heap.sh" /home/steam/run_server.sh 2>/dev/null; then
+        sed -i '/^start_server$/i bash /home/steam/fix-heap.sh' /home/steam/run_server.sh
+        echo "[entrypoint] Patched run_server.sh to run fix-heap.sh before start_server"
+    fi
+    # If start_server is a shell function that edits json then launches java, inject fix-heap
+    # just before the ProjectZomboid64 binary is invoked.
+    if grep -q 'ProjectZomboid64' /home/steam/run_server.sh 2>/dev/null \
+        && ! grep -q 'fix-heap.sh &&' /home/steam/run_server.sh 2>/dev/null; then
+        sed -i -E 's|(\./ProjectZomboid64)|bash /home/steam/fix-heap.sh \&\& \1|g' /home/steam/run_server.sh || true
+        echo "[entrypoint] Patched ProjectZomboid64 invocation to run fix-heap first"
+    fi
 fi
 
 # Branch override from shared volume (written by web UI / setup wizard).

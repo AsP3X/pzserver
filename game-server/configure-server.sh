@@ -379,6 +379,11 @@ fi
 chmod 666 "$INI_FILE" 2>/dev/null || true
 [ -f "$SANDBOX_FILE" ] && chmod 666 "$SANDBOX_FILE" 2>/dev/null || true
 
+# Fix JVM heap units if the image wrote bare -Xmx8192 (bytes) into the json
+if [ -f /home/steam/fix-heap.sh ]; then
+    bash /home/steam/fix-heap.sh || true
+fi
+
 # Log effective values from the INI file (not env vars, which may have been overridden)
 echo "[configure-server] Configuration applied:"
 echo "  Port: $(grep '^DefaultPort=' "$INI_FILE" | sed 's/^DefaultPort=//')/udp"
