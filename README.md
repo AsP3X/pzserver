@@ -75,10 +75,31 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 
 | Network | Type | Services |
 |---------|------|----------|
-| **`proxy-network`** | external (public edge) | `game-server`, `caddy` |
-| **`pzserver-internal`** | internal (private) | `app`, `queue`, `db`, `redis`, `docker-socket-proxy`, + `game-server` / `caddy` for RCON/upstream |
+| **`proxy-network`** | external (public edge) | `game-server`, (+ `caddy` or `app` depending on web mode) |
+| **`pzserver-internal`** | internal (private) | `app`, `queue`, `db`, `redis`, `docker-socket-proxy`, + `game-server` for RCON |
 
 `proxy-network` is shared with your reverse-proxy stack when present. Deploy creates it if missing.
+
+### Web panel exposure (`WEB_PROXY_MODE`)
+
+| Mode | `.env` value | Host ports 80/443 | How to reach the panel |
+|------|--------------|-------------------|------------------------|
+| **Local** (default) | `local` | No | `http://127.0.0.1:8000` |
+| **Caddy** | `caddy` | Yes (Caddy) | Your domain / IP on 80/443 |
+| **Nginx Proxy Manager** | `npm` | No | NPM → `http://pz-app:8000` on `proxy-network` |
+
+If NPM (or anything else) already owns port 80, use **`WEB_PROXY_MODE=npm`**.
+
+```env
+WEB_PROXY_MODE=npm
+```
+
+NPM Proxy Host example:
+
+- Forward hostname: `pz-app`
+- Forward port: `8000`
+- Scheme: `http`
+- Docker network: `proxy-network`
 
 ### Host-mapped game data (`./data/`)
 

@@ -1,0 +1,7 @@
+# Web mode: Caddy binds host HTTP/HTTPS ports (standalone).
+# Used when WEB_PROXY_MODE=caddy
+services:
+  caddy:
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"

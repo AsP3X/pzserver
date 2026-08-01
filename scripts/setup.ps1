@@ -231,9 +231,11 @@ if ($UseDefaults) {
     $APP_PORT = "8000"
     $CADDY_HTTP_PORT = "80"
     $CADDY_HTTPS_PORT = "443"
-    $ADMIN_PUBLIC_ENABLED = $false
+    $WEB_PROXY_MODE = if ($env:WEB_PROXY_MODE) { $env:WEB_PROXY_MODE.ToLowerInvariant() } else { "local" }
+    if ($WEB_PROXY_MODE -notin @("local", "caddy", "npm")) { $WEB_PROXY_MODE = "local" }
+    $ADMIN_PUBLIC_ENABLED = ($WEB_PROXY_MODE -ne "local")
     $SITE_HOST = "localhost"
-    $APP_URL = "http://localhost:8000"
+    $APP_URL = "http://127.0.0.1:8000"
     $CADDY_SITE = "localhost"
     $CADDY_TLS = "`ttls internal"
     $GENERATE_SELF_SIGNED = $false
@@ -242,10 +244,11 @@ if ($UseDefaults) {
 FIREWALL_BACKEND=windows
 FIREWALL_OS=windows
 FIREWALL_ZONE=
-CADDY_ENABLED=false
+CADDY_ENABLED=$( if ($WEB_PROXY_MODE -eq "caddy") { "true" } else { "false" } )
 ADMIN_PUBLIC_HOST=localhost
 ADMIN_HTTP_PORT=80
 ADMIN_HTTPS_PORT=443
+WEB_PROXY_MODE=$WEB_PROXY_MODE
 "@
     Write-FileUtf8NoBom ".firewall.conf" $firewallConf
 } else {
@@ -317,8 +320,8 @@ switch ($branchChoice) {
 
 $PZ_SERVER_PASSWORD = Read-Prompt "Server password (empty = open)" ""
 
-# ── Web Panel (HTTPS via Caddy) ─────────────────────────────────────
-Write-Section "Web Panel (HTTPS)"
+# ── Web panel exposure ──────────────────────────────────────────────
+Write-Section "Web panel access"
 
 Write-Host "  Detecting server public IP..." -ForegroundColor DarkGray
 $SERVER_IP = try { (Invoke-CompatibleWebRequest -Uri "https://api.ipify.org" -TimeoutSec 5).Content.Trim() } catch { "" }
@@ -332,19 +335,45 @@ $APP_PORT = "8000"
 $CADDY_HTTP_PORT = "80"
 $CADDY_HTTPS_PORT = "443"
 $ADMIN_PUBLIC_ENABLED = $false
+$WEB_PROXY_MODE = "local"
+$GENERATE_SELF_SIGNED = $false
 
 Write-Host ""
-$enablePublic = Read-Host "  Enable public admin access (via Caddy reverse proxy)? [y/N]"
-if ([string]::IsNullOrEmpty($enablePublic)) { $enablePublic = "n" }
+Write-Host "  How should the web admin panel be exposed?"
+Write-Host "    1) Local only - http://127.0.0.1:8000  (no host ports 80/443)"
+Write-Host "    2) Caddy on this host - publish ports 80/443"
+Write-Host "    3) Nginx Proxy Manager / external proxy on proxy-network"
+Write-Host "       (no 80/443 bind; NPM forwards to http://pz-app:8000)" -ForegroundColor DarkGray
+do {
+    $webModeChoice = Read-Host "  [1]"
+    if ([string]::IsNullOrEmpty($webModeChoice)) { $webModeChoice = "1" }
+} while ($webModeChoice -notin @("1", "2", "3"))
 
-if ($enablePublic.ToLower() -ne "y") {
-    # Local-only mode
+if ($webModeChoice -eq "1") {
+    $WEB_PROXY_MODE = "local"
     $SITE_HOST = "localhost"
-    $APP_URL = "https://localhost"
+    $APP_URL = "http://127.0.0.1:8000"
     $CADDY_SITE = "localhost"
     $CADDY_TLS = "`ttls internal"
-    Write-Host "  Panel will be available locally at https://localhost" -ForegroundColor Green
+    Write-Host "  Panel: http://127.0.0.1:8000 only" -ForegroundColor Green
+} elseif ($webModeChoice -eq "3") {
+    $WEB_PROXY_MODE = "npm"
+    $ADMIN_PUBLIC_ENABLED = $true
+    $SITE_HOST = "localhost"
+    $APP_URL = "http://127.0.0.1:8000"
+    $CADDY_SITE = "localhost"
+    $CADDY_TLS = "`ttls internal"
+    Write-Host "  Nginx Proxy Manager mode" -ForegroundColor Green
+    Write-Host "  In NPM: Proxy Host -> http://pz-app:8000 on network proxy-network" -ForegroundColor DarkGray
+    $npmUrl = Read-Host "  Public URL for the panel (optional) [skip]"
+    if (-not [string]::IsNullOrWhiteSpace($npmUrl)) { $APP_URL = $npmUrl }
 } else {
+    $WEB_PROXY_MODE = "caddy"
+    $ADMIN_PUBLIC_ENABLED = $true
+    Write-Host "  Caddy will publish host HTTP/HTTPS ports" -ForegroundColor Green
+}
+
+if ($WEB_PROXY_MODE -eq "caddy") {
     $ADMIN_PUBLIC_ENABLED = $true
 
     # ── Hostname / Domain / IP ──────────────────────────────────────
@@ -736,6 +765,11 @@ $rootEnv = Set-EnvValue $rootEnv "APP_KEY" "base64:$APP_SECRET"
 $rootEnv = Set-EnvValue $rootEnv "APP_DEBUG" $APP_DEBUG
 $rootEnv = Set-EnvValue $rootEnv "APP_URL" $APP_URL
 $rootEnv = Set-EnvValue $rootEnv "APP_PORT" $APP_PORT
+if ($rootEnv -notmatch '(?m)^WEB_PROXY_MODE=') {
+    $rootEnv = $rootEnv.TrimEnd() + "`nWEB_PROXY_MODE=$WEB_PROXY_MODE`n"
+} else {
+    $rootEnv = Set-EnvValue $rootEnv "WEB_PROXY_MODE" $WEB_PROXY_MODE
+}
 $rootEnv = Set-EnvValue $rootEnv "CADDY_HTTP_PORT" $CADDY_HTTP_PORT
 $rootEnv = Set-EnvValue $rootEnv "CADDY_HTTPS_PORT" $CADDY_HTTPS_PORT
 $rootEnv = Set-EnvValue $rootEnv "DB_PASSWORD" $DB_PASS

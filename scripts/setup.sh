@@ -163,8 +163,8 @@ esac
 
 prompt PZ_SERVER_PASSWORD "Server password (empty = open)" ""
 
-# ── Web Panel (HTTPS via Caddy) ───────────────────────────────────────────────
-section "Web Panel (HTTPS)"
+# ── Web panel exposure ────────────────────────────────────────────────────────
+section "Web panel access"
 
 # Detect public IP once (used by domain and IP validation)
 echo -e "  ${DIM}Detecting server public IP...${NC}"
@@ -179,22 +179,57 @@ APP_PORT=8000
 CADDY_HTTP_PORT=80
 CADDY_HTTPS_PORT=443
 ADMIN_PUBLIC_ENABLED=false
+WEB_PROXY_MODE=local
+GENERATE_SELF_SIGNED=false
 
 echo ""
-echo -ne "  Enable public admin access (via Caddy reverse proxy)? ${DIM}[y/N]${NC}: "
-read -r enable_public || true
-enable_public="${enable_public:-n}"
+echo "  How should the web admin panel be exposed?"
+echo "    1) Local only — http://127.0.0.1:8000  (no host ports 80/443)"
+echo "    2) Caddy on this host — publish ports 80/443 (standalone)"
+echo "    3) Nginx Proxy Manager / external proxy on proxy-network"
+echo -e "       ${DIM}(no 80/443 bind; NPM forwards to http://pz-app:8000)${NC}"
+while true; do
+    echo -ne "  ${DIM}[1]${NC}: "
+    read -r web_mode_choice || true
+    web_mode_choice="${web_mode_choice:-1}"
+    [[ "$web_mode_choice" =~ ^[123]$ ]] && break
+    echo -e "  ${RED}Invalid choice. Enter 1, 2, or 3.${NC}"
+done
 
-if [ "${enable_public,,}" != "y" ]; then
-    # Local-only mode
-    SITE_HOST="localhost"
-    APP_URL="https://localhost"
-    CADDY_SITE="localhost"
-    CADDY_TLS=$'\ttls internal'
-    ADMIN_PUBLIC_ENABLED=false
-    echo -e "  ${GREEN}✓ Panel will be available locally at http://localhost:${APP_PORT}${NC}"
-else
-    ADMIN_PUBLIC_ENABLED=true
+case "$web_mode_choice" in
+    1)
+        WEB_PROXY_MODE=local
+        SITE_HOST="localhost"
+        APP_URL="http://127.0.0.1:${APP_PORT}"
+        CADDY_SITE="localhost"
+        CADDY_TLS=$'\ttls internal'
+        ADMIN_PUBLIC_ENABLED=false
+        echo -e "  ${GREEN}✓ Panel: http://127.0.0.1:${APP_PORT} only${NC}"
+        ;;
+    3)
+        WEB_PROXY_MODE=npm
+        SITE_HOST="localhost"
+        APP_URL="http://127.0.0.1:${APP_PORT}"
+        CADDY_SITE="localhost"
+        CADDY_TLS=$'\ttls internal'
+        ADMIN_PUBLIC_ENABLED=true
+        echo -e "  ${GREEN}✓ Nginx Proxy Manager mode${NC}"
+        echo -e "  ${DIM}In NPM: Proxy Host → http://pz-app:8000 on network proxy-network${NC}"
+        echo -ne "  Public URL for the panel (optional, e.g. https://pz.example.com) ${DIM}[skip]${NC}: "
+        read -r npm_url || true
+        if [ -n "$npm_url" ]; then
+            APP_URL="$npm_url"
+        fi
+        ;;
+    2)
+        WEB_PROXY_MODE=caddy
+        ADMIN_PUBLIC_ENABLED=true
+        echo -e "  ${GREEN}✓ Caddy will publish host HTTP/HTTPS ports${NC}"
+        # fall through to domain/IP + port configuration below
+        ;;
+esac
+
+if [ "$WEB_PROXY_MODE" = "caddy" ]; then
 
     # ── Hostname / Domain / IP ────────────────────────────────────────────
     while true; do
@@ -455,11 +490,18 @@ echo -e "  Admin:        ${GREEN}${ADMIN_USERNAME}${NC}"
 echo -e "  Server:       ${GREEN}${PZ_SERVER_NAME}${NC}"
 echo -e "  Players:      ${GREEN}${PZ_MAX_PLAYERS}${NC} / RAM: ${GREEN}${PZ_MAX_RAM}${NC}"
 echo -e "  Branch:       ${GREEN}${PZ_STEAM_BRANCH}${NC}"
-if [ "$ADMIN_PUBLIC_ENABLED" = "true" ]; then
-    echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (HTTPS via Caddy, ports ${CADDY_HTTP_PORT}/${CADDY_HTTPS_PORT})"
-else
-    echo -e "  Panel:        ${GREEN}http://localhost:${APP_PORT}${NC} (local only)"
-fi
+echo -e "  Web mode:     ${GREEN}${WEB_PROXY_MODE}${NC}"
+case "$WEB_PROXY_MODE" in
+    caddy)
+        echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (Caddy ports ${CADDY_HTTP_PORT}/${CADDY_HTTPS_PORT})"
+        ;;
+    npm)
+        echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (NPM → http://pz-app:8000)"
+        ;;
+    *)
+        echo -e "  Panel:        ${GREEN}http://127.0.0.1:${APP_PORT}${NC} (local only)"
+        ;;
+esac
 echo -e "  Architecture: ${GREEN}${ARCH_LABEL}${NC}"
 if [ -f .firewall.conf ]; then
     . .firewall.conf
@@ -588,6 +630,7 @@ sed \
     -e "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" \
     -e "s|^APP_URL=.*|APP_URL=${APP_URL}|" \
     -e "s|^APP_PORT=.*|APP_PORT=${APP_PORT}|" \
+    -e "s|^WEB_PROXY_MODE=.*|WEB_PROXY_MODE=${WEB_PROXY_MODE}|" \
     -e "s|^CADDY_HTTP_PORT=.*|CADDY_HTTP_PORT=${CADDY_HTTP_PORT}|" \
     -e "s|^CADDY_HTTPS_PORT=.*|CADDY_HTTPS_PORT=${CADDY_HTTPS_PORT}|" \
     -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" \

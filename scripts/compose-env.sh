@@ -23,11 +23,51 @@ else
   PZ_COMPOSE_ARCH_FILE="docker-compose.amd64.yml"
 fi
 
+# WEB_PROXY_MODE:
+#   local  — panel only on 127.0.0.1:APP_PORT (default; no :80/:443)
+#   caddy  — built-in Caddy publishes host HTTP/HTTPS ports
+#   npm    — Nginx Proxy Manager / external proxy on proxy-network (no :80/:443)
+pz_load_web_mode() {
+  WEB_PROXY_MODE="${WEB_PROXY_MODE:-}"
+  if [[ -z "$WEB_PROXY_MODE" && -f "${PZ_REPO_ROOT}/.env" ]]; then
+    # shellcheck disable=SC1090
+    WEB_PROXY_MODE="$(grep -E '^WEB_PROXY_MODE=' "${PZ_REPO_ROOT}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' | tr -d '"' | tr -d "'")"
+  fi
+  WEB_PROXY_MODE="$(echo "${WEB_PROXY_MODE:-local}" | tr '[:upper:]' '[:lower:]')"
+  case "$WEB_PROXY_MODE" in
+    caddy|ports) WEB_PROXY_MODE="caddy" ;;
+    npm|external|proxy|traefik) WEB_PROXY_MODE="npm" ;;
+    local|none|off) WEB_PROXY_MODE="local" ;;
+    *) WEB_PROXY_MODE="local" ;;
+  esac
+  export WEB_PROXY_MODE
+}
+
+# Build docker compose CLI args (-f / --profile) for the selected web mode.
+pz_compose_cli_args() {
+  pz_load_web_mode
+  local args=(
+    -f "${PZ_REPO_ROOT}/docker-compose.yml"
+    -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}"
+  )
+  case "$WEB_PROXY_MODE" in
+    caddy)
+      args+=(-f "${PZ_REPO_ROOT}/docker-compose.web-caddy.yml" --profile caddy)
+      ;;
+    npm)
+      args+=(-f "${PZ_REPO_ROOT}/docker-compose.web-npm.yml")
+      ;;
+    local)
+      ;;
+  esac
+  printf '%s\n' "${args[@]}"
+}
+
 pz_compose() {
-  docker compose \
-    -f "${PZ_REPO_ROOT}/docker-compose.yml" \
-    -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}" \
-    "$@"
+  local args=()
+  # shellcheck disable=SC2207
+  mapfile -t args < <(pz_compose_cli_args)
+  docker compose "${args[@]}" "$@"
 }
 
 pz_ensure_data_dirs() {
@@ -53,18 +93,26 @@ pz_ensure_networks() {
     echo "Creating external Docker network: proxy-network"
     docker network create proxy-network >/dev/null
   fi
-  # pzserver-internal is created by Compose (internal: true)
 }
 
 pz_up() {
   pz_ensure_db_volume
   pz_ensure_data_dirs
   pz_ensure_networks
+  pz_load_web_mode
+  echo "Web proxy mode: ${WEB_PROXY_MODE}"
   pz_compose up -d --build
 }
 
 pz_down() {
-  pz_compose down
+  # Include all profiles so caddy is removed even if mode changed
+  docker compose \
+    -f "${PZ_REPO_ROOT}/docker-compose.yml" \
+    -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}" \
+    -f "${PZ_REPO_ROOT}/docker-compose.web-caddy.yml" \
+    -f "${PZ_REPO_ROOT}/docker-compose.web-npm.yml" \
+    --profile caddy \
+    down "$@"
 }
 
 pz_ps() {
@@ -85,6 +133,7 @@ pz_info() {
     PZ_GAME_PORT="${PZ_GAME_PORT:-16261}"
     PZ_DIRECT_PORT="${PZ_DIRECT_PORT:-16262}"
   fi
+  pz_load_web_mode
 
   local PUBLIC_IP
   PUBLIC_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
@@ -94,33 +143,22 @@ pz_info() {
   echo "  Project Zomboid B42 — Status"
   echo "=============================================="
   echo ""
-  echo "  Local Admin:   http://localhost:${APP_PORT}"
-  if [[ -f "${PZ_REPO_ROOT}/.firewall.conf" ]]; then
-    # shellcheck disable=SC1091
-    # shellcheck disable=SC1090
-    source "${PZ_REPO_ROOT}/.firewall.conf"
-    local HTTPS_PORT="${ADMIN_HTTPS_PORT:-443}"
-    local HTTP_PORT="${ADMIN_HTTP_PORT:-80}"
-    local HOST="${ADMIN_PUBLIC_HOST:-}"
-    if [[ -n "$HOST" && "$HOST" != "localhost" ]]; then
-      if [[ "$HTTPS_PORT" == "443" ]]; then
-        echo "  Public Admin:  https://${HOST}  (open firewall if needed)"
-      else
-        echo "  Public Admin:  https://${HOST}:${HTTPS_PORT}"
-      fi
-    else
-      echo "  Public Admin:  not configured (re-run ./deploy.sh --init to enable)"
-    fi
-    echo "  Caddy Ports:   ${HTTP_PORT} (HTTP) / ${HTTPS_PORT} (HTTPS)"
-    echo "  Firewall:      ${FIREWALL_BACKEND:-unknown}"
-  else
-    echo "  Public Admin:  not configured (re-run ./deploy.sh --init)"
-    echo "  Firewall:      not configured"
-  fi
+  echo "  Local Admin:   http://127.0.0.1:${APP_PORT}"
+  echo "  Web mode:      ${WEB_PROXY_MODE}"
+  case "$WEB_PROXY_MODE" in
+    caddy)
+      echo "  Public Admin:  Caddy on host ports ${CADDY_HTTP_PORT:-80}/${CADDY_HTTPS_PORT:-443}"
+      ;;
+    npm)
+      echo "  Public Admin:  via Nginx Proxy Manager on proxy-network"
+      echo "                 Forward to: http://pz-app:8000"
+      ;;
+    local)
+      echo "  Public Admin:  disabled (localhost only)"
+      ;;
+  esac
   if [[ -n "$PUBLIC_IP" ]]; then
     echo "  Public IP:     ${PUBLIC_IP}"
-  else
-    echo "  Public IP:     unavailable"
   fi
   echo "  Game Ports:    ${PZ_GAME_PORT}/udp, ${PZ_DIRECT_PORT}/udp"
   echo "  Data dir:      ${PZ_REPO_ROOT}/data/"

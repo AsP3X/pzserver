@@ -1,0 +1,16 @@
+# Web mode: Nginx Proxy Manager / external reverse proxy on proxy-network.
+# Used when WEB_PROXY_MODE=npm
+#
+# In NPM, create a Proxy Host:
+#   Forward hostname: pz-app
+#   Forward port:     8000
+#   Scheme:           http
+#   Network:          proxy-network (same as this stack)
+#
+# Caddy is not started (no profile "caddy"). Nothing binds host :80/:443.
+
+services:
+  app:
+    networks:
+      - proxy-network
+      - pzserver-internal

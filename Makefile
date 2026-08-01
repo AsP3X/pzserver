@@ -7,7 +7,26 @@ else
 	ARCH_FILE := docker-compose.amd64.yml
 endif
 
-COMPOSE := docker compose -f docker-compose.yml -f $(ARCH_FILE)
+# WEB_PROXY_MODE from .env: local | caddy | npm (default local)
+WEB_PROXY_MODE := $(shell sed -n 's/^WEB_PROXY_MODE=//p' .env 2>/dev/null | tail -1 | tr -d '\r' | tr A-Z a-z)
+ifeq ($(WEB_PROXY_MODE),)
+	WEB_PROXY_MODE := local
+endif
+ifeq ($(WEB_PROXY_MODE),ports)
+	WEB_PROXY_MODE := caddy
+endif
+ifeq ($(filter $(WEB_PROXY_MODE),external proxy traefik),$(WEB_PROXY_MODE))
+	WEB_PROXY_MODE := npm
+endif
+
+COMPOSE_BASE := docker compose -f docker-compose.yml -f $(ARCH_FILE)
+ifeq ($(WEB_PROXY_MODE),caddy)
+	COMPOSE := $(COMPOSE_BASE) -f docker-compose.web-caddy.yml --profile caddy
+else ifeq ($(WEB_PROXY_MODE),npm)
+	COMPOSE := $(COMPOSE_BASE) -f docker-compose.web-npm.yml
+else
+	COMPOSE := $(COMPOSE_BASE)
+endif
 
 PZ_GAME_PORT ?= 16261
 PZ_DIRECT_PORT ?= 16262

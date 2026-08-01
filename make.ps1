@@ -29,7 +29,35 @@ $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitec
 }
 
 $ArchFile = if ($arch -eq "aarch64") { "docker-compose.arm64.yml" } else { "docker-compose.amd64.yml" }
-$ComposeArgs = @("compose", "-f", "docker-compose.yml", "-f", $ArchFile)
+
+function Get-WebProxyMode {
+    $mode = $env:WEB_PROXY_MODE
+    if (-not $mode -and (Test-Path ".env")) {
+        $line = Select-String -Path ".env" -Pattern '^WEB_PROXY_MODE=' | Select-Object -Last 1
+        if ($line) { $mode = ($line.Line -split '=', 2)[1].Trim().Trim('"').Trim("'") }
+    }
+    $mode = if ($mode) { $mode.ToLowerInvariant() } else { "local" }
+    switch -Regex ($mode) {
+        '^(caddy|ports)$' { return "caddy" }
+        '^(npm|external|proxy|traefik)$' { return "npm" }
+        default { return "local" }
+    }
+}
+
+function Get-ComposeArgs {
+    $args = @("compose", "-f", "docker-compose.yml", "-f", $ArchFile)
+    switch (Get-WebProxyMode) {
+        "caddy" {
+            $args += @("-f", "docker-compose.web-caddy.yml", "--profile", "caddy")
+        }
+        "npm" {
+            $args += @("-f", "docker-compose.web-npm.yml")
+        }
+    }
+    return $args
+}
+
+$ComposeArgs = Get-ComposeArgs
 
 # ── Port defaults (override via env vars) ───────────────────────────
 $PZ_GAME_PORT   = if ($env:PZ_GAME_PORT)   { $env:PZ_GAME_PORT }   else { "16261" }
@@ -70,10 +98,24 @@ function Invoke-Compose {
     param([string[]]$Arguments)
     Assert-DockerEnvironment
     Ensure-DataDirs
+    $script:ComposeArgs = Get-ComposeArgs
     if ($Arguments.Count -gt 0 -and $Arguments[0] -in @("up", "run")) {
         Ensure-Networks
+        Write-Host "  Web proxy mode: $(Get-WebProxyMode)" -ForegroundColor DarkGray
     }
-    $allArgs = $script:ComposeArgs + $Arguments
+    # For "down", include all web overlays + caddy profile so containers always stop
+    $baseArgs = $script:ComposeArgs
+    if ($Arguments.Count -gt 0 -and $Arguments[0] -eq "down") {
+        $baseArgs = @(
+            "compose",
+            "-f", "docker-compose.yml",
+            "-f", $ArchFile,
+            "-f", "docker-compose.web-caddy.yml",
+            "-f", "docker-compose.web-npm.yml",
+            "--profile", "caddy"
+        )
+    }
+    $allArgs = $baseArgs + $Arguments
     Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
     & docker @allArgs
     if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE" }
