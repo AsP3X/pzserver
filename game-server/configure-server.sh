@@ -372,14 +372,17 @@ fi
 # PZ getFileWriter() cannot create intermediate dirs and fails with:
 #   "cannot open file writer for <player>" / "cannot write export_requests.json"
 # when Lua/ or Lua/inventory is missing or not world-writable (bind mounts).
+# Use 0777 dirs + 0666 files (no sticky bit) so game (steam/root) and Laravel
+# (www-data) can both open and replace each other's files.
 LUA_DIR="${PZ_CONFIG_DIR}/Lua"
 mkdir -p "${LUA_DIR}/inventory" 2>/dev/null \
     || echo "[configure-server] WARNING: Cannot create ${LUA_DIR}/inventory"
-# Sticky world-writable so game (root/steam) and app (www-data) can both write
-chmod 1777 "${LUA_DIR}" 2>/dev/null || chmod 777 "${LUA_DIR}" 2>/dev/null || true
-chmod 1777 "${LUA_DIR}/inventory" 2>/dev/null || chmod 777 "${LUA_DIR}/inventory" 2>/dev/null || true
+chmod 777 "${LUA_DIR}" 2>/dev/null || true
+chmod 777 "${LUA_DIR}/inventory" 2>/dev/null || true
 # Touch placeholder files so mounts exist and stay writable
-for f in export_requests.json player_stats.json players_live.json game_state.json items_catalog.json; do
+for f in export_requests.json player_stats.json players_live.json game_state.json \
+         items_catalog.json delivery_queue.json delivery_results.json \
+         deposit_requests.json deposit_results.json; do
     if [ ! -f "${LUA_DIR}/${f}" ]; then
         : > "${LUA_DIR}/${f}" 2>/dev/null || true
     fi
@@ -387,6 +390,8 @@ for f in export_requests.json player_stats.json players_live.json game_state.jso
 done
 # Existing files under inventory/
 chmod 666 "${LUA_DIR}/inventory"/* 2>/dev/null || true
+find "${LUA_DIR}" -type d -exec chmod 777 {} + 2>/dev/null || true
+find "${LUA_DIR}" -type f -exec chmod 666 {} + 2>/dev/null || true
 if [ -d "${LUA_DIR}/inventory" ]; then
     echo "[configure-server] Lua bridge directories ready at ${LUA_DIR} (mode $(stat -c '%a' "${LUA_DIR}" 2>/dev/null || echo '?'))"
 fi

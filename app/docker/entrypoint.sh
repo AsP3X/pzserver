@@ -70,12 +70,13 @@ done
 
 # ── Lua bridge permissions ────────────────────────────────────────────
 # Shared volume between game server and app — both www-data and steam/root
-# need write access. Using world-writable with sticky bit (1777) so either
-# container can write regardless of who created the files.
+# need write access. Plain 0777 dirs + 0666 files (no sticky bit): sticky
+# 1777 blocks rename/replace of files owned by the other UID and breaks
+# getFileWriter() when PHP leaves 0644 www-data files behind.
 LUA_BRIDGE_DIR="${LUA_BRIDGE_PATH:-/lua-bridge}"
 mkdir -p "$LUA_BRIDGE_DIR/inventory" 2>/dev/null || true
 if [ -d "$LUA_BRIDGE_DIR" ]; then
-    chmod -R 1777 "$LUA_BRIDGE_DIR" 2>/dev/null || chmod -R 777 "$LUA_BRIDGE_DIR" 2>/dev/null || true
+    find "$LUA_BRIDGE_DIR" -type d -exec chmod 777 {} + 2>/dev/null || chmod -R 777 "$LUA_BRIDGE_DIR" 2>/dev/null || true
     find "$LUA_BRIDGE_DIR" -type f -exec chmod 666 {} + 2>/dev/null || true
 fi
 

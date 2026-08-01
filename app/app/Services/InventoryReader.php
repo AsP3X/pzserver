@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\LuaBridgeFile;
+
 class InventoryReader
 {
     private string $inventoryDir;
@@ -108,24 +110,6 @@ class InventoryReader
             'updated_at' => date('c'),
         ];
 
-        $dir = dirname($this->exportRequestsPath);
-        if (! is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-
-        $tmpPath = $this->exportRequestsPath.'.tmp.'.getmypid().'.'.bin2hex(random_bytes(4));
-        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-
-        try {
-            if (file_put_contents($tmpPath, $json) === false) {
-                return false;
-            }
-
-            return rename($tmpPath, $this->exportRequestsPath);
-        } catch (\Throwable) {
-            @unlink($tmpPath);
-
-            return false;
-        }
+        return LuaBridgeFile::writeJsonAtomic($this->exportRequestsPath, $payload);
     }
 }

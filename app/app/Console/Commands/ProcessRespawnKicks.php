@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Services\RconClient;
 use App\Services\RconSanitizer;
 use App\Services\RespawnDelayManager;
+use App\Support\LuaBridgeFile;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -68,8 +69,8 @@ class ProcessRespawnKicks extends Command
             }
         }
 
-        // Clear the kicks file after processing
-        file_put_contents($kicksFile, json_encode(['kicks' => []]));
+        // Clear the kicks file after processing (keep world-writable for game UID)
+        LuaBridgeFile::writeJsonAtomic($kicksFile, ['kicks' => []]);
 
         if ($kicked > 0) {
             Log::info("RespawnKick: kicked {$kicked} player(s)");

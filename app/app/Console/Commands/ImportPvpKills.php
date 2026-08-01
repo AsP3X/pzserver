@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\GameEvent;
+use App\Support\LuaBridgeFile;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 
@@ -50,8 +51,8 @@ class ImportPvpKills extends Command
             $count++;
         }
 
-        // Clear the file after import
-        file_put_contents($path, json_encode(['kills' => []]));
+        // Clear the file after import (keep world-writable for game UID)
+        LuaBridgeFile::writeJsonAtomic($path, ['kills' => []]);
 
         if ($count > 0) {
             $this->info("Imported {$count} PvP kill(s).");

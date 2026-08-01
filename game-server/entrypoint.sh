@@ -12,7 +12,10 @@ if [ "$(id -u)" = "0" ]; then
     chown -R steam:steam /home/steam/Zomboid/Server 2>/dev/null || true
     chown steam:steam /home/steam/Zomboid/db 2>/dev/null || true
     chown steam:steam /home/steam/Zomboid/Saves 2>/dev/null || true
-    chmod -R 1777 /home/steam/Zomboid/Lua 2>/dev/null || true
+    # No sticky bit — game + www-data must both be able to replace files
+    find /home/steam/Zomboid/Lua -type d -exec chmod 777 {} + 2>/dev/null || chmod -R 777 /home/steam/Zomboid/Lua 2>/dev/null || true
+    find /home/steam/Zomboid/Lua -type f -exec chmod 666 {} + 2>/dev/null || true
+
     echo "[entrypoint] Dropping to steam user..."
     exec env HOME=/home/steam su -p -s /bin/bash steam -- "$0" "$@"
 fi

@@ -20,8 +20,23 @@ afterEach(function () {
     if ($files) {
         array_map('unlink', $files);
     }
+    @unlink($this->tempDir.'/export_requests.json');
     @rmdir($this->tempDir.'/inventory');
     @rmdir($this->tempDir);
+});
+
+it('requestExport writes world-writable export_requests.json', function () {
+    expect($this->reader->requestExport('AsP3X'))->toBeTrue();
+
+    $path = $this->tempDir.'/export_requests.json';
+    expect(file_exists($path))->toBeTrue();
+
+    $data = json_decode(file_get_contents($path), true);
+    expect($data['usernames'])->toContain('AsP3X');
+
+    if (PHP_OS_FAMILY !== 'Windows') {
+        expect(fileperms($path) & 0002)->not->toBe(0);
+    }
 });
 
 it('reads a valid player inventory', function () {
