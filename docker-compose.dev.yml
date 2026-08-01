@@ -1,0 +1,6 @@
+# Optional development overlay — Vite HMR port.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.amd64.yml -f docker-compose.dev.yml up
+services:
+  app:
+    ports:
+      - "127.0.0.1:5173:5173"

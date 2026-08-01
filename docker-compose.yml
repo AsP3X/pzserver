@@ -35,9 +35,8 @@ services:
       redis:
         condition: service_healthy
     ports:
-      # Localhost-only admin (not on the public Docker network)
+      # Localhost-only admin panel (production uses prebuilt Vite assets — no :5173)
       - "127.0.0.1:${APP_PORT:-8000}:8000"
-      - "127.0.0.1:5173:5173"
     volumes:
       - ./app:/var/www/html
       - app-vendor:/var/www/html/vendor
