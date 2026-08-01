@@ -1,0 +1,258 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Enums\UserRole;
+use App\Http\Requests\Api\AddItemRequest;
+use App\Http\Requests\Api\AddXpRequest;
+use App\Http\Requests\Api\BanPlayerRequest;
+use App\Http\Requests\Api\KickPlayerRequest;
+use App\Http\Requests\Api\SetAccessLevelRequest;
+use App\Http\Requests\Api\TeleportPlayerRequest;
+use App\Models\User;
+use App\Services\AuditLogger;
+use App\Services\OnlinePlayersReader;
+use App\Services\RconClient;
+use App\Services\RconSanitizer;
+use Illuminate\Http\JsonResponse;
+
+class PlayerController
+{
+    public function __construct(
+        private readonly RconClient $rcon,
+        private readonly AuditLogger $auditLogger,
+        private readonly OnlinePlayersReader $onlinePlayers,
+    ) {}
+
+    public function index(): JsonResponse
+    {
+        $onlineNames = $this->onlinePlayers->getOnlineUsernames();
+        $players = array_map(fn (string $name) => ['name' => $name], $onlineNames);
+
+        return response()->json([
+            'players' => $players,
+            'count' => count($players),
+        ]);
+    }
+
+    public function show(string $name): JsonResponse
+    {
+        $onlineNames = $this->onlinePlayers->getOnlineUsernames();
+
+        if (! in_array($name, $onlineNames, true)) {
+            return response()->json(['error' => 'Player not found or not online'], 404);
+        }
+
+        return response()->json(['name' => $name]);
+    }
+
+    public function kick(string $name, KickPlayerRequest $request): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $reason = $request->validated('reason');
+        $safeReason = $reason ? RconSanitizer::message($reason) : null;
+
+        return $this->executePlayerCommand(
+            name: $name,
+            command: $safeReason ? "kickuser \"{$name}\" -r \"{$safeReason}\"" : "kickuser \"{$name}\"",
+            action: 'player.kick',
+            details: ['reason' => $reason],
+            ip: $request->ip(),
+            successMessage: "Player '{$name}' kicked",
+        );
+    }
+
+    public function ban(string $name, BanPlayerRequest $request): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $reason = $request->validated('reason');
+        $ipBan = $request->validated('ip_ban', false);
+
+        try {
+            $this->rcon->connect();
+            $this->rcon->command("banuser \"{$name}\"");
+
+            if ($ipBan) {
+                $this->rcon->command("banid \"{$name}\"");
+            }
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Failed to ban player: server may be offline',
+                'detail' => $e->getMessage(),
+            ], 503);
+        }
+
+        $this->auditLogger->log(
+            actor: 'api-key',
+            action: 'player.ban',
+            target: $name,
+            details: ['reason' => $reason, 'ip_ban' => $ipBan],
+            ip: $request->ip(),
+        );
+
+        return response()->json([
+            'message' => "Player '{$name}' banned".($ipBan ? ' (IP ban)' : ''),
+        ]);
+    }
+
+    public function unban(string $name): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+
+        return $this->executePlayerCommand(
+            name: $name,
+            command: "unbanuser \"{$name}\"",
+            action: 'player.unban',
+            details: [],
+            ip: request()->ip(),
+            successMessage: "Player '{$name}' unbanned",
+        );
+    }
+
+    public function setAccessLevel(string $name, SetAccessLevelRequest $request): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $level = RconSanitizer::accessLevel($request->validated('level'));
+
+        $response = $this->executePlayerCommand(
+            name: $name,
+            command: "setaccesslevel \"{$name}\" \"{$level}\"",
+            action: 'player.setaccess',
+            details: ['level' => $level],
+            ip: $request->ip(),
+            successMessage: "Access level for '{$name}' set to '{$level}'",
+        );
+
+        if ($response->getStatusCode() === 200) {
+            $this->syncRoleFromAccessLevel($name, $level);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Mirror a PZ access-level change onto the registered user's web role so the
+     * dashboard reflects it immediately. Unregistered (online-only) players have
+     * no row to update, and the primary super admin is never demoted to avoid
+     * locking out the dashboard.
+     */
+    private function syncRoleFromAccessLevel(string $name, string $level): void
+    {
+        $user = User::query()->where('username', $name)->first();
+
+        if ($user === null || $user->role === UserRole::SuperAdmin) {
+            return;
+        }
+
+        $newRole = UserRole::fromPzAccessLevel($level);
+
+        if ($user->role !== $newRole) {
+            $user->update(['role' => $newRole]);
+        }
+    }
+
+    public function teleport(string $name, TeleportPlayerRequest $request): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $targetPlayer = $request->validated('target_player');
+
+        if ($targetPlayer) {
+            $safeTarget = RconSanitizer::playerName($targetPlayer);
+            $command = "teleportto \"{$name}\" \"{$safeTarget}\"";
+            $details = ['target_player' => $targetPlayer];
+        } else {
+            $x = (float) $request->validated('x');
+            $y = (float) $request->validated('y');
+            $z = (float) $request->validated('z', '0');
+            $command = "teleport \"{$name}\" {$x},{$y},{$z}";
+            $details = ['x' => $x, 'y' => $y, 'z' => $z];
+        }
+
+        return $this->executePlayerCommand(
+            name: $name,
+            command: $command,
+            action: 'player.teleport',
+            details: $details,
+            ip: $request->ip(),
+            successMessage: "Player '{$name}' teleported",
+        );
+    }
+
+    public function addItem(string $name, AddItemRequest $request): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $itemId = RconSanitizer::itemId($request->validated('item_id'));
+        $count = (int) $request->validated('count', 1);
+
+        return $this->executePlayerCommand(
+            name: $name,
+            command: "additem \"{$name}\" \"{$itemId}\" {$count}",
+            action: 'player.additem',
+            details: ['item_id' => $itemId, 'count' => $count],
+            ip: $request->ip(),
+            successMessage: "Added {$count}x '{$itemId}' to '{$name}'",
+        );
+    }
+
+    public function addXp(string $name, AddXpRequest $request): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $skill = RconSanitizer::skill($request->validated('skill'));
+        $amount = (int) $request->validated('amount');
+
+        return $this->executePlayerCommand(
+            name: $name,
+            command: "addxp \"{$name}\" {$skill}={$amount}",
+            action: 'player.addxp',
+            details: ['skill' => $skill, 'amount' => $amount],
+            ip: $request->ip(),
+            successMessage: "Added {$amount} XP in '{$skill}' to '{$name}'",
+        );
+    }
+
+    public function godmode(string $name): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+
+        return $this->executePlayerCommand(
+            name: $name,
+            command: "godmod \"{$name}\"",
+            action: 'player.godmode',
+            details: [],
+            ip: request()->ip(),
+            successMessage: "Godmode toggled for '{$name}'",
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $details
+     */
+    private function executePlayerCommand(
+        string $name,
+        string $command,
+        string $action,
+        array $details,
+        ?string $ip,
+        string $successMessage,
+    ): JsonResponse {
+        try {
+            $this->rcon->connect();
+            $this->rcon->command($command);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Command failed: server may be offline',
+                'detail' => $e->getMessage(),
+            ], 503);
+        }
+
+        $this->auditLogger->log(
+            actor: 'api-key',
+            action: $action,
+            target: $name,
+            details: $details,
+            ip: $ip,
+        );
+
+        return response()->json(['message' => $successMessage]);
+    }
+}

@@ -1,0 +1,26 @@
+{
+    "username": "TestPlayer",
+    "timestamp": "2026-01-15T14:30:00",
+    "items": [
+        {
+            "full_type": "Base.Axe",
+            "name": "Axe",
+            "category": "Weapon",
+            "count": 1,
+            "condition": 0.85,
+            "equipped": true,
+            "container": "inventory"
+        },
+        {
+            "full_type": "Base.WaterBottleFull",
+            "name": "Water Bottle",
+            "category": "Water",
+            "count": 1,
+            "condition": 1.0,
+            "equipped": false,
+            "container": "Big Hiking Bag"
+        }
+    ],
+    "weight": 5.2,
+    "max_weight": 15.0
+}

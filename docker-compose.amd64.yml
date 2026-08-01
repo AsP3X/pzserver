@@ -1,0 +1,51 @@
+services:
+  game-server:
+    # Pin to a specific version tag when available to prevent supply chain attacks
+    image: renegademaster/zomboid-dedicated-server:latest
+    entrypoint: ["/bin/bash", "/home/steam/amd64-entrypoint.sh"]
+    # SteamCMD on newer kernels (6.x) trips Docker's default seccomp filter on
+    # socket() syscalls, producing "CreateBoundSocket: error 38 (ENOSYS)" and
+    # "FAILED (No Connection)". Disable seccomp + IPv6 so SteamCMD can connect.
+    security_opt:
+      - seccomp=unconfined
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    environment:
+      ADMIN_PASSWORD: ${PZ_ADMIN_PASSWORD:?PZ_ADMIN_PASSWORD must be set in .env}
+      ADMIN_USERNAME: ${PZ_ADMIN_USERNAME:-admin}
+      AUTOSAVE_INTERVAL: ${PZ_AUTOSAVE_INTERVAL:-15}
+      BIND_IP: "0.0.0.0"
+      DEFAULT_PORT: ${PZ_GAME_PORT:-16261}
+      GAME_VERSION: ${PZ_STEAM_BRANCH:-public}
+      GC_CONFIG: ${PZ_GC_CONFIG:-ZGC}
+      MAP_NAMES: ${PZ_MAP_NAMES:-Muldraugh, KY}
+      MAX_PLAYERS: ${PZ_MAX_PLAYERS:-16}
+      MAX_RAM: ${PZ_MAX_RAM:-4096m}
+      PZ_MOD_IDS: ${PZ_MOD_IDS:-}
+      PZ_WORKSHOP_IDS: ${PZ_WORKSHOP_IDS:-}
+      PAUSE_ON_EMPTY: ${PZ_PAUSE_ON_EMPTY:-true}
+      PUBLIC_SERVER: ${PZ_PUBLIC_SERVER:-true}
+      RCON_PASSWORD: ${PZ_RCON_PASSWORD:?PZ_RCON_PASSWORD must be set in .env}
+      RCON_PORT: ${PZ_RCON_PORT:-27015}
+      SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
+      SERVER_PASSWORD: ${PZ_SERVER_PASSWORD:-}
+      STEAM_VAC: ${PZ_STEAM_VAC:-true}
+      UDP_PORT: ${PZ_DIRECT_PORT:-16262}
+      # Note: Open and AutoCreateUserInWhiteList are not supported as env vars
+      # by this image. Set them via the web UI config page after first boot.
+      USE_STEAM: "true"
+      TZ: ${TZ:-Asia/Tbilisi}
+    volumes:
+      - zomboid-server:/home/steam/ZomboidDedicatedServer
+      - ./game-server/mods/ZomboidManager:/home/steam/Zomboid/mods/ZomboidManager:ro
+      - ./game-server/amd64-entrypoint.sh:/home/steam/amd64-entrypoint.sh:ro
+      - ./game-server/configure-server.sh:/home/steam/configure-server.sh:ro
+    healthcheck:
+      # Check RCON TCP port in /proc/net — proves game server is fully loaded
+      # (ss/netstat not available in renegademaster image)
+      test: ["CMD-SHELL", "grep -q \":$(printf '%04X' ${PZ_RCON_PORT:-27015}) \" /proc/net/tcp6 /proc/net/tcp 2>/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s

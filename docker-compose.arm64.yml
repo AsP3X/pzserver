@@ -1,0 +1,51 @@
+services:
+  game-server:
+    # Pin to a specific version tag when available to prevent supply chain attacks
+    image: ghcr.io/joyfui/project-zomboid-server-docker-arm64:latest
+    user: "0:0"
+    stdin_open: true
+    tty: true
+    entrypoint: ["/bin/bash", "/home/steam/entrypoint.sh"]
+    # SteamCMD on newer kernels (6.x) trips Docker's default seccomp filter on
+    # socket() syscalls, producing "CreateBoundSocket: error 38 (ENOSYS)" and
+    # "FAILED (No Connection)". Disable seccomp + IPv6 so SteamCMD can connect.
+    security_opt:
+      - seccomp=unconfined
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    environment:
+      SERVERNAME: ${PZ_SERVER_NAME:-ZomboidServer}
+      TZ: ${TZ:-Asia/Tbilisi}
+      PZ_ADMIN_PASSWORD: ${PZ_ADMIN_PASSWORD:?PZ_ADMIN_PASSWORD must be set in .env}
+      PZ_SERVER_PASSWORD: ${PZ_SERVER_PASSWORD:-}
+      PZ_MAX_PLAYERS: ${PZ_MAX_PLAYERS:-16}
+      PZ_GAME_PORT: ${PZ_GAME_PORT:-16261}
+      PZ_DIRECT_PORT: ${PZ_DIRECT_PORT:-16262}
+      PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
+      PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:?PZ_RCON_PASSWORD must be set in .env}
+      PZ_MAP_NAMES: ${PZ_MAP_NAMES:-Muldraugh, KY}
+      PZ_MOD_IDS: ${PZ_MOD_IDS:-}
+      PZ_WORKSHOP_IDS: ${PZ_WORKSHOP_IDS:-}
+      PZ_PAUSE_ON_EMPTY: ${PZ_PAUSE_ON_EMPTY:-true}
+      PZ_PUBLIC_SERVER: ${PZ_PUBLIC_SERVER:-true}
+      PZ_STEAM_VAC: ${PZ_STEAM_VAC:-true}
+      PZ_AUTOSAVE_INTERVAL: ${PZ_AUTOSAVE_INTERVAL:-15}
+      PZ_OPEN: ${PZ_OPEN:-true}
+      PZ_AUTO_CREATE_WHITELIST: ${PZ_AUTO_CREATE_WHITELIST:-true}
+      PZ_MAX_RAM: ${PZ_MAX_RAM:-4096m}
+      PZ_GC_CONFIG: ${PZ_GC_CONFIG:-ZGC}
+      PZ_STEAM_BRANCH: ${PZ_STEAM_BRANCH:-public}
+    volumes:
+      - zomboid-server:/home/steam/pzserver
+      - ./game-server/configure-server.sh:/home/steam/configure-server.sh:ro
+      - ./game-server/entrypoint.sh:/home/steam/entrypoint.sh:ro
+      - ./game-server/mods/ZomboidManager:/home/steam/Zomboid/mods/ZomboidManager:ro
+    healthcheck:
+      # Check RCON TCP port in /proc/net — proves game server is fully loaded
+      # (grep reads kernel's /proc directly, works without FEX emulation)
+      test: ["CMD-SHELL", "grep -q \":$(printf '%04X' ${PZ_RCON_PORT:-27015}) \" /proc/net/tcp6 /proc/net/tcp 2>/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s

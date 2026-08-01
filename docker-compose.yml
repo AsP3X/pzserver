@@ -1,0 +1,244 @@
+services:
+  # ---------------------------------------------------------------------------
+  # PZ Game Server — Dedicated server via SteamCMD
+  # Image and arch-specific config provided by docker-compose.{arm64,amd64}.yml
+  # ---------------------------------------------------------------------------
+  game-server:
+    container_name: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
+    restart: unless-stopped
+    # Allow clean world save on stop (PZ needs time to flush chunks)
+    stop_grace_period: 60s
+    ports:
+      - "${PZ_GAME_PORT:-16261}:${PZ_GAME_PORT:-16261}/udp"
+      - "${PZ_DIRECT_PORT:-16262}:${PZ_DIRECT_PORT:-16262}/udp"
+    volumes:
+      - zomboid-data:/home/steam/Zomboid
+      - lua-bridge:/home/steam/Zomboid/Lua
+    networks:
+      - zomboid-net
+
+  # ---------------------------------------------------------------------------
+  # Laravel Application — API + Web Dashboard
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: pz-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./app:/var/www/html
+      - app-vendor:/var/www/html/vendor
+      - app-node-modules:/var/www/html/node_modules
+      - app-build:/var/www/html/public/build
+      - zomboid-data:/pz-data
+      - zomboid-server:/pz-server:ro
+      - backup-data:/backups
+      - lua-bridge:/lua-bridge
+      - map-tiles:/map-tiles
+    env_file: ./app/.env
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      GAME_SERVER_CONTAINER_NAME: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
+      DOCKER_PROXY_URL: http://docker-socket-proxy:2375
+      PZ_DATA_PATH: /pz-data
+      PZ_SERVER_PATH: /pz-server
+      PZ_RCON_HOST: game-server
+      BACKUP_PATH: /backups
+      LUA_BRIDGE_PATH: /lua-bridge
+      PZ_MAP_TILES_PATH: /map-tiles
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    networks:
+      - zomboid-net
+      - backend-net
+
+  # ---------------------------------------------------------------------------
+  # Queue Worker — Processes backup jobs, restart jobs, etc.
+  # ---------------------------------------------------------------------------
+  queue:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: pz-queue
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: php artisan queue:work redis --tries=3 --timeout=600 --sleep=3
+    volumes:
+      - ./app:/var/www/html
+      - app-vendor:/var/www/html/vendor
+      - zomboid-data:/pz-data
+      - zomboid-server:/pz-server:ro
+      - backup-data:/backups
+      - lua-bridge:/lua-bridge
+      - map-tiles:/map-tiles
+    env_file: ./app/.env
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      GAME_SERVER_CONTAINER_NAME: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
+      DOCKER_PROXY_URL: http://docker-socket-proxy:2375
+      PZ_DATA_PATH: /pz-data
+      PZ_SERVER_PATH: /pz-server
+      PZ_RCON_HOST: game-server
+      BACKUP_PATH: /backups
+      LUA_BRIDGE_PATH: /lua-bridge
+      PZ_MAP_TILES_PATH: /map-tiles
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    networks:
+      - zomboid-net
+      - backend-net
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — Primary database
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: pz-db
+    restart: unless-stopped
+    # Not published on the host — app/queue reach it via the backend-net DNS name "db".
+    # Avoids conflicts with a local Postgres install on :5432.
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-zomboid}
+      POSTGRES_USER: ${DB_USERNAME:-zomboid}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-zomboid}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-zomboid} -d ${DB_DATABASE:-zomboid}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend-net
+      - zomboid-net
+
+  # ---------------------------------------------------------------------------
+  # Redis — Queue, cache, rate limiting
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: pz-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command: /bin/sh -c 'set -- --appendonly yes; [ -n "$$REDIS_PASSWORD" ] && set -- "$$@" --requirepass "$$REDIS_PASSWORD"; exec redis-server "$$@"'
+    healthcheck:
+      test: ["CMD-SHELL", 'if [ -n "$$REDIS_PASSWORD" ]; then REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping; else redis-cli ping; fi']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend-net
+
+  # ---------------------------------------------------------------------------
+  # Docker Socket Proxy — Restricted Docker API access for app/queue
+  # ---------------------------------------------------------------------------
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    container_name: pz-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 1
+      LOG: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - backend-net
+
+  # ---------------------------------------------------------------------------
+  # Caddy — Reverse proxy with automatic TLS
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2.11.2-alpine
+    container_name: pz-caddy
+    restart: unless-stopped
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/certs:/etc/caddy/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    networks:
+      - zomboid-net
+
+# -----------------------------------------------------------------------------
+# Networks
+# -----------------------------------------------------------------------------
+networks:
+  zomboid-net:
+    driver: bridge
+    # Not internal — game-server needs internet for SteamCMD + Steam master servers
+    # RCON security: port not published to host, only accessible between containers
+  backend-net:
+    driver: bridge
+    internal: true
+    # Internal — db and redis never accessible from host or internet
+
+# -----------------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  app-vendor:
+    name: pz-app-vendor
+  app-node-modules:
+    name: pz-app-node-modules
+  app-build:
+    name: pz-app-build
+  zomboid-server:
+    name: pz-server-files
+  zomboid-data:
+    name: pz-data
+  postgres-data:
+    name: pz-postgres
+    external: true
+  redis-data:
+    name: pz-redis
+  backup-data:
+    name: pz-backups
+  lua-bridge:
+    name: pz-lua-bridge
+  map-tiles:
+    name: pz-map-tiles
+  caddy-data:
+    name: pz-caddy-data
+  caddy-config:
+    name: pz-caddy-config

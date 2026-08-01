@@ -1,0 +1,5 @@
+name=ZomboidManager
+id=ZomboidManager
+modversion=1.0
+poster=poster.png
+description=Server-side bridge mod for Zomboid Manager. Exports game state, inventory snapshots, player positions, and processes delivery queues via file-based JSON communication.

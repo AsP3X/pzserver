@@ -1,0 +1,829 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Zomboid Manager — First-Time Setup
+# Interactive wizard that configures both .env files, creates the database
+# volume, starts containers, and provisions the admin account.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Colors & helpers ──────────────────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+banner() {
+    echo ""
+    echo -e "${CYAN}${BOLD}══════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  Zomboid Manager — First-Time Setup${NC}"
+    echo -e "${CYAN}${BOLD}══════════════════════════════════════════════${NC}"
+    echo ""
+}
+
+section() {
+    echo ""
+    echo -e "${BOLD}── $1 ──${NC}"
+}
+
+prompt() {
+    local var_name="$1"
+    local label="$2"
+    local default="$3"
+    local is_secret="${4:-false}"
+    local value
+
+    if [ "$is_secret" = "true" ]; then
+        echo -ne "  ${label} ${DIM}[hidden]${NC}: "
+        read -rs value || true
+        echo ""
+    elif [ -n "$default" ]; then
+        echo -ne "  ${label} ${DIM}[${default}]${NC}: "
+        read -r value || true
+    else
+        echo -ne "  ${label}: "
+        read -r value || true
+    fi
+
+    value="${value:-$default}"
+    eval "$var_name='$value'"
+}
+
+generate_secret() {
+    openssl rand -base64 "$1" | tr -dc 'A-Za-z0-9' | head -c "$2"
+}
+
+GENERATE_SELF_SIGNED=false
+
+# ── Detect architecture ──────────────────────────────────────────────────────
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    ARCH_LABEL="aarch64 (ARM64)"
+else
+    ARCH_LABEL="x86_64 (AMD64)"
+fi
+
+# ── Guard: existing .env ─────────────────────────────────────────────────────
+if [ -f .env ] || [ -f app/.env ]; then
+    echo ""
+    echo -e "${YELLOW}Existing .env file(s) detected.${NC}"
+    echo -ne "  Overwrite and reconfigure? ${DIM}[y/N]${NC}: "
+    read -r overwrite || true
+    if [ "${overwrite,,}" != "y" ]; then
+        echo "Cancelled."
+        exit 0
+    fi
+    echo ""
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Interactive prompts
+# ══════════════════════════════════════════════════════════════════════════════
+banner
+
+# ── Environment ───────────────────────────────────────────────────────────────
+section "Environment"
+while true; do
+    echo "  1) Production  (recommended for real servers)"
+    echo "  2) Development (debug mode, Vite dev server)"
+    echo -ne "  ${DIM}[1]${NC}: "
+    read -r env_choice || true
+    env_choice="${env_choice:-1}"
+    [[ "$env_choice" =~ ^[12]$ ]] && break
+    echo -e "  ${RED}Invalid choice. Enter 1 or 2.${NC}"
+done
+
+if [ "$env_choice" = "2" ]; then
+    APP_ENV="local"
+    APP_DEBUG="true"
+    LOG_LEVEL="debug"
+    SESSION_ENCRYPT="false"
+    ROOT_TEMPLATE=".env.example"
+    APP_TEMPLATE="app/.env.example"
+else
+    APP_ENV="production"
+    APP_DEBUG="false"
+    LOG_LEVEL="warning"
+    SESSION_ENCRYPT="true"
+    ROOT_TEMPLATE=".env.production.example"
+    APP_TEMPLATE="app/.env.production.example"
+fi
+
+# ── Web Admin Account ────────────────────────────────────────────────────────
+section "Web Admin Account"
+prompt ADMIN_USERNAME "Username" "admin"
+
+# Generate a random password as default
+DEFAULT_ADMIN_PASS=$(generate_secret 18 16)
+echo -ne "  Password ${DIM}[auto-generated]${NC}: "
+read -rs ADMIN_PASSWORD || true
+echo ""
+if [ -z "$ADMIN_PASSWORD" ]; then
+    ADMIN_PASSWORD="$DEFAULT_ADMIN_PASS"
+    ADMIN_PASS_GENERATED=true
+else
+    ADMIN_PASS_GENERATED=false
+fi
+
+prompt ADMIN_EMAIL "Email (optional, press Enter to skip)" ""
+
+# ── Game Server ───────────────────────────────────────────────────────────────
+section "Game Server"
+prompt PZ_SERVER_NAME "Server name" "ZomboidServer"
+prompt PZ_MAX_PLAYERS "Max players" "16"
+prompt PZ_MAX_RAM "Max RAM" "4096m"
+
+echo "  Steam branch:"
+echo -e "  ${DIM}Note: the ZomboidManager mod (player map, inventory, delivery queue,${NC}"
+echo -e "  ${DIM}live stats) requires Build 42. B41 (legacy41) leaves those features offline.${NC}"
+while true; do
+    echo "    1) public    — Build 42 Stable (default Steam, recommended)"
+    echo "    2) unstable  — Build 42 Unstable (bleeding edge MP)"
+    echo "    3) legacy41  — Build 41.78.x (legacy; ZomboidManager mod will NOT work)"
+    echo "    4) Custom    — Enter a branch name manually"
+    echo -ne "  ${DIM}[1]${NC}: "
+    read -r branch_choice || true
+    branch_choice="${branch_choice:-1}"
+    [[ "$branch_choice" =~ ^[1234]$ ]] && break
+    echo -e "  ${RED}Invalid choice. Enter 1, 2, 3, or 4.${NC}"
+done
+case "$branch_choice" in
+    1) PZ_STEAM_BRANCH="public" ;;
+    2) PZ_STEAM_BRANCH="unstable" ;;
+    3) PZ_STEAM_BRANCH="legacy41" ;;
+    4)
+        echo -ne "  Branch name: "
+        read -r PZ_STEAM_BRANCH || true
+        PZ_STEAM_BRANCH="${PZ_STEAM_BRANCH:-public}"
+        ;;
+esac
+
+prompt PZ_SERVER_PASSWORD "Server password (empty = open)" ""
+
+# ── Web Panel (HTTPS via Caddy) ───────────────────────────────────────────────
+section "Web Panel (HTTPS)"
+
+# Detect public IP once (used by domain and IP validation)
+echo -e "  ${DIM}Detecting server public IP...${NC}"
+SERVER_IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || true)
+if [ -n "$SERVER_IP" ]; then
+    echo -e "  ${DIM}Detected: ${SERVER_IP}${NC}"
+else
+    echo -e "  ${YELLOW}Could not detect public IP (no internet or behind NAT).${NC}"
+fi
+
+APP_PORT=8000
+CADDY_HTTP_PORT=80
+CADDY_HTTPS_PORT=443
+ADMIN_PUBLIC_ENABLED=false
+
+echo ""
+echo -ne "  Enable public admin access (via Caddy reverse proxy)? ${DIM}[y/N]${NC}: "
+read -r enable_public || true
+enable_public="${enable_public:-n}"
+
+if [ "${enable_public,,}" != "y" ]; then
+    # Local-only mode
+    SITE_HOST="localhost"
+    APP_URL="https://localhost"
+    CADDY_SITE="localhost"
+    CADDY_TLS=$'\ttls internal'
+    ADMIN_PUBLIC_ENABLED=false
+    echo -e "  ${GREEN}✓ Panel will be available locally at http://localhost:${APP_PORT}${NC}"
+else
+    ADMIN_PUBLIC_ENABLED=true
+
+    # ── Hostname / Domain / IP ────────────────────────────────────────────
+    while true; do
+        echo ""
+        echo "  How will you access the panel?"
+        echo "  1) Domain name  (e.g., zomboid.example.com — auto Let's Encrypt)"
+        echo "  2) IP address    (public or LAN — self-signed cert)"
+        echo -ne "  ${DIM}[2]${NC}: "
+        read -r access_choice || true
+        access_choice="${access_choice:-2}"
+        if ! [[ "$access_choice" =~ ^[12]$ ]]; then
+            echo -e "  ${RED}Invalid choice. Enter 1 or 2.${NC}"
+            continue
+        fi
+
+        case "$access_choice" in
+            1)
+                while true; do
+                    prompt SITE_HOST "Domain name" ""
+                    if [ -n "$SITE_HOST" ] && [[ "$SITE_HOST" =~ ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$ ]]; then
+                        break
+                    fi
+                    echo -e "  ${RED}Invalid domain name. Try again.${NC}"
+                done
+                # DNS pre-check: verify domain resolves to this server
+                DOMAIN_IP=$(dig +short "$SITE_HOST" 2>/dev/null | tail -1)
+                if [ -z "$DOMAIN_IP" ]; then
+                    echo -e "  ${RED}${SITE_HOST} does not resolve to any IP address.${NC}"
+                    echo -e "  ${RED}Let's Encrypt requires DNS to be configured first.${NC}"
+                    continue
+                elif [ -n "$SERVER_IP" ] && [ "$DOMAIN_IP" != "$SERVER_IP" ]; then
+                    echo -e "  ${RED}${SITE_HOST} resolves to ${DOMAIN_IP}, but this server's public IP is ${SERVER_IP}.${NC}"
+                    echo -e "  ${RED}Let's Encrypt will fail unless the domain points to this server.${NC}"
+                    continue
+                else
+                    echo -e "  ${GREEN}✓ ${SITE_HOST} resolves to ${DOMAIN_IP}${NC}"
+                fi
+                APP_URL="https://${SITE_HOST}"
+                CADDY_SITE="${SITE_HOST}"
+                CADDY_TLS=""
+                break
+                ;;
+            2)
+                # Collect detected IPs into a numbered list
+                IP_OPTIONS=()
+                IP_LABELS=()
+                if [ -n "$SERVER_IP" ]; then
+                    IP_OPTIONS+=("$SERVER_IP")
+                    IP_LABELS+=("$SERVER_IP  (public)")
+                fi
+                LOCAL_IPS=$(hostname -I 2>/dev/null || true)
+                for lip in $LOCAL_IPS; do
+                    # Skip Docker/bridge IPs (172.x) and the public IP if already listed
+                    if [ "$lip" = "$SERVER_IP" ]; then continue; fi
+                    if [[ "$lip" =~ ^172\. ]]; then continue; fi
+                    IP_OPTIONS+=("$lip")
+                    IP_LABELS+=("$lip  (LAN)")
+                done
+
+                if [ ${#IP_OPTIONS[@]} -gt 0 ]; then
+                    echo ""
+                    echo "  Detected addresses:"
+                    for i in "${!IP_OPTIONS[@]}"; do
+                        echo "    $((i+1))) ${IP_LABELS[$i]}"
+                    done
+                    echo "    $((${#IP_OPTIONS[@]}+1))) Enter manually"
+                    echo -ne "  ${DIM}[1]${NC}: "
+                    read -r ip_pick || true
+                    ip_pick="${ip_pick:-1}"
+
+                    if [[ "$ip_pick" =~ ^[0-9]+$ ]] && [ "$ip_pick" -ge 1 ] && [ "$ip_pick" -le "${#IP_OPTIONS[@]}" ]; then
+                        SITE_HOST="${IP_OPTIONS[$((ip_pick-1))]}"
+                    else
+                        # Manual entry with validation
+                        while true; do
+                            prompt SITE_HOST "IP address" ""
+                            if [ -z "$SITE_HOST" ] || ! [[ "$SITE_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                                echo -e "  ${RED}Invalid IP address. Try again.${NC}"
+                                continue
+                            fi
+                            # Verify IP belongs to this server (public or LAN)
+                            LOCAL_IPS=$(hostname -I 2>/dev/null || true)
+                            IP_VALID=false
+                            if [ -n "$SERVER_IP" ] && [ "$SITE_HOST" = "$SERVER_IP" ]; then
+                                IP_VALID=true
+                                echo -e "  ${GREEN}✓ Matches server public IP${NC}"
+                            elif echo "$LOCAL_IPS" | grep -qw "$SITE_HOST"; then
+                                IP_VALID=true
+                                echo -e "  ${GREEN}✓ Matches local network interface${NC}"
+                            fi
+                            if [ "$IP_VALID" = "false" ]; then
+                                echo -e "  ${YELLOW}${SITE_HOST} is not assigned to this server.${NC}"
+                                if [ -n "$SERVER_IP" ]; then
+                                    echo -e "  ${YELLOW}Public IP: ${SERVER_IP} | Local IPs: ${LOCAL_IPS}${NC}"
+                                else
+                                    echo -e "  ${YELLOW}Local IPs: ${LOCAL_IPS}${NC}"
+                                fi
+                                echo -ne "  ${YELLOW}Use anyway? ${DIM}[y/N]${NC}: "
+                                read -r force_ip || true
+                                if [ "${force_ip,,}" != "y" ]; then continue; fi
+                            fi
+                            break
+                        done
+                    fi
+                else
+                    # No IPs detected — fall back to manual entry with validation
+                    while true; do
+                        prompt SITE_HOST "Server IP address" ""
+                        if [ -z "$SITE_HOST" ] || ! [[ "$SITE_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                            echo -e "  ${RED}Invalid IP address. Try again.${NC}"
+                            continue
+                        fi
+                        # Verify IP belongs to this server
+                        LOCAL_IPS=$(hostname -I 2>/dev/null || true)
+                        IP_VALID=false
+                        if [ -n "$SERVER_IP" ] && [ "$SITE_HOST" = "$SERVER_IP" ]; then
+                            IP_VALID=true
+                            echo -e "  ${GREEN}✓ Matches server public IP${NC}"
+                        elif echo "$LOCAL_IPS" | grep -qw "$SITE_HOST"; then
+                            IP_VALID=true
+                            echo -e "  ${GREEN}✓ Matches local network interface${NC}"
+                        fi
+                        if [ "$IP_VALID" = "false" ]; then
+                            echo -e "  ${YELLOW}${SITE_HOST} is not assigned to this server.${NC}"
+                            echo -ne "  ${YELLOW}Use anyway? ${DIM}[y/N]${NC}: "
+                            read -r force_ip || true
+                            if [ "${force_ip,,}" != "y" ]; then continue; fi
+                        fi
+                        break
+                    done
+                fi
+
+                echo -e "  ${GREEN}✓ Using ${SITE_HOST}${NC}"
+                APP_URL="https://${SITE_HOST}"
+                CADDY_SITE=":443"
+                CADDY_TLS=$'\ttls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem'
+                GENERATE_SELF_SIGNED=true
+                break
+                ;;
+        esac
+    done
+
+    # ── Caddy Ports ───────────────────────────────────────────────────────
+    echo ""
+    echo -e "  ${BOLD}Caddy listening ports${NC}"
+    echo -e "  ${DIM}Caddy is the reverse proxy that handles HTTPS for the admin panel.${NC}"
+    echo -e "  ${DIM}Default is 80 (HTTP redirect) and 443 (HTTPS). Change if your router${NC}"
+    echo -e "  ${DIM}or another service already uses these ports.${NC}"
+
+    # Ports that should never be used for a web proxy — well-known service ports
+    # that would conflict with system services or pose security risks.
+    # 21=FTP, 22=SSH, 23=Telnet, 25=SMTP, 53=DNS, 110=POP3, 143=IMAP,
+    # 445=SMB, 465=SMTPS, 587=Submission, 993=IMAPS, 995=POP3S, 3306=MySQL,
+    # 5432=PostgreSQL, 6379=Redis
+    BLOCKED_PORTS="21 22 23 25 53 110 143 445 465 587 993 995 3306 5432 6379"
+
+    is_blocked_port() {
+        local p="$1"
+        for bp in $BLOCKED_PORTS; do
+            [ "$p" -eq "$bp" ] && return 0
+        done
+        return 1
+    }
+
+    while true; do
+        echo -ne "  HTTPS port ${DIM}[443]${NC}: "
+        read -r port_input || true
+        CADDY_HTTPS_PORT="${port_input:-443}"
+
+        # Validate: must be a number in range
+        if ! [[ "$CADDY_HTTPS_PORT" =~ ^[0-9]+$ ]] || [ "$CADDY_HTTPS_PORT" -lt 1 ] || [ "$CADDY_HTTPS_PORT" -gt 65535 ]; then
+            echo -e "  ${RED}Invalid port number.${NC}"
+            continue
+        fi
+        # Block well-known service ports
+        if is_blocked_port "$CADDY_HTTPS_PORT"; then
+            echo -e "  ${RED}Port ${CADDY_HTTPS_PORT} is a well-known service port and cannot be used here.${NC}"
+            continue
+        fi
+        # Warn on privileged ports (non-standard)
+        if [ "$CADDY_HTTPS_PORT" -lt 1024 ] && [ "$CADDY_HTTPS_PORT" -ne 443 ]; then
+            echo -e "  ${YELLOW}Warning: Port ${CADDY_HTTPS_PORT} is a privileged port (< 1024).${NC}"
+            echo -ne "  ${YELLOW}Continue? ${DIM}[Y/n]${NC}: "
+            read -r priv_ok || true
+            if [ "${priv_ok,,}" = "n" ]; then continue; fi
+        fi
+        break
+    done
+
+    while true; do
+        echo -ne "  HTTP port (for redirect to HTTPS) ${DIM}[80]${NC}: "
+        read -r port_input || true
+        CADDY_HTTP_PORT="${port_input:-80}"
+
+        if ! [[ "$CADDY_HTTP_PORT" =~ ^[0-9]+$ ]] || [ "$CADDY_HTTP_PORT" -lt 1 ] || [ "$CADDY_HTTP_PORT" -gt 65535 ]; then
+            echo -e "  ${RED}Invalid port number.${NC}"
+            continue
+        fi
+        if is_blocked_port "$CADDY_HTTP_PORT"; then
+            echo -e "  ${RED}Port ${CADDY_HTTP_PORT} is a well-known service port and cannot be used here.${NC}"
+            continue
+        fi
+        if [ "$CADDY_HTTP_PORT" -eq "$CADDY_HTTPS_PORT" ]; then
+            echo -e "  ${RED}HTTP and HTTPS ports must be different.${NC}"
+            continue
+        fi
+        if [ "$CADDY_HTTP_PORT" -lt 1024 ] && [ "$CADDY_HTTP_PORT" -ne 80 ]; then
+            echo -e "  ${YELLOW}Warning: Port ${CADDY_HTTP_PORT} is a privileged port (< 1024).${NC}"
+            echo -ne "  ${YELLOW}Continue? ${DIM}[Y/n]${NC}: "
+            read -r priv_ok || true
+            if [ "${priv_ok,,}" = "n" ]; then continue; fi
+        fi
+        break
+    done
+
+    # Warn about common router admin conflicts
+    if [ "$CADDY_HTTP_PORT" -eq 80 ] || [ "$CADDY_HTTPS_PORT" -eq 443 ]; then
+        echo ""
+        echo -e "  ${YELLOW}Warning: Some routers use ports 80/443 for their own WAN remote management UI.${NC}"
+        echo -e "  ${YELLOW}If enabled, your router will intercept traffic on these ports before it${NC}"
+        echo -e "  ${YELLOW}reaches your server — port forwarding alone won't fix this.${NC}"
+        echo -e "  ${DIM}Fix: Disable 'Remote Management' / 'WAN Admin' in your router settings,${NC}"
+        echo -e "  ${DIM}or move the router admin to a different port, or choose custom Caddy${NC}"
+        echo -e "  ${DIM}ports here (e.g., 8080/8443) to avoid the conflict entirely.${NC}"
+    fi
+
+    echo -e "  ${GREEN}✓ Caddy will listen on ports ${CADDY_HTTP_PORT} (HTTP) and ${CADDY_HTTPS_PORT} (HTTPS)${NC}"
+
+    # Update APP_URL with non-standard HTTPS port
+    if [ "$CADDY_HTTPS_PORT" -ne 443 ]; then
+        APP_URL="https://${SITE_HOST}:${CADDY_HTTPS_PORT}"
+    fi
+
+    # Warn: Let's Encrypt requires ports 80/443 for domain validation
+    if [ "$access_choice" = "1" ] && { [ "$CADDY_HTTP_PORT" -ne 80 ] || [ "$CADDY_HTTPS_PORT" -ne 443 ]; }; then
+        echo ""
+        echo -e "  ${YELLOW}Warning: Let's Encrypt HTTP challenge requires ports 80 and 443.${NC}"
+        echo -e "  ${YELLOW}Non-standard ports may prevent automatic certificate issuance.${NC}"
+        echo -e "  ${YELLOW}Consider using standard ports with a domain, or switch to IP mode.${NC}"
+    fi
+fi
+
+# ── Firewall Backend ──────────────────────────────────────────────────────────
+# Detect or prompt for firewall backend, generates .firewall.conf
+# Pass admin port settings so they're persisted in the same config file
+export ADMIN_PUBLIC_HOST="${SITE_HOST:-localhost}"
+export ADMIN_HTTP_PORT="${CADDY_HTTP_PORT}"
+export ADMIN_HTTPS_PORT="${CADDY_HTTPS_PORT}"
+bash scripts/firewall/detect.sh .firewall.conf
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Summary
+# ══════════════════════════════════════════════════════════════════════════════
+section "Summary"
+echo ""
+echo -e "  Environment:  ${GREEN}${APP_ENV}${NC}"
+echo -e "  Admin:        ${GREEN}${ADMIN_USERNAME}${NC}"
+echo -e "  Server:       ${GREEN}${PZ_SERVER_NAME}${NC}"
+echo -e "  Players:      ${GREEN}${PZ_MAX_PLAYERS}${NC} / RAM: ${GREEN}${PZ_MAX_RAM}${NC}"
+echo -e "  Branch:       ${GREEN}${PZ_STEAM_BRANCH}${NC}"
+if [ "$ADMIN_PUBLIC_ENABLED" = "true" ]; then
+    echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (HTTPS via Caddy, ports ${CADDY_HTTP_PORT}/${CADDY_HTTPS_PORT})"
+else
+    echo -e "  Panel:        ${GREEN}http://localhost:${APP_PORT}${NC} (local only)"
+fi
+echo -e "  Architecture: ${GREEN}${ARCH_LABEL}${NC}"
+if [ -f .firewall.conf ]; then
+    . .firewall.conf
+    echo -e "  Firewall:     ${GREEN}${FIREWALL_BACKEND}${NC}"
+fi
+echo ""
+echo -ne "  Proceed? ${DIM}[Y/n]${NC}: "
+read -r proceed || true
+if [ "${proceed,,}" = "n" ]; then
+    echo "Cancelled."
+    exit 0
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Generate secrets
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${BOLD}Generating secrets...${NC}"
+
+DB_PASS=$(generate_secret 18 24)
+RCON_PASS=$(generate_secret 18 16)
+PZ_ADMIN_PASS=$(generate_secret 18 16)
+API_SECRET=$(generate_secret 32 48)
+APP_SECRET=$(openssl rand -base64 32)
+REDIS_PASS=$(generate_secret 18 20)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Generate self-signed certificate (IP mode only)
+# ══════════════════════════════════════════════════════════════════════════════
+mkdir -p caddy/certs
+if [ "$GENERATE_SELF_SIGNED" = "true" ]; then
+    # Remove stale certs from previous runs (may be root-owned from Docker)
+    rm -f caddy/certs/cert.pem caddy/certs/key.pem 2>/dev/null || \
+        sudo rm -f caddy/certs/cert.pem caddy/certs/key.pem 2>/dev/null || true
+
+    echo "Generating self-signed certificate for ${SITE_HOST}..."
+    CERT_OK=false
+    CERT_ERR=""
+
+    # Try with -addext (OpenSSL 1.1.1+) first, fall back without it
+    if CERT_ERR=$(openssl req -x509 -newkey rsa:2048 \
+        -keyout caddy/certs/key.pem -out caddy/certs/cert.pem \
+        -days 3650 -nodes \
+        -subj "/CN=${SITE_HOST}" \
+        -addext "subjectAltName=IP:${SITE_HOST}" 2>&1); then
+        CERT_OK=true
+    elif CERT_ERR=$(openssl req -x509 -newkey rsa:2048 \
+        -keyout caddy/certs/key.pem -out caddy/certs/cert.pem \
+        -days 3650 -nodes \
+        -subj "/CN=${SITE_HOST}" 2>&1); then
+        CERT_OK=true
+        echo -e "  ${YELLOW}Note: Certificate generated without SAN extension (older OpenSSL).${NC}"
+    fi
+
+    if [ "$CERT_OK" = "false" ]; then
+        echo -e "  ${RED}Failed to generate self-signed certificate.${NC}"
+        # Show only meaningful error lines (skip RSA progress noise)
+        echo "$CERT_ERR" | grep -v '^[.+*-]*$' | grep -v '^-----$' | tail -3 >&2
+        echo -e "  ${DIM}You can generate one manually:${NC}"
+        echo -e "  ${DIM}  openssl req -x509 -newkey rsa:2048 -keyout caddy/certs/key.pem -out caddy/certs/cert.pem -days 3650 -nodes -subj '/CN=${SITE_HOST}'${NC}"
+        exit 1
+    fi
+else
+    # Clean up certs from a previous IP-mode run (may be root-owned from Docker)
+    rm -f caddy/certs/cert.pem caddy/certs/key.pem 2>/dev/null || \
+        sudo rm -f caddy/certs/cert.pem caddy/certs/key.pem 2>/dev/null || true
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Generate Caddyfile
+# ══════════════════════════════════════════════════════════════════════════════
+echo "Creating caddy/Caddyfile..."
+if [ "$GENERATE_SELF_SIGNED" = "true" ]; then
+    # IP mode: listen on all interfaces, use generated cert, add HTTP→HTTPS redirect
+    cat > caddy/Caddyfile <<CADDYEOF
+{
+	# Managed by setup.sh — edit freely or re-run make init
+}
+
+${CADDY_SITE} {
+${CADDY_TLS}
+	reverse_proxy app:8000
+}
+
+:80 {
+	redir https://{host}{uri} permanent
+}
+CADDYEOF
+else
+    cat > caddy/Caddyfile <<CADDYEOF
+{
+	# Managed by setup.sh — edit freely or re-run make init
+}
+
+${CADDY_SITE} {
+${CADDY_TLS}
+	reverse_proxy app:8000
+}
+
+http://${CADDY_SITE} {
+	redir https://${CADDY_SITE}{uri} permanent
+}
+CADDYEOF
+fi
+
+# Update .firewall.conf now that Caddyfile exists
+if [ -f .firewall.conf ]; then
+    sed -i 's/^CADDY_ENABLED=.*/CADDY_ENABLED=true/' .firewall.conf
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Generate root .env
+# ══════════════════════════════════════════════════════════════════════════════
+echo "Creating .env from ${ROOT_TEMPLATE}..."
+
+sed \
+    -e "s|^PZ_SERVER_NAME=.*|PZ_SERVER_NAME=${PZ_SERVER_NAME}|" \
+    -e "s|^PZ_ADMIN_PASSWORD=.*|PZ_ADMIN_PASSWORD=${PZ_ADMIN_PASS}|" \
+    -e "s|^PZ_SERVER_PASSWORD=.*|PZ_SERVER_PASSWORD=${PZ_SERVER_PASSWORD}|" \
+    -e "s|^PZ_MAX_PLAYERS=.*|PZ_MAX_PLAYERS=${PZ_MAX_PLAYERS}|" \
+    -e "s|^PZ_MAX_RAM=.*|PZ_MAX_RAM=${PZ_MAX_RAM}|" \
+    -e "s|^PZ_RCON_PASSWORD=.*|PZ_RCON_PASSWORD=${RCON_PASS}|" \
+    -e "s|^PZ_STEAM_BRANCH=.*|PZ_STEAM_BRANCH=${PZ_STEAM_BRANCH}|" \
+    -e "s|^APP_ENV=.*|APP_ENV=${APP_ENV}|" \
+    -e "s|^APP_KEY=.*|APP_KEY=base64:${APP_SECRET}|" \
+    -e "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" \
+    -e "s|^APP_URL=.*|APP_URL=${APP_URL}|" \
+    -e "s|^APP_PORT=.*|APP_PORT=${APP_PORT}|" \
+    -e "s|^CADDY_HTTP_PORT=.*|CADDY_HTTP_PORT=${CADDY_HTTP_PORT}|" \
+    -e "s|^CADDY_HTTPS_PORT=.*|CADDY_HTTPS_PORT=${CADDY_HTTPS_PORT}|" \
+    -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" \
+    -e "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" \
+    -e "s|^API_KEY=.*|API_KEY=${API_SECRET}|" \
+    -e "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=${ADMIN_USERNAME}|" \
+    -e "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=${ADMIN_EMAIL}|" \
+    -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
+    "$ROOT_TEMPLATE" > .env
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Generate app/.env
+# ══════════════════════════════════════════════════════════════════════════════
+echo "Creating app/.env from ${APP_TEMPLATE}..."
+
+sed \
+    -e "s|^PZ_SERVER_NAME=.*|PZ_SERVER_NAME=${PZ_SERVER_NAME}|" \
+    -e "s|^PZ_RCON_PASSWORD=.*|PZ_RCON_PASSWORD=${RCON_PASS}|" \
+    -e "s|^APP_ENV=.*|APP_ENV=${APP_ENV}|" \
+    -e "s|^APP_KEY=.*|APP_KEY=base64:${APP_SECRET}|" \
+    -e "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" \
+    -e "s|^APP_URL=.*|APP_URL=${APP_URL}|" \
+    -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" \
+    -e "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" \
+    -e "s|^API_KEY=.*|API_KEY=${API_SECRET}|" \
+    -e "s|^PZ_ADMIN_PASSWORD=.*|PZ_ADMIN_PASSWORD=${PZ_ADMIN_PASS}|" \
+    -e "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=${ADMIN_USERNAME}|" \
+    -e "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=${ADMIN_EMAIL}|" \
+    -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
+    -e "s|^LOG_LEVEL=.*|LOG_LEVEL=${LOG_LEVEL}|" \
+    "$APP_TEMPLATE" > app/.env
+
+# Production-specific overrides for app/.env
+if [ "$APP_ENV" = "production" ]; then
+    sed -i "s|^SESSION_ENCRYPT=.*|SESSION_ENCRYPT=true|" app/.env 2>/dev/null || true
+    sed -i "s|^SESSION_SECURE_COOKIE=.*|SESSION_SECURE_COOKIE=true|" app/.env 2>/dev/null || true
+fi
+
+# Always set LOG_STACK to daily
+sed -i "s|^LOG_STACK=.*|LOG_STACK=daily|" app/.env 2>/dev/null || true
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Ensure database volume exists
+# ══════════════════════════════════════════════════════════════════════════════
+if ! docker volume inspect pz-postgres >/dev/null 2>&1; then
+    echo "Creating Postgres volume..."
+    docker volume create pz-postgres >/dev/null
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Stop existing services and clean stale state
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${BOLD}Starting services...${NC}"
+make down 2>/dev/null || true
+
+# Fix ownership on directories that may be root-owned from a previous Docker run
+# The container runs as non-root and needs write access to these.
+for dir in app/bootstrap/cache app/storage app/storage/logs app/storage/framework/cache app/storage/framework/sessions app/storage/framework/views; do
+    if [ -d "$dir" ]; then
+        chown -R "$(id -u):$(id -g)" "$dir" 2>/dev/null || \
+            sudo chown -R "$(id -u):$(id -g)" "$dir" 2>/dev/null || true
+    fi
+done
+
+# Remove build/cache volumes that may have stale state from a previous run
+# (game data, DB, and backups are intentionally preserved)
+for vol in pz-caddy-data pz-caddy-config pz-app-vendor pz-app-node-modules pz-app-build; do
+    docker volume rm "$vol" 2>/dev/null || true
+done
+
+# Verify no stale pz- volumes are stuck (Docker can leave ghosts after down -v)
+STALE=$(docker volume ls -q --filter name=pz-caddy --filter name=pz-app-vendor --filter name=pz-app-node --filter name=pz-app-build 2>/dev/null || true)
+if [ -n "$STALE" ]; then
+    echo -e "${YELLOW}Cleaning leftover volumes...${NC}"
+    echo "$STALE" | xargs docker volume rm 2>/dev/null || true
+fi
+
+make up
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Persist Steam branch into game-server volume
+# Without this, the AMD64 image silently downloads the stable "public" branch
+# when GAME_VERSION isn't honored on first boot. Writing the override file
+# (and restarting the container when the user picked a non-public branch)
+# ensures SteamCMD runs with the correct -beta flag.
+# ══════════════════════════════════════════════════════════════════════════════
+echo "Persisting Steam branch (${PZ_STEAM_BRANCH}) to game-server volume..."
+
+# Write the branch to a temp file and `docker cp` it into the container.
+# Avoids quoting/encoding pitfalls (custom branches with single quotes,
+# CRLF when this is later cross-edited from Windows, etc.).
+TMP_BRANCH_FILE=$(mktemp)
+printf '%s' "$PZ_STEAM_BRANCH" > "$TMP_BRANCH_FILE"
+chmod 0644 "$TMP_BRANCH_FILE"
+docker exec pz-game-server sh -c "mkdir -p /home/steam/Zomboid" >/dev/null 2>&1 || true
+docker cp "$TMP_BRANCH_FILE" pz-game-server:/home/steam/Zomboid/.steam_branch >/dev/null 2>&1 || true
+docker exec pz-game-server sh -c "chmod 0644 /home/steam/Zomboid/.steam_branch" >/dev/null 2>&1 || true
+rm -f "$TMP_BRANCH_FILE"
+
+if [ "$PZ_STEAM_BRANCH" != "public" ]; then
+    echo "Restarting game-server to apply '${PZ_STEAM_BRANCH}' branch..."
+    docker restart pz-game-server >/dev/null 2>&1 || true
+fi
+
+# Record the selected branch in game-version.conf for informational use
+if [ -f game-version.conf ]; then
+    if grep -q '^PZ_BRANCH=' game-version.conf; then
+        sed -i "s|^PZ_BRANCH=.*|PZ_BRANCH=${PZ_STEAM_BRANCH}|" game-version.conf
+    else
+        printf 'PZ_BRANCH=%s\n' "$PZ_STEAM_BRANCH" >> game-version.conf
+    fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sync passwords into existing volumes (re-run safe)
+# ══════════════════════════════════════════════════════════════════════════════
+# PostgreSQL: volume retains the password from the first initdb — sync it
+echo "Syncing database password..."
+docker exec pz-db psql -U "${DB_USERNAME:-zomboid}" -d "${DB_DATABASE:-zomboid}" \
+    -c "ALTER USER ${DB_USERNAME:-zomboid} PASSWORD '${DB_PASS}';" >/dev/null 2>&1 || true
+
+# Redis: update requirepass to match new password
+echo "Syncing Redis password..."
+if [ -n "$REDIS_PASS" ]; then
+    # Try authenticating with old password first (may fail on first run — that's OK)
+    docker exec pz-redis redis-cli CONFIG SET requirepass "$REDIS_PASS" >/dev/null 2>&1 || \
+    docker exec pz-redis redis-cli -a "$REDIS_PASS" CONFIG SET requirepass "$REDIS_PASS" >/dev/null 2>&1 || true
+fi
+
+# Clear stale config/route cache (APP_URL or other settings may have changed)
+echo "Clearing application cache..."
+docker exec pz-app php artisan config:clear --no-interaction >/dev/null 2>&1 || true
+docker exec pz-app php artisan route:clear --no-interaction >/dev/null 2>&1 || true
+docker exec pz-app php artisan view:clear --no-interaction >/dev/null 2>&1 || true
+
+# Admin user: update or create via artisan (entrypoint may not have run yet)
+echo "Syncing admin account..."
+for attempt in 1 2 3; do
+    if docker exec pz-app php artisan zomboid:create-admin --no-interaction 2>&1 | grep -qE "created|updated|exists"; then
+        break
+    fi
+    sleep 3
+done
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Health check — verify the app is running (local check only)
+# ══════════════════════════════════════════════════════════════════════════════
+echo "Verifying app is running..."
+HEALTH_OK=false
+for attempt in 1 2 3 4 5; do
+    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}/" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+        HEALTH_OK=true
+        break
+    fi
+    sleep 3
+done
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Done
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+if [ "$HEALTH_OK" = "true" ]; then
+    echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}${BOLD}  Setup complete!${NC}"
+    echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${NC}"
+else
+    echo -e "${YELLOW}${BOLD}══════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}${BOLD}  Setup complete — but app not responding!${NC}"
+    echo -e "${YELLOW}${BOLD}══════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${YELLOW}The app container may still be starting up.${NC}"
+    echo -e "  ${YELLOW}Check: make logs${NC}"
+fi
+echo ""
+echo -e "  ${BOLD}Local Admin:${NC}   http://localhost:${APP_PORT}"
+if [ "$ADMIN_PUBLIC_ENABLED" = "true" ]; then
+    echo -e "  ${BOLD}Public Admin:${NC}  ${APP_URL}  ${DIM}(requires 'make admin-expose')${NC}"
+fi
+echo -e "  ${BOLD}Admin User:${NC}    ${ADMIN_USERNAME}"
+if [ "$ADMIN_PASS_GENERATED" = "true" ]; then
+echo -e "  ${BOLD}Admin Pass:${NC}    ${YELLOW}${ADMIN_PASSWORD}${NC}"
+echo ""
+echo -e "  ${YELLOW}Save this password — it won't be shown again.${NC}"
+else
+echo -e "  ${BOLD}Admin Pass:${NC}    (as entered)"
+fi
+echo ""
+echo -e "  ${BOLD}API Key:${NC}       ${DIM}${API_SECRET}${NC}"
+echo ""
+
+# Game server status — check if SteamCMD failed and restart if needed
+GS_RUNNING=false
+for gs_attempt in 1 2 3; do
+    # Give the entrypoint time to run SteamCMD (or fail)
+    echo -e "  ${DIM}Checking game server (attempt ${gs_attempt}/3)...${NC}"
+    sleep 10
+
+    # Check if SteamCMD hit a fatal error
+    if docker logs pz-game-server 2>&1 | grep -q "FATAL: SteamCMD failed"; then
+        if [ "$gs_attempt" -lt 3 ]; then
+            echo -e "  ${YELLOW}Game server: SteamCMD failed — restarting container...${NC}"
+            docker restart pz-game-server >/dev/null 2>&1 || true
+        else
+            echo -e "  ${RED}Game server: SteamCMD failed after 3 container restarts.${NC}"
+            echo -e "  ${DIM}  Check logs: docker logs pz-game-server${NC}"
+        fi
+        continue
+    fi
+
+    # Check if it's running or still downloading
+    GS_STATE=$(docker inspect --format='{{.State.Status}}' pz-game-server 2>/dev/null || echo "unknown")
+    if [ "$GS_STATE" = "running" ]; then
+        GS_RUNNING=true
+        break
+    fi
+done
+
+if [ "$GS_RUNNING" = "true" ]; then
+    echo -e "  ${GREEN}Game server: running (SteamCMD download may still be in progress)${NC}"
+    echo -e "  ${DIM}  Monitor with: docker logs -f pz-game-server${NC}"
+else
+    echo -e "  ${YELLOW}Game server: not running${NC}"
+    echo -e "  ${DIM}  Check logs: docker logs pz-game-server${NC}"
+fi
+echo ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Item icons — download in background if catalog is available
+# ══════════════════════════════════════════════════════════════════════════════
+if docker exec pz-app test -f /lua-bridge/items_catalog.json 2>/dev/null; then
+    echo -e "${DIM}Downloading item icons in background...${NC}"
+    docker exec -d pz-app php artisan zomboid:download-item-icons --no-interaction \
+        >> /dev/null 2>&1 || true
+else
+    echo -e "${DIM}Item icons: skipped (catalog not yet exported by game server)${NC}"
+    echo -e "${DIM}  Run later: make exec CMD=\"php artisan zomboid:download-item-icons\"${NC}"
+fi

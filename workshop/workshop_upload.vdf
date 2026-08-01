@@ -1,0 +1,11 @@
+"workshopitem"
+{
+    "appid"             "108600"
+    "publishedfileid"   "3685323705"
+    "contentfolder"     "./ZomboidManager/Contents/"
+    "previewfile"       "./ZomboidManager/preview.png"
+    "visibility"        "0"
+    "title"             "ZomboidManager"
+    "description"       "Server-side bridge mod for Zomboid Manager. Exports game state, inventory snapshots, player positions, and processes delivery queues."
+    "changenote"        "Initial release"
+}
