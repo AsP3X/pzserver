@@ -650,7 +650,11 @@ chmod -R a+rwX data 2>/dev/null || true
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${BOLD}Starting services...${NC}"
-make down 2>/dev/null || true
+
+# Compose helpers — no Make required
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/compose-env.sh"
+pz_down 2>/dev/null || true
 
 # Fix ownership on directories that may be root-owned from a previous Docker run
 # The container runs as non-root and needs write access to these.
@@ -674,7 +678,7 @@ if [ -n "$STALE" ]; then
     echo "$STALE" | xargs docker volume rm 2>/dev/null || true
 fi
 
-make up
+pz_up
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Persist Steam branch into game-server volume
@@ -769,12 +773,12 @@ else
     echo -e "${YELLOW}${BOLD}══════════════════════════════════════════════${NC}"
     echo ""
     echo -e "  ${YELLOW}The app container may still be starting up.${NC}"
-    echo -e "  ${YELLOW}Check: make logs${NC}"
+    echo -e "  ${YELLOW}Check: docker logs -f pz-app${NC}"
 fi
 echo ""
 echo -e "  ${BOLD}Local Admin:${NC}   http://localhost:${APP_PORT}"
 if [ "$ADMIN_PUBLIC_ENABLED" = "true" ]; then
-    echo -e "  ${BOLD}Public Admin:${NC}  ${APP_URL}  ${DIM}(requires 'make admin-expose')${NC}"
+    echo -e "  ${BOLD}Public Admin:${NC}  ${APP_URL}  ${DIM}(open firewall / Caddy ports if needed)${NC}"
 fi
 echo -e "  ${BOLD}Admin User:${NC}    ${ADMIN_USERNAME}"
 if [ "$ADMIN_PASS_GENERATED" = "true" ]; then
@@ -833,5 +837,5 @@ if docker exec pz-app test -f /lua-bridge/items_catalog.json 2>/dev/null; then
         >> /dev/null 2>&1 || true
 else
     echo -e "${DIM}Item icons: skipped (catalog not yet exported by game server)${NC}"
-    echo -e "${DIM}  Run later: make exec CMD=\"php artisan zomboid:download-item-icons\"${NC}"
+    echo -e "${DIM}  Run later: docker exec pz-app php artisan zomboid:download-item-icons${NC}"
 fi
