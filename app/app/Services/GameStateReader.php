@@ -33,8 +33,18 @@ class GameStateReader
             return null;
         }
 
+        $content = trim($content);
+        if ($content === '') {
+            return null;
+        }
+
         $data = json_decode($content, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($data)) {
+            return null;
+        }
+
+        // Incomplete bridge exports (placeholders, failed writes) must not reach the UI
+        if (! isset($data['time']) || ! is_array($data['time'])) {
             return null;
         }
 

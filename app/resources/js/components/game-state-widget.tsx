@@ -42,7 +42,9 @@ const weatherLabelKeys: Record<string, string> = {
 export function GameStateWidget({ gameState }: { gameState: GameState | null }) {
     const { t } = useTranslation();
 
-    if (!gameState) {
+    // Partial/empty bridge files (e.g. 0-byte game_state.json) must not crash the page
+    const time = gameState?.time;
+    if (!gameState || !time || typeof time.is_night !== 'boolean') {
         return (
             <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-4 py-3">
                 <TreeDeciduous className="size-5 text-muted-foreground" />
@@ -51,15 +53,18 @@ export function GameStateWidget({ gameState }: { gameState: GameState | null }) 
         );
     }
 
-    const { time, season, weather } = gameState;
-    const SeasonIcon = seasonConfig[season]?.icon ?? Sun;
-    const seasonColor = seasonConfig[season]?.color ?? 'text-muted-foreground';
-    const seasonLabel = seasonConfig[season] ? t(seasonConfig[season].labelKey) : season;
+    const season = gameState.season;
+    const weather = gameState.weather;
+    const SeasonIcon = seasonConfig[season as keyof typeof seasonConfig]?.icon ?? Sun;
+    const seasonColor = seasonConfig[season as keyof typeof seasonConfig]?.color ?? 'text-muted-foreground';
+    const seasonLabel = season && seasonConfig[season as keyof typeof seasonConfig]
+        ? t(seasonConfig[season as keyof typeof seasonConfig].labelKey)
+        : (season ?? '');
 
     const WeatherIcon = weather ? (weatherIcons[weather.condition] ?? Cloud) : Cloud;
     const weatherLabel = weather && weatherLabelKeys[weather.condition]
         ? t(weatherLabelKeys[weather.condition])
-        : weather?.condition.replace('_', ' ') ?? '';
+        : weather?.condition?.replace('_', ' ') ?? '';
 
     return (
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/50 bg-card px-4 py-3">
@@ -71,9 +76,9 @@ export function GameStateWidget({ gameState }: { gameState: GameState | null }) 
                     <Sun className="size-4 text-yellow-500" />
                 )}
                 <div>
-                    <span className="font-semibold tabular-nums">{time.formatted}</span>
+                    <span className="font-semibold tabular-nums">{time.formatted ?? '—'}</span>
                     <span className="ml-1.5 text-sm text-muted-foreground">
-                        {t('game_state.day', { day: String(time.day_of_year) })}
+                        {t('game_state.day', { day: String(time.day_of_year ?? '—') })}
                     </span>
                 </div>
             </div>
