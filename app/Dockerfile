@@ -41,7 +41,7 @@ RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
 # Install pzmap2dzi for map tile generation (pyclipper needs C++ compiler)
 RUN apk add --no-cache --virtual .pzmap-build-deps g++ python3-dev \
     && git clone --depth 1 https://github.com/cff29546/pzmap2dzi.git /opt/pzmap2dzi \
-    && pip3 install --break-system-packages lupa pyclipper pillow pyyaml ruamel.yaml \
+    && pip3 install --break-system-packages lupa pyclipper pillow pyyaml ruamel.yaml requests \
     && apk del .pzmap-build-deps
 
 # Copy package files and install + build frontend
