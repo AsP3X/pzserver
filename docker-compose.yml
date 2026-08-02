@@ -29,9 +29,11 @@ services:
   # Laravel Application — API + Web Dashboard
   # ---------------------------------------------------------------------------
   app:
+    image: ${PZ_APP_IMAGE:-pzserver-app:local}
     build:
       context: ./app
       dockerfile: Dockerfile
+    pull_policy: build
     container_name: pz-app
     restart: unless-stopped
     depends_on:
@@ -83,9 +85,11 @@ services:
   # Queue Worker — Processes backup jobs, restart jobs, etc.
   # ---------------------------------------------------------------------------
   queue:
+    image: ${PZ_APP_IMAGE:-pzserver-app:local}
     build:
       context: ./app
       dockerfile: Dockerfile
+    pull_policy: build
     container_name: pz-queue
     restart: unless-stopped
     depends_on:

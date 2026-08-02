@@ -130,7 +130,18 @@ pz_up() {
   # Avoid "name already in use" after partial deploys / mode switches
   pz_force_remove_stack_containers
   echo "Web proxy mode: ${WEB_PROXY_MODE}"
+  # Always build local fixed images (app + game-server overlay on upstream base)
+  echo "Building local images (app + game-server on top of upstream base)..."
+  pz_compose build app game-server
   pz_compose up -d --build --remove-orphans
+}
+
+# Rebuild only the game-server overlay (FROM renegademaster / joyfui + our scripts)
+pz_rebuild_game() {
+  pz_load_web_mode
+  echo "Rebuilding game-server local image from upstream base..."
+  pz_compose build --pull game-server
+  pz_compose up -d game-server
 }
 
 pz_down() {

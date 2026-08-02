@@ -1,7 +1,12 @@
 services:
   game-server:
-    # Pin to a specific version tag when available to prevent supply chain attacks
-    image: ghcr.io/joyfui/project-zomboid-server-docker-arm64:latest
+    image: ${PZ_GAME_IMAGE:-pzserver-game:arm64}
+    build:
+      context: ./game-server
+      dockerfile: Dockerfile.arm64
+      args:
+        BASE_IMAGE: ${PZ_GAME_BASE_IMAGE:-ghcr.io/joyfui/project-zomboid-server-docker-arm64:latest}
+    pull_policy: build
     user: "0:0"
     stdin_open: true
     tty: true

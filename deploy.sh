@@ -32,10 +32,11 @@ show_help() {
     Data:    ./data/zomboid  ./data/server  ./data/backups
 
   Day-to-day (no Make needed):
-    ./deploy.sh              start (if .env exists)
+    ./deploy.sh              start (if .env exists) — builds local fixed images
     ./deploy.sh --down       stop
     ./deploy.sh --status     status
-    docker compose -f docker-compose.yml -f docker-compose.amd64.yml logs -f
+    ./deploy.sh --rebuild-game   rebuild game-server (upstream + our entrypoints)
+    source scripts/compose-env.sh && pz_compose build app game-server
 
 EOF
 }
@@ -61,6 +62,10 @@ case "${1:-}" in
     ;;
   --down)
     pz_down
+    exit 0
+    ;;
+  --rebuild-game)
+    pz_rebuild_game
     exit 0
     ;;
   --init)
