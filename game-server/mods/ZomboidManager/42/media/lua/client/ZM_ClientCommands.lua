@@ -6,6 +6,84 @@
 
 print("[ZM_ClientCommands] Lua file loaded — client-side handler is active")
 
+--- "Base.WaterBottle" → "WaterBottle"
+local function shortTypeName(itemType)
+    if not itemType then
+        return itemType
+    end
+    return string.match(itemType, "([^%.]+)$") or itemType
+end
+
+local function itemMatchesType(item, itemType)
+    if not item or not itemType then
+        return false
+    end
+    if item.getFullType and item:getFullType() == itemType then
+        return true
+    end
+    if item.getType and item:getType() == itemType then
+        return true
+    end
+    local short = shortTypeName(itemType)
+    if short and item.getType and item:getType() == short then
+        return true
+    end
+    return false
+end
+
+--- Find item by full type or short type (getFirstTypeRecurse only matches short types)
+local function findItem(inv, itemType)
+    if not inv then
+        return nil
+    end
+
+    if inv.getItemsFromFullType then
+        local items = inv:getItemsFromFullType(itemType)
+        if items and items:size() > 0 then
+            return items:get(0)
+        end
+    end
+
+    local short = shortTypeName(itemType)
+    if inv.getFirstTypeRecurse then
+        local item = inv:getFirstTypeRecurse(short)
+        if item then
+            return item
+        end
+        item = inv:getFirstTypeRecurse(itemType)
+        if item then
+            return item
+        end
+    end
+
+    -- Manual scan of top-level + one level of bags
+    local items = inv:getItems()
+    if items then
+        for i = 0, items:size() - 1 do
+            local item = items:get(i)
+            if itemMatchesType(item, itemType) then
+                return item
+            end
+            if item and item.getItemContainer then
+                local bag = item:getItemContainer()
+                if bag then
+                    local bagItems = bag:getItems()
+                    if bagItems then
+                        for j = 0, bagItems:size() - 1 do
+                            local nested = bagItems:get(j)
+                            if itemMatchesType(nested, itemType) then
+                                return nested
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
 local function onServerCommand(module, command, args)
     if module ~= "ZomboidManager" then
         return
@@ -25,16 +103,18 @@ local function onServerCommand(module, command, args)
     end
 
     if command == "removeItem" then
-        -- Server already removed the item — mirror the removal on the client
-        -- so the inventory UI updates instantly without relog.
         local itemType = args.item_type
         local count = tonumber(args.count) or 1
         print("[ZM_ClientCommands] removeItem: type=" .. tostring(itemType) .. " count=" .. tostring(count))
         for i = 1, count do
-            local item = inv:getFirstTypeRecurse(itemType)
+            local item = findItem(inv, itemType)
             if item then
                 local container = item:getContainer() or inv
-                container:Remove(item)
+                if container.Remove then
+                    container:Remove(item)
+                elseif container.DoRemoveItem then
+                    container:DoRemoveItem(item)
+                end
                 print("[ZM_ClientCommands] removeItem: removed instance " .. tostring(i) .. " of " .. tostring(itemType))
             else
                 print("[ZM_ClientCommands] removeItem: item NOT found for instance " .. tostring(i) .. " of " .. tostring(itemType))
@@ -42,8 +122,6 @@ local function onServerCommand(module, command, args)
         end
 
     elseif command == "addItem" then
-        -- Server already added the item — mirror the addition on the client
-        -- so the inventory UI updates instantly without relog.
         local itemType = args.item_type
         local count = tonumber(args.count) or 1
         print("[ZM_ClientCommands] addItem: type=" .. tostring(itemType) .. " count=" .. tostring(count))

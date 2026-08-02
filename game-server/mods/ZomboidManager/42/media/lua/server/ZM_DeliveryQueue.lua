@@ -48,25 +48,157 @@ local function findPlayer(username)
     return nil
 end
 
---- Count items of a specific type across inventory + backpack
-local function countItemType(player, itemType)
-    local total = 0
-    local inventory = player:getInventory()
-    if inventory then
-        local items = inventory:getItemsFromFullType(itemType)
-        if items then
-            total = total + items:size()
+--- "Base.WaterBottle" → "WaterBottle" (getFirstType* matches getType(), not full type)
+local function shortTypeName(itemType)
+    if not itemType then
+        return itemType
+    end
+    local short = string.match(itemType, "([^%.]+)$")
+    return short or itemType
+end
+
+--- All item containers on the player (main inv + nested bags + worn containers)
+local function collectContainers(player)
+    local containers = {}
+    local seen = {}
+
+    local function addContainer(container)
+        if not container then
+            return
+        end
+        local key = tostring(container)
+        if seen[key] then
+            return
+        end
+        seen[key] = true
+        table.insert(containers, container)
+
+        local items = container:getItems()
+        if not items then
+            return
+        end
+        for i = 0, items:size() - 1 do
+            local item = items:get(i)
+            if item and item.getItemContainer then
+                local nested = item:getItemContainer()
+                if nested then
+                    addContainer(nested)
+                end
+            end
+        end
+    end
+
+    addContainer(player:getInventory())
+
+    if player.getWornItems then
+        local worn = player:getWornItems()
+        if worn then
+            for i = 0, worn:size() - 1 do
+                local wornItem = worn:get(i)
+                local item = wornItem
+                if wornItem and wornItem.getItem then
+                    item = wornItem:getItem()
+                end
+                if item and item.getItemContainer then
+                    local c = item:getItemContainer()
+                    if c then
+                        addContainer(c)
+                    end
+                end
+            end
         end
     end
 
     local backpack = player:getClothingItem_Back()
     if backpack and backpack:getItemContainer() then
-        local items = backpack:getItemContainer():getItemsFromFullType(itemType)
-        if items then
-            total = total + items:size()
+        addContainer(backpack:getItemContainer())
+    end
+
+    return containers
+end
+
+--- Does this inventory item match the requested type (full or short)?
+local function itemMatchesType(item, itemType)
+    if not item or not itemType then
+        return false
+    end
+    if item.getFullType and item:getFullType() == itemType then
+        return true
+    end
+    if item.getType and item:getType() == itemType then
+        return true
+    end
+    local short = shortTypeName(itemType)
+    if short and item.getType and item:getType() == short then
+        return true
+    end
+    return false
+end
+
+--- Find first matching item in a container (full-type aware)
+local function findItemInContainer(container, itemType)
+    if not container then
+        return nil
+    end
+
+    -- Preferred: full-type API
+    if container.getItemsFromFullType then
+        local items = container:getItemsFromFullType(itemType)
+        if items and items:size() > 0 then
+            return items:get(0)
         end
     end
 
+    -- getFirstType / getFirstTypeRecurse expect SHORT type (WaterBottle), not Base.WaterBottle
+    local short = shortTypeName(itemType)
+    if container.getFirstType then
+        local item = container:getFirstType(short)
+        if item then
+            return item
+        end
+        -- also try as-is in case caller already passed short type
+        if short ~= itemType then
+            item = container:getFirstType(itemType)
+            if item then
+                return item
+            end
+        end
+    end
+
+    -- Manual scan
+    local items = container:getItems()
+    if not items then
+        return nil
+    end
+    for i = 0, items:size() - 1 do
+        local item = items:get(i)
+        if itemMatchesType(item, itemType) then
+            return item
+        end
+    end
+    return nil
+end
+
+--- Count items of a specific type across all player containers
+local function countItemType(player, itemType)
+    local total = 0
+    for _, container in ipairs(collectContainers(player)) do
+        if container.getItemsFromFullType then
+            local items = container:getItemsFromFullType(itemType)
+            if items then
+                total = total + items:size()
+            end
+        else
+            local items = container:getItems()
+            if items then
+                for i = 0, items:size() - 1 do
+                    if itemMatchesType(items:get(i), itemType) then
+                        total = total + 1
+                    end
+                end
+            end
+        end
+    end
     return total
 end
 
@@ -94,6 +226,9 @@ local function syncRemoveToClient(player)
         inventory:setDrawDirty(true)
     end
 end
+
+-- Forward declaration (give_verified rollback calls removeOneItem)
+local removeOneItem
 
 --- Give item to player (fallback when RCON is unavailable)
 local function giveItem(player, itemType, count)
@@ -134,15 +269,7 @@ local function giveItemVerified(player, itemType, count)
             if actuallyAdded > 0 then
                 -- Remove partially added items to keep things clean
                 for j = 1, actuallyAdded do
-                    local toRemove = inventory:getFirstTypeRecurse(itemType)
-                    if toRemove then
-                        local container = toRemove:getContainer()
-                        if container then
-                            container:DoRemoveItem(toRemove)
-                        else
-                            inventory:DoRemoveItem(toRemove)
-                        end
-                    end
+                    removeOneItem(player, itemType)
                 end
             end
             return false, "failed to add item " .. itemType .. " (attempt " .. i .. "/" .. count .. ")", nil
@@ -159,17 +286,8 @@ local function giveItemVerified(player, itemType, count)
         local actuallyAdded = countAfter - countBefore
         print("[ZomboidManager] WARNING: give_verified failed verification for " .. itemType ..
               " — expected >=" .. (countBefore + count) .. " but got " .. countAfter)
-        -- Remove what was added
         for j = 1, actuallyAdded do
-            local toRemove = inventory:getFirstTypeRecurse(itemType)
-            if toRemove then
-                local container = toRemove:getContainer()
-                if container then
-                    container:DoRemoveItem(toRemove)
-                else
-                    inventory:DoRemoveItem(toRemove)
-                end
-            end
+            removeOneItem(player, itemType)
         end
         return false, "verification failed: expected >=" .. (countBefore + count) .. " items but found " .. countAfter, nil
     end
@@ -186,8 +304,29 @@ local function giveItemVerified(player, itemType, count)
 end
 
 --- Remove a single item from the player, handling equipped/worn items.
-local function removeOneItem(player, inventory, itemType)
-    local item = inventory:getFirstTypeRecurse(itemType)
+--- Uses full-type matching + nested bag scan (getFirstTypeRecurse only matches short types).
+removeOneItem = function(player, itemType)
+    local inventory = player:getInventory()
+    if not inventory then
+        return false
+    end
+
+    local item = nil
+    for _, container in ipairs(collectContainers(player)) do
+        item = findItemInContainer(container, itemType)
+        if item then
+            break
+        end
+    end
+
+    -- Last resort: recurse from main inventory with short type name
+    if not item and inventory.getFirstTypeRecurse then
+        item = inventory:getFirstTypeRecurse(shortTypeName(itemType))
+        if not item then
+            item = inventory:getFirstTypeRecurse(itemType)
+        end
+    end
+
     if not item then
         return false
     end
@@ -205,10 +344,14 @@ local function removeOneItem(player, inventory, itemType)
     end
 
     local container = item:getContainer()
-    if container then
+    if container and container.DoRemoveItem then
         container:DoRemoveItem(item)
-    else
+    elseif container and container.Remove then
+        container:Remove(item)
+    elseif inventory.DoRemoveItem then
         inventory:DoRemoveItem(item)
+    else
+        inventory:Remove(item)
     end
 
     return true
@@ -221,15 +364,25 @@ local function removeItem(player, itemType, count)
         return false, "player has no inventory"
     end
 
+    count = count or 1
+    local available = countItemType(player, itemType)
+    if available < 1 then
+        return false, "item not found: " .. tostring(itemType)
+            .. " (have 0; check full type e.g. Base.WaterBottleFull vs Base.WaterBottle)"
+    end
+
     local removed = 0
-    for i = 1, count do
-        if removeOneItem(player, inventory, itemType) then
+    for _ = 1, count do
+        if removeOneItem(player, itemType) then
             removed = removed + 1
+        else
+            break
         end
     end
 
     if removed < count then
-        return false, "only removed " .. removed .. "/" .. count .. " items"
+        return false, "only removed " .. removed .. "/" .. count .. " items (found "
+            .. available .. " matching " .. tostring(itemType) .. " before remove)"
     end
 
     -- Tell the client to mirror the removal for instant UI update.
