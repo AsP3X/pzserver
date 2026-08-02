@@ -7,40 +7,56 @@ class MapConfigBuilder
     /**
      * Build map configuration, preferring local tiles then falling back to proxy.
      *
-     * @return array{tileUrl: string|null, tileSize: int, minZoom: int, maxZoom: int, defaultZoom: int, center: array{x: int, y: int}, dzi: array|null}
+     * @return array{
+     *     tileUrl: string|null,
+     *     tileSize: int,
+     *     minZoom: int,
+     *     maxZoom: int,
+     *     defaultZoom: int,
+     *     center: array{x: float|int, y: float|int},
+     *     dzi: array|null,
+     *     source: string,
+     *     local_ready: bool,
+     *     tiles_path: string
+     * }
      */
     public function build(): array
     {
+        $tilesPath = (string) config('zomboid.map.tiles_path');
         $localDzi = $this->getLocalDziConfig();
 
         if ($localDzi) {
+            // Relative URL so tiles work behind NPM/Caddy regardless of APP_URL.
             return [
-                'tileUrl' => url('/admin/map-tiles/{z}/{x}_{y}'),
-                'tileSize' => config('zomboid.map.tile_size'),
-                'minZoom' => config('zomboid.map.min_zoom'),
-                'maxZoom' => config('zomboid.map.max_zoom'),
-                'defaultZoom' => config('zomboid.map.default_zoom'),
+                'tileUrl' => '/admin/map-tiles/{z}/{x}_{y}',
+                'tileSize' => (int) config('zomboid.map.tile_size'),
+                'minZoom' => (int) config('zomboid.map.min_zoom'),
+                'maxZoom' => (int) config('zomboid.map.max_zoom'),
+                'defaultZoom' => (int) config('zomboid.map.default_zoom'),
                 'center' => [
                     'x' => config('zomboid.map.center_x'),
                     'y' => config('zomboid.map.center_y'),
                 ],
                 'dzi' => $localDzi,
+                'source' => 'local',
+                'local_ready' => true,
+                'tiles_path' => $tilesPath,
             ];
         }
 
         // Fall back to proxy tiles from map.projectzomboid.com
         $proxyDzi = config('zomboid.map.proxy_dzi');
-        $w = $proxyDzi['width'];
-        $h = $proxyDzi['height'];
-        $sqr = $proxyDzi['sqr'];
+        $w = (int) $proxyDzi['width'];
+        $h = (int) $proxyDzi['height'];
+        $sqr = (int) $proxyDzi['sqr'];
         $maxNativeZoom = (int) ceil(log(max($w, $h), 2));
 
         return [
             'tileUrl' => config('zomboid.map.proxy_url'),
-            'tileSize' => config('zomboid.map.proxy_tile_size'),
-            'minZoom' => config('zomboid.map.min_zoom'),
-            'maxZoom' => config('zomboid.map.max_zoom'),
-            'defaultZoom' => config('zomboid.map.default_zoom'),
+            'tileSize' => (int) config('zomboid.map.proxy_tile_size'),
+            'minZoom' => (int) config('zomboid.map.min_zoom'),
+            'maxZoom' => (int) config('zomboid.map.max_zoom'),
+            'defaultZoom' => (int) config('zomboid.map.default_zoom'),
             'center' => [
                 'x' => config('zomboid.map.center_x'),
                 'y' => config('zomboid.map.center_y'),
@@ -48,13 +64,24 @@ class MapConfigBuilder
             'dzi' => [
                 'width' => $w,
                 'height' => $h,
-                'x0' => $proxyDzi['x0'],
-                'y0' => $proxyDzi['y0'],
+                'x0' => (int) $proxyDzi['x0'],
+                'y0' => (int) $proxyDzi['y0'],
                 'sqr' => $sqr,
                 'maxNativeZoom' => $maxNativeZoom,
                 'isometric' => true,
             ],
+            'source' => 'proxy',
+            'local_ready' => false,
+            'tiles_path' => $tilesPath,
         ];
+    }
+
+    /**
+     * Whether a usable local tile set exists on disk.
+     */
+    public function hasLocalTiles(): bool
+    {
+        return $this->getLocalDziConfig() !== null;
     }
 
     /**
@@ -64,26 +91,48 @@ class MapConfigBuilder
      */
     private function getLocalDziConfig(): ?array
     {
-        $dziPath = config('zomboid.map.tiles_path').'/html/map_data/base/layer0_files';
+        $base = rtrim((string) config('zomboid.map.tiles_path'), '/');
+        $dziPath = $base.'/html/map_data/base/layer0_files';
 
-        if (! is_dir($dziPath.'/0')) {
+        // Accept either level 0 or common omit_levels layout (level folders present)
+        $levelDir = null;
+        foreach (['0', '1', '2', '3'] as $level) {
+            if (is_dir($dziPath.'/'.$level)) {
+                $levelDir = $dziPath.'/'.$level;
+                break;
+            }
+        }
+
+        if ($levelDir === null) {
             return null;
         }
 
-        $webp = glob($dziPath.'/0/*.webp');
-        $jpg = glob($dziPath.'/0/*.jpg');
+        $webp = glob($levelDir.'/*.webp') ?: [];
+        $jpg = glob($levelDir.'/*.jpg') ?: [];
 
-        if (empty($webp) && empty($jpg)) {
+        if ($webp === [] && $jpg === []) {
             return null;
         }
 
-        $infoPath = config('zomboid.map.tiles_path').'/html/map_data/base/map_info.json';
+        $infoPath = $base.'/html/map_data/base/map_info.json';
 
         if (! is_file($infoPath)) {
-            return null;
+            // Minimal defaults so a partial render can still show tiles
+            return [
+                'width' => 65536,
+                'height' => 65536,
+                'x0' => 0,
+                'y0' => 0,
+                'sqr' => 1,
+                'maxNativeZoom' => 16,
+                'isometric' => false,
+            ];
         }
 
-        $mapInfo = json_decode(file_get_contents($infoPath), true);
+        $mapInfo = json_decode((string) file_get_contents($infoPath), true);
+        if (! is_array($mapInfo) || ! isset($mapInfo['w'], $mapInfo['h'])) {
+            return null;
+        }
 
         $w = (int) $mapInfo['w'];
         $h = (int) $mapInfo['h'];

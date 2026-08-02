@@ -33,7 +33,10 @@ type Props = {
     serverStatus: 'offline' | 'starting' | 'online';
     mapConfig: MapConfig;
     hasTiles: boolean;
+    tileSource?: 'local' | 'proxy' | 'none' | string;
+    localTilesReady?: boolean;
     tileProgress: TileProgress | null;
+    tilesGenerating?: boolean;
     safeZones: SafeZone[];
 };
 
@@ -45,9 +48,51 @@ const statusDotColor: Record<PlayerMarker['status'], string> = {
 
 const ZONE_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
 
-export default function PlayerMap({ markers, onlineCount, serverStatus, mapConfig, hasTiles, tileProgress, safeZones }: Props) {
+export default function PlayerMap({
+    markers,
+    onlineCount,
+    serverStatus,
+    mapConfig,
+    hasTiles,
+    tileSource = 'proxy',
+    localTilesReady = false,
+    tileProgress,
+    tilesGenerating = false,
+    safeZones,
+}: Props) {
     const { t } = useTranslation();
-    usePoll(5000, { only: ['markers', 'onlineCount', 'serverStatus', 'hasTiles', 'tileProgress', 'safeZones'] });
+    const [genLoading, setGenLoading] = useState(false);
+    const [genMessage, setGenMessage] = useState<string | null>(null);
+    usePoll(5000, {
+        only: ['markers', 'onlineCount', 'serverStatus', 'hasTiles', 'tileProgress', 'safeZones', 'tileSource', 'localTilesReady', 'tilesGenerating'],
+    });
+
+    async function generateTiles(force = false) {
+        setGenLoading(true);
+        setGenMessage(null);
+        try {
+            const csrf = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+            const res = await fetch('/admin/players/map/generate-tiles', {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ force }),
+            });
+            const json = await res.json().catch(() => ({}));
+            setGenMessage(json.message || (res.ok ? 'Started' : 'Failed to start'));
+            if (res.ok) {
+                router.reload({ only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady'] });
+            }
+        } catch {
+            setGenMessage('Network error starting tile generation');
+        }
+        setGenLoading(false);
+    }
 
     const zoneOverlays: ZoneOverlay[] = useMemo(
         () => safeZones.map((zone, i) => ({ ...zone, color: ZONE_COLORS[i % ZONE_COLORS.length] })),
@@ -114,8 +159,26 @@ export default function PlayerMap({ markers, onlineCount, serverStatus, mapConfi
                                 {t('admin.player_map.dead_count', { count: String(counts.dead) })}
                             </Badge>
                         )}
+                        <Badge variant={localTilesReady ? 'default' : 'secondary'} className="text-sm">
+                            tiles: {tileSource}
+                        </Badge>
+                        <button
+                            type="button"
+                            disabled={genLoading || tilesGenerating}
+                            onClick={() => generateTiles(!localTilesReady)}
+                            className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                        >
+                            {genLoading || tilesGenerating ? (
+                                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                            ) : null}
+                            {localTilesReady ? 'Regenerate tiles' : 'Generate local tiles'}
+                        </button>
                     </div>
                 </div>
+
+                {genMessage && (
+                    <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">{genMessage}</div>
+                )}
 
                 {serverStatus === 'offline' && (
                     <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">

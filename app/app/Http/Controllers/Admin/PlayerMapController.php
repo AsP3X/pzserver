@@ -9,7 +9,10 @@ use App\Services\PlayerPositionReader;
 use App\Services\PlayersDbReader;
 use App\Services\SafeZoneManager;
 use App\Services\ServerStatusResolver;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Artisan;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -104,16 +107,65 @@ class PlayerMapController extends Controller
 
         $mapConfig = $this->mapConfigBuilder->build();
         $safeZoneConfig = $this->safeZoneManager->getConfig();
+        $hasBasemap = $mapConfig['tileUrl'] !== null && $mapConfig['dzi'] !== null;
 
         return Inertia::render('admin/player-map', [
             'markers' => $markers,
             'onlineCount' => $resolved['player_count'],
             'serverStatus' => $resolved['game_status'],
             'mapConfig' => $mapConfig,
-            'hasTiles' => $mapConfig['tileUrl'] !== null,
-            'tileProgress' => null,
-            'tilesGenerating' => false,
+            'hasTiles' => $hasBasemap,
+            'tileSource' => $mapConfig['source'] ?? 'none',
+            'localTilesReady' => (bool) ($mapConfig['local_ready'] ?? false),
+            'tileProgress' => $this->readTileProgress(),
+            'tilesGenerating' => $this->isTileGenerationRunning(),
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
+        ]);
+    }
+
+    /**
+     * Kick off local map tile generation (background).
+     */
+    public function generateTiles(Request $request): JsonResponse
+    {
+        $force = (bool) $request->boolean('force');
+        $lock = storage_path('app/map-tiles.generating');
+
+        if ($this->isTileGenerationRunning()) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Tile generation is already running. Check storage/logs/map-tiles.log',
+            ], 409);
+        }
+
+        file_put_contents($lock, json_encode([
+            'started_at' => now()->toIso8601String(),
+            'pid' => getmypid(),
+            'force' => $force,
+        ]));
+
+        // Run in background so the HTTP request returns immediately
+        $artisan = base_path('artisan');
+        $log = storage_path('logs/map-tiles.log');
+        $forceFlag = $force ? '--force' : '';
+        $cmd = sprintf(
+            'php %s zomboid:generate-map-tiles %s >> %s 2>&1; rm -f %s',
+            escapeshellarg($artisan),
+            $forceFlag,
+            escapeshellarg($log),
+            escapeshellarg($lock),
+        );
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            pclose(popen('start /B '.$cmd, 'r'));
+        } else {
+            exec('nohup '.$cmd.' > /dev/null 2>&1 &');
+        }
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Map tile generation started. This can take 10–60+ minutes. Refresh the map later.',
+            'log' => 'storage/logs/map-tiles.log',
         ]);
     }
 
@@ -159,5 +211,39 @@ class PlayerMapController extends Controller
             'Cache-Control' => 'public, max-age=86400',
             'Content-Type' => $contentType,
         ]);
+    }
+
+    private function isTileGenerationRunning(): bool
+    {
+        $lock = storage_path('app/map-tiles.generating');
+        if (! is_file($lock)) {
+            return false;
+        }
+
+        // Stale lock after 6 hours
+        if (filemtime($lock) < time() - 21600) {
+            @unlink($lock);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @return array{generating: bool, completed: int, total: int, percent: int}|null
+     */
+    private function readTileProgress(): ?array
+    {
+        if (! $this->isTileGenerationRunning()) {
+            return null;
+        }
+
+        return [
+            'generating' => true,
+            'completed' => 0,
+            'total' => 0,
+            'percent' => 0,
+        ];
     }
 }

@@ -52,8 +52,23 @@ class GenerateMapTiles extends Command
 
         $this->info("Using pzmap2dzi: {$pzmap2dziPath}");
 
-        // Check if tiles already exist
-        if (! $this->option('force') && is_dir($tilesPath) && count(scandir($tilesPath)) > 2) {
+        // Only skip when a usable tile pyramid exists (not just an empty/partial dir)
+        $layer0 = rtrim($tilesPath, '/').'/html/map_data/base/layer0_files';
+        $ready = false;
+        foreach (['0', '1', '2', '3'] as $level) {
+            if (is_dir($layer0.'/'.$level)) {
+                $files = array_merge(
+                    glob($layer0.'/'.$level.'/*.webp') ?: [],
+                    glob($layer0.'/'.$level.'/*.jpg') ?: [],
+                );
+                if ($files !== []) {
+                    $ready = true;
+                    break;
+                }
+            }
+        }
+
+        if (! $this->option('force') && $ready) {
             $this->warn('Tiles already exist. Use --force to regenerate.');
 
             return self::SUCCESS;

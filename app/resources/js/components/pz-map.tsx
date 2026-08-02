@@ -268,14 +268,16 @@ export default function PzMap({
         map.setView(center, mapConfig.defaultZoom);
 
         if (hasTiles && mapConfig.tileUrl && dzi) {
+            // errorTileUrl keeps the basemap from looking totally broken on missing tiles
             createDziTileLayer(mapConfig.tileUrl, {
                 tileSize: mapConfig.tileSize,
                 minZoom: mapConfig.minZoom,
                 maxZoom: mapConfig.maxZoom,
                 maxNativeZoom,
                 noWrap: true,
+                crossOrigin: mapConfig.tileUrl.startsWith('http') ? 'anonymous' : undefined,
             }).addTo(map);
-        } else if (!hasTiles) {
+        } else {
             addCoordinateGrid(map);
         }
 
