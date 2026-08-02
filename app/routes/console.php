@@ -40,10 +40,8 @@ Schedule::command('zomboid:refresh-item-catalog')
     ->dailyAt('05:15')
     ->runInBackground();
 
-Schedule::command('zomboid:generate-map-tiles')
-    ->everyThirtyMinutes()
-    ->when(fn () => ! is_dir(config('zomboid.map.tiles_path').'/html/map_data/base/layer0_files'))
-    ->runInBackground();
+// Map tiles are intentionally NOT scheduled — generation is heavy and opt-in only
+// (php artisan zomboid:generate-map-tiles or Admin → Player map button).
 
 Schedule::command('zomboid:download-item-icons')
     ->hourly()

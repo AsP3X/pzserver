@@ -149,12 +149,9 @@ if echo "$@" | grep -q "supervisord"; then
         php artisan zomboid:create-admin --no-interaction 2>&1 || true
     fi
 
-    # Map tiles — generate in background if missing
-    if [ ! -d "${PZ_MAP_TILES_PATH:-/map-tiles}/html/map_data/base/layer0_files" ] && [ -d "${PZ_SERVER_PATH:-/pz-server}" ]; then
-        echo "[entrypoint] Map tiles not found — generating in background..."
-        php artisan zomboid:generate-map-tiles \
-            >> /var/www/html/storage/logs/map-tiles.log 2>&1 &
-    fi
+    # Map tiles — do NOT auto-generate (CPU/disk heavy). Run manually if needed:
+    #   php artisan zomboid:generate-map-tiles --force
+    # or Admin → Player map → "Generate local tiles"
 
     # Item icons — download in background if catalog exists but icons are missing
     ICON_DIR="/var/www/html/public/images/items"
