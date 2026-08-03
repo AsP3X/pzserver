@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\MapConfigBuilder;
+use App\Services\MapTileGenerator;
 use App\Services\MapTileProgress;
 use App\Services\MapTileStore;
 use App\Services\OnlinePlayersReader;
@@ -28,6 +29,7 @@ class PlayerMapController extends Controller
         private readonly SafeZoneManager $safeZoneManager,
         private readonly MapTileStore $tileStore,
         private readonly MapTileProgress $tileProgress,
+        private readonly MapTileGenerator $tileGenerator,
     ) {}
 
     public function __invoke(): InertiaResponse
@@ -110,7 +112,7 @@ class PlayerMapController extends Controller
         $mapConfig = $this->mapConfigBuilder->build();
         $safeZoneConfig = $this->safeZoneManager->getConfig();
         $hasBasemap = $mapConfig['tileUrl'] !== null && $mapConfig['dzi'] !== null;
-        $canResume = $this->tileStore->hasLooseTiles() && ! $this->isTileGenerationRunning();
+        $canResume = $this->tileStore->hasLooseTiles() && ! $this->tileGenerator->isRunning();
 
         return Inertia::render('admin/player-map', [
             'markers' => $markers,
@@ -122,7 +124,7 @@ class PlayerMapController extends Controller
             'localTilesReady' => (bool) ($mapConfig['local_ready'] ?? false),
             'canResume' => $canResume,
             'tileProgress' => $this->readTileProgress(),
-            'tilesGenerating' => $this->isTileGenerationRunning(),
+            'tilesGenerating' => $this->tileGenerator->isRunning(),
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
         ]);
     }
@@ -132,68 +134,14 @@ class PlayerMapController extends Controller
      */
     public function generateTiles(Request $request): JsonResponse
     {
-        $force = (bool) $request->boolean('force');
-        $resume = (bool) $request->boolean('resume');
-        $lock = $this->tileProgress->lockPath();
-
-        if ($this->isTileGenerationRunning()) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'Tile generation is already running. Use Stop, or wait for it to finish.',
-            ], 409);
-        }
-
-        if ($force && $resume) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'Choose either force regenerate or resume, not both.',
-            ], 422);
-        }
-
-        $this->tileProgress->clearStopRequest();
-
-        file_put_contents($lock, json_encode([
-            'started_at' => now()->toIso8601String(),
-            'pid' => getmypid(),
-            'force' => $force,
-            'resume' => $resume,
-        ]));
-
-        $flags = '';
-        if ($force) {
-            $flags = '--force';
-        } elseif ($resume) {
-            $flags = '--resume';
-        }
-
-        // Run in background so the HTTP request returns immediately
-        $artisan = base_path('artisan');
-        $log = storage_path('logs/map-tiles.log');
-        $cmd = sprintf(
-            'php %s zomboid:generate-map-tiles %s >> %s 2>&1; rm -f %s',
-            escapeshellarg($artisan),
-            $flags,
-            escapeshellarg($log),
-            escapeshellarg($lock),
+        $result = $this->tileGenerator->start(
+            force: (bool) $request->boolean('force'),
+            resume: (bool) $request->boolean('resume'),
         );
 
-        if (PHP_OS_FAMILY === 'Windows') {
-            pclose(popen('start /B '.$cmd, 'r'));
-        } else {
-            exec('nohup '.$cmd.' > /dev/null 2>&1 &');
-        }
-
-        $message = $force
-            ? 'Full regenerate started (previous tiles cleared). This can take a long time.'
-            : ($resume
-                ? 'Resume started — continuing from existing loose tiles.'
-                : 'Map tile generation started. This can take 10–60+ minutes.');
-
-        return response()->json([
-            'ok' => true,
-            'message' => $message,
-            'log' => 'storage/logs/map-tiles.log',
-        ]);
+        return response()->json($result, $result['ok'] ? 200 : (
+            str_contains($result['message'], 'already running') ? 409 : 422
+        ));
     }
 
     /**
@@ -201,19 +149,9 @@ class PlayerMapController extends Controller
      */
     public function stopTiles(): JsonResponse
     {
-        if (! $this->isTileGenerationRunning()) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'No map tile generation is running.',
-            ], 409);
-        }
+        $result = $this->tileGenerator->requestStop();
 
-        $this->tileProgress->requestStop();
-
-        return response()->json([
-            'ok' => true,
-            'message' => 'Stop requested. Workers will exit shortly; partial tiles are kept for Resume.',
-        ]);
+        return response()->json($result, $result['ok'] ? 200 : 409);
     }
 
     /**
@@ -237,28 +175,6 @@ class PlayerMapController extends Controller
         ]);
     }
 
-    private function isTileGenerationRunning(): bool
-    {
-        // Progress file is written by artisan (CLI or UI-triggered)
-        if ($this->tileProgress->isRunning()) {
-            return true;
-        }
-
-        $lock = $this->tileProgress->lockPath();
-        if (! is_file($lock)) {
-            return false;
-        }
-
-        // Stale lock after 6 hours
-        if (filemtime($lock) < time() - 21600) {
-            @unlink($lock);
-
-            return false;
-        }
-
-        return true;
-    }
-
     /**
      * @return array{
      *     generating: bool,
@@ -275,10 +191,11 @@ class PlayerMapController extends Controller
     private function readTileProgress(): ?array
     {
         $progress = $this->tileProgress->read();
+        $running = $this->tileGenerator->isRunning();
 
-        if ($progress !== null && ($progress['generating'] || $this->isTileGenerationRunning())) {
+        if ($progress !== null && ($progress['generating'] || $running || in_array($progress['stage'], ['failed', 'stopped', 'done'], true))) {
             return [
-                'generating' => (bool) ($progress['generating'] || $this->isTileGenerationRunning()),
+                'generating' => (bool) ($progress['generating'] || $running),
                 'completed' => (int) $progress['completed'],
                 'total' => (int) $progress['total'],
                 'percent' => (int) $progress['percent'],
@@ -290,11 +207,10 @@ class PlayerMapController extends Controller
             ];
         }
 
-        if (! $this->isTileGenerationRunning()) {
+        if (! $running) {
             return null;
         }
 
-        // Lock present but progress not written yet
         return [
             'generating' => true,
             'completed' => 0,

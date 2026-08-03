@@ -274,6 +274,48 @@ export default function PlayerMap({
                     <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">{genMessage}</div>
                 )}
 
+                {tileProgress && (tileProgress.generating || tilesGenerating || ['failed', 'stopped', 'done'].includes(tileProgress.stage ?? '')) && (
+                    <div className="rounded-lg border border-border bg-background px-4 py-3 shadow-sm">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                            {(tileProgress.generating || tilesGenerating) && (
+                                <Loader2 className="size-4 animate-spin text-primary" />
+                            )}
+                            {tileProgress.message || t('admin.player_map.generating_tiles')}
+                            {tileProgress.step && tileProgress.steps ? (
+                                <span className="text-muted-foreground text-xs font-normal">
+                                    ({tileProgress.step}/{tileProgress.steps})
+                                </span>
+                            ) : null}
+                        </div>
+                        {(tileProgress.generating || tilesGenerating) && (
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                                {tileProgress.percent > 0 ? (
+                                    <div
+                                        className="h-full rounded-full bg-primary transition-all duration-500"
+                                        style={{ width: `${Math.max(tileProgress.percent, 2)}%` }}
+                                    />
+                                ) : (
+                                    <div className="h-full w-full animate-pulse rounded-full bg-primary/30" />
+                                )}
+                            </div>
+                        )}
+                        {tileProgress.total > 0 && (
+                            <p className="text-muted-foreground mt-1 text-xs">
+                                {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()} (
+                                {tileProgress.percent}%)
+                                {tileProgress.tiles_on_disk
+                                    ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
+                                    : ''}
+                            </p>
+                        )}
+                        {tileProgress.stage === 'failed' && (
+                            <p className="mt-1 text-xs text-red-400">
+                                See container log: storage/logs/map-tiles.log
+                            </p>
+                        )}
+                    </div>
+                )}
+
                 {serverStatus === 'offline' && (
                     <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
                         <AlertTriangle className="size-4 shrink-0" />

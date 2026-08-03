@@ -68,24 +68,26 @@ class GenerateMapTiles extends Command
             return self::FAILURE;
         }
 
-        if (! is_dir($serverPath)) {
-            $this->error("Game server path does not exist: {$serverPath}");
+        // Progress may already have been started by the web UI — refresh it
+        $this->progress->start([
+            'stage' => 'starting',
+            'step' => 0,
+            'steps' => 3,
+            'message' => 'Validating game files and tools…',
+        ]);
 
-            return self::FAILURE;
+        if (! is_dir($serverPath)) {
+            return $this->failEarly("Game server path does not exist: {$serverPath}");
         }
 
         if (! is_dir($serverPath.'/media')) {
-            $this->error("Game server files not ready yet (no media/ directory in {$serverPath})");
-
-            return self::FAILURE;
+            return $this->failEarly("Game server files not ready yet (no media/ directory in {$serverPath}). Wait for SteamCMD install to finish.");
         }
 
         // Check Python3 availability
         exec('python3 --version 2>&1', $output, $exitCode);
         if ($exitCode !== 0) {
-            $this->error('Python3 is required but not found.');
-
-            return self::FAILURE;
+            return $this->failEarly('Python3 is required but not found in the app container.');
         }
 
         $this->info('Python3 found: '.($output[0] ?? 'unknown version'));
@@ -93,9 +95,7 @@ class GenerateMapTiles extends Command
         // Check for pzmap2dzi
         $pzmap2dziPath = $this->findPzmap2dzi();
         if ($pzmap2dziPath === null) {
-            $this->error('pzmap2dzi not found.');
-
-            return self::FAILURE;
+            return $this->failEarly('pzmap2dzi not found at /opt/pzmap2dzi (rebuild the app image).');
         }
 
         $this->info("Using pzmap2dzi: {$pzmap2dziPath}");
@@ -109,6 +109,8 @@ class GenerateMapTiles extends Command
         // Default: skip only when a finished pack exists (not a partial loose pyramid)
         if (! $force && ! $resume && $hasPacked && ! $hasLoose) {
             $this->warn('Packed tiles already exist. Use --force to regenerate, or --resume after a partial run.');
+            $this->progress->finish(true, 'Packed tiles already exist. Use Start over / --force to regenerate.');
+            $this->clearLock();
 
             return self::SUCCESS;
         }
@@ -121,6 +123,8 @@ class GenerateMapTiles extends Command
 
         if ($resume && $hasPacked && ! $hasLoose) {
             $this->warn('Nothing to resume: only a finished pack is present. Use --force to regenerate from scratch.');
+            $this->progress->finish(true, 'Nothing to resume — only a finished pack exists. Use --force to regenerate.');
+            $this->clearLock();
 
             return self::SUCCESS;
         }
@@ -135,11 +139,12 @@ class GenerateMapTiles extends Command
         }
 
         $this->progress->clearStopRequest();
-        $this->progress->start([
+        $this->progress->update([
             'stage' => 'starting',
             'step' => 0,
             'steps' => 3,
             'message' => $resume ? 'Resuming map tile generation…' : 'Starting map tile generation…',
+            'generating' => true,
         ]);
 
         if ($force) {
@@ -172,7 +177,8 @@ class GenerateMapTiles extends Command
             if ($this->wasStopped) {
                 return $this->finishInterrupted();
             }
-            $this->progress->finish(false, 'Unpack failed.', 'pzmap2dzi unpack failed');
+            $this->progress->finish(false, 'Unpack failed. See storage/logs/pzmap2dzi.log', 'pzmap2dzi unpack failed');
+            $this->clearLock();
 
             return self::FAILURE;
         }
@@ -194,7 +200,8 @@ class GenerateMapTiles extends Command
             if ($this->wasStopped) {
                 return $this->finishInterrupted();
             }
-            $this->progress->finish(false, 'Render failed.', 'pzmap2dzi render base failed');
+            $this->progress->finish(false, 'Render failed. See storage/logs/pzmap2dzi.log', 'pzmap2dzi render base failed');
+            $this->clearLock();
 
             return self::FAILURE;
         }
@@ -218,7 +225,8 @@ class GenerateMapTiles extends Command
             if ($this->wasStopped) {
                 return $this->finishInterrupted();
             }
-            $this->progress->finish(false, 'Packing failed.', 'Failed to pack tiles into SQLite');
+            $this->progress->finish(false, 'Packing failed. See storage/logs/map-tiles.log', 'Failed to pack tiles into SQLite');
+            $this->clearLock();
 
             return self::FAILURE;
         }
@@ -226,11 +234,29 @@ class GenerateMapTiles extends Command
 
         $this->progress->clearStopRequest();
         $this->progress->finish(true, 'Map tiles ready at '.$this->tileStore->packPath());
+        $this->clearLock();
         $this->info('Map tiles ready at: '.$this->tileStore->packPath());
         $this->info('Loose tile files were packed away so backups/deletes stay fast.');
         $this->info('Total time: '.$this->formatElapsed(microtime(true) - $this->startedAt));
 
         return self::SUCCESS;
+    }
+
+    private function failEarly(string $message): int
+    {
+        $this->error($message);
+        $this->progress->finish(false, $message, 'validation_failed');
+        $this->clearLock();
+
+        return self::FAILURE;
+    }
+
+    private function clearLock(): void
+    {
+        $lock = $this->progress->lockPath();
+        if (is_file($lock)) {
+            @unlink($lock);
+        }
     }
 
     private function requestStopOnly(): int
@@ -288,6 +314,7 @@ class GenerateMapTiles extends Command
             'finished_at' => now()->toIso8601String(),
         ]);
 
+        $this->clearLock();
         $this->warn('Generation stopped. Loose tiles preserved for resume.');
         $this->info("Tiles on disk: ~{$tiles}");
         $this->info('Resume: docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume');
