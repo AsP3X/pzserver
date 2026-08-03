@@ -127,8 +127,10 @@ This stack throttles generation by default:
 | Control | Default | Env |
 |---------|---------|-----|
 | Render workers | **1** | `PZ_MAP_WORKERS` |
-| CPU/I/O priority | `nice -n 19` + `ionice -c 3` (idle) | `PZ_MAP_LOW_PRIORITY=true` |
+| CPU/I/O priority | `nice -n 15` + `ionice -c 2 -n 7` (low, not idle) | `PZ_MAP_LOW_PRIORITY`, `PZ_MAP_IONICE_CLASS` |
 | Pack micro-pauses | every 100 tiles, 10ms | `PZ_MAP_PACK_PAUSE_EVERY` / `PZ_MAP_PACK_PAUSE_US` |
+
+> **Note:** `ionice -c 3` (idle) was tried earlier but can leave render stuck in “preparing” for a very long time while the game server keeps the disk busy. Default is now best-effort low priority so prepare/scan still progresses.
 
 Still plan for:
 

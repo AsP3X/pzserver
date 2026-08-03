@@ -72,8 +72,13 @@ return [
         // Generation is I/O heavy — keep workers low so the game disk is not saturated.
         // Override with PZ_MAP_WORKERS=1 for quietest hosts.
         'generate_workers' => max(1, (int) env('PZ_MAP_WORKERS', 1)),
-        // nice -n 19 + ionice -c 3 (idle) when available
+        // nice + ionice when available. Prefer best-effort low prio over "idle" class:
+        // ionice -c 3 (idle) can starve for hours while the game server is writing.
         'generate_low_priority' => filter_var(env('PZ_MAP_LOW_PRIORITY', true), FILTER_VALIDATE_BOOL),
+        // 2 = best-effort (with nice level), 3 = idle (only when disk is free)
+        'generate_ionice_class' => max(1, min(3, (int) env('PZ_MAP_IONICE_CLASS', 2))),
+        'generate_ionice_level' => max(0, min(7, (int) env('PZ_MAP_IONICE_LEVEL', 7))),
+        'generate_nice' => max(-20, min(19, (int) env('PZ_MAP_NICE', 15))),
         // Micro-pauses while packing millions of files into SQLite
         'pack_pause_every' => max(50, (int) env('PZ_MAP_PACK_PAUSE_EVERY', 100)),
         'pack_pause_us' => max(0, (int) env('PZ_MAP_PACK_PAUSE_US', 10000)),

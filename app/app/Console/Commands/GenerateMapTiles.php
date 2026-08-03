@@ -797,6 +797,9 @@ YAML;
 
     /**
      * Prefix a shell command with nice/ionice so map gen yields disk to the game server.
+     *
+     * Default is best-effort low priority (class 2, level 7) — not idle class 3.
+     * Idle class can make prepare/render appear stuck for hours while the game is online.
      */
     private function prefixLowIoPriority(string $command): string
     {
@@ -804,13 +807,20 @@ YAML;
             return $command;
         }
 
+        $nice = (int) config('zomboid.map.generate_nice', 15);
+        $ioClass = (int) config('zomboid.map.generate_ionice_class', 2);
+        $ioLevel = (int) config('zomboid.map.generate_ionice_level', 7);
+
         $prefix = '';
         if ($this->shellCommandExists('nice')) {
-            $prefix .= 'nice -n 19 ';
+            $prefix .= 'nice -n '.$nice.' ';
         }
-        // idle I/O class — only uses disk when nothing else needs it
         if ($this->shellCommandExists('ionice')) {
-            $prefix .= 'ionice -c 3 ';
+            if ($ioClass === 3) {
+                $prefix .= 'ionice -c 3 ';
+            } else {
+                $prefix .= 'ionice -c '.$ioClass.' -n '.$ioLevel.' ';
+            }
         }
 
         return $prefix !== '' ? $prefix.$command : $command;
