@@ -12,9 +12,62 @@ Then **log out and back in**.
 
 ```bash
 make logs    # or .\make.ps1 logs on Windows
+# or:
+docker logs -f pz-game-server
 ```
 
 The game server takes a few minutes to download via SteamCMD on first launch. Be patient.
+
+## Game server starts then exits: "Failed to connect to Steam servers"
+
+With `USE_STEAM=true` (default for AMD64), the dedicated server **must** reach Steam after launch. If auth fails, PZ shuts down immediately (you may also see a harmless NPE on exit because the world never loaded).
+
+Typical log sequence:
+
+```text
+Waiting for response from Steam servers
+Failed to connect to Steam servers
+Server exited
+```
+
+SteamCMD may also show: `Timed out waiting for update to start` during validate.
+
+**Checks (run on the host):**
+
+```bash
+# Container can resolve and reach Steam?
+docker exec pz-game-server getent hosts api.steampowered.com 2>/dev/null || true
+docker exec pz-game-server sh -c 'wget -qO- --timeout=10 https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/ 2>&1 | head -c 200' || true
+
+# Host outbound (firewall / cloud security group must allow outbound HTTPS + Steam)
+curl -fsS --max-time 10 https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/ | head -c 200
+```
+
+**Mitigations:**
+
+1. **Redeploy with public DNS** (compose sets `8.8.8.8` / `1.1.1.1` for the game container when using current `docker-compose.amd64.yml`):
+
+   ```bash
+   git pull && ./deploy.sh
+   ```
+
+2. **Cloud / host firewall:** allow **outbound** TCP 443 and Steam traffic (not only inbound game ports 16261–16262/udp).
+
+3. **Retry:** Steam outages and rate limits happen; restart after a few minutes:
+
+   ```bash
+   docker restart pz-game-server
+   docker logs -f pz-game-server
+   ```
+
+4. **Ignore noise** that is usually harmless:
+
+   - `libjsig.so` / `LD_PRELOAD` cannot be preloaded  
+   - `unknown option ""`  
+   - `libPZXInitThreads64.so was not found` (OK for dedicated server)  
+   - SteamCMD `validate` every boot (slow but expected on AMD64)
+
+The long **Checking for available updates / Verifying installation** phase is SteamCMD on every container start (AMD64 image). The fatal line is **Failed to connect to Steam servers** after the Java server has already begun.
 
 ## Can't connect in-game
 
