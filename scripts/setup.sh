@@ -686,8 +686,12 @@ mkdir -p \
     data/postgres data/redis \
     data/app-vendor data/app-node-modules data/app-build \
     data/caddy-data data/caddy-config
-# Containers may run as various UIDs — make host dirs writable
-chmod -R a+rwX data 2>/dev/null || true
+# Containers may run as various UIDs — make host dirs writable.
+# Do NOT chmod -R all of ./data (map-tiles / postgres can be huge and hang setup).
+for _d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config; do
+    chmod a+rwx "data/${_d}" 2>/dev/null || true
+done
+chmod -R a+rwX data/zomboid/Lua 2>/dev/null || true
 
 echo "Ensuring Docker network proxy-network exists..."
 if ! docker network inspect proxy-network >/dev/null 2>&1; then

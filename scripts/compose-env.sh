@@ -83,7 +83,17 @@ pz_ensure_data_dirs() {
     "${PZ_REPO_ROOT}/data/app-build" \
     "${PZ_REPO_ROOT}/data/caddy-data" \
     "${PZ_REPO_ROOT}/data/caddy-config"
-  chmod -R a+rwX "${PZ_REPO_ROOT}/data" 2>/dev/null || true
+
+  # Never chmod -R the whole ./data tree: map-tiles (DZI pyramids) and postgres
+  # can contain hundreds of thousands of files and make deploy look "stuck".
+  # Only ensure top-level dirs are traversable/writable; Lua bridge needs recurse.
+  local d
+  for d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config; do
+    chmod a+rwx "${PZ_REPO_ROOT}/data/${d}" 2>/dev/null || true
+  done
+  if [[ -d "${PZ_REPO_ROOT}/data/zomboid/Lua" ]]; then
+    chmod -R a+rwX "${PZ_REPO_ROOT}/data/zomboid/Lua" 2>/dev/null || true
+  fi
 }
 
 # Kept for callers; Postgres is a bind mount under ./data/postgres now.
@@ -114,26 +124,38 @@ PZ_STACK_CONTAINERS=(
 # Remove leftover containers by name (survives compose project / profile mismatches)
 pz_force_remove_stack_containers() {
   local name
+  local any=0
   for name in "${PZ_STACK_CONTAINERS[@]}"; do
     if docker container inspect "$name" >/dev/null 2>&1; then
-      echo "  Removing leftover container: ${name}"
+      any=1
+      echo "  Stopping/removing: ${name}"
+      # Bounded stop so game-server (stop_grace_period: 60s) cannot hang deploy forever
+      docker stop -t 15 "$name" >/dev/null 2>&1 || true
       docker rm -f "$name" >/dev/null 2>&1 || true
     fi
   done
+  if [[ "$any" -eq 0 ]]; then
+    echo "  (no leftover stack containers)"
+  fi
 }
 
 pz_up() {
+  echo "→ Ensuring data directories..."
   pz_ensure_db_volume
   pz_ensure_data_dirs
+  echo "→ Ensuring Docker networks..."
   pz_ensure_networks
   pz_load_web_mode
-  # Avoid "name already in use" after partial deploys / mode switches
-  pz_force_remove_stack_containers
   echo "Web proxy mode: ${WEB_PROXY_MODE}"
+  # Avoid "name already in use" after partial deploys / mode switches
+  echo "→ Refreshing stack containers (stop + recreate)..."
+  pz_force_remove_stack_containers
   # Always build local fixed images (app + game-server overlay on upstream base)
-  echo "Building local images (app + game-server on top of upstream base)..."
+  echo "→ Building local images (app + game-server) — this can take several minutes..."
   pz_compose build app game-server
+  echo "→ Starting containers..."
   pz_compose up -d --build --remove-orphans
+  echo "→ Stack is up."
 }
 
 # Rebuild only the game-server overlay (FROM renegademaster / joyfui + our scripts)

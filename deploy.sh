@@ -92,6 +92,9 @@ if [[ ! -f .env || ! -f app/.env ]]; then
   exit 0
 fi
 
-echo "Environment found — starting stack..."
+echo "Environment found — starting / redeploying stack..."
+echo "(Progress lines below come from the deploy helper; builds can take a few minutes.)"
+echo ""
 pz_up
+echo ""
 pz_info
