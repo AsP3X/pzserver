@@ -332,6 +332,35 @@ export type StackedItem = {
     containers: string[];
 };
 
+export type VaultItemRow = {
+    id: string;
+    full_type: string;
+    name: string;
+    category: string;
+    condition: number;
+    count: number;
+    icon: string;
+};
+
+export type VaultCapacity = {
+    used: number;
+    total: number;
+    max: number;
+    upgrade_cost: number;
+    upgrade_increment: number;
+};
+
+export type VaultTransactionRow = {
+    id: string;
+    direction: 'deposit' | 'withdraw';
+    status: 'pending' | 'completed' | 'partial' | 'failed';
+    full_type: string;
+    requested_count: number;
+    actual_count: number;
+    fee_charged: string;
+    created_at: string;
+};
+
 export type ItemCatalogEntry = {
     full_type: string;
     name: string;
