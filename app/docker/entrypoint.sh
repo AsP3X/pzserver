@@ -25,8 +25,10 @@ seed_bind_mount() {
     if [ -n "$marker" ] && [ ! -e "$dest/$marker" ]; then
         need_seed=1
     elif [ -z "$marker" ]; then
-        # empty-directory check
-        if [ ! -d "$dest" ] || [ -z "$(ls -A "$dest" 2>/dev/null)" ]; then
+        # Empty-directory check. `ls -A` also lists dot files, so a stray
+        # .gitkeep would make the mount look populated and silently skip
+        # seeding; treat it as empty.
+        if [ ! -d "$dest" ] || [ -z "$(ls -A "$dest" 2>/dev/null | grep -v '^\.gitkeep$')" ]; then
             need_seed=1
         fi
     fi
