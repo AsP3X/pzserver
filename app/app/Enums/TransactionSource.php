@@ -11,4 +11,6 @@ enum TransactionSource: string
     case Payment = 'payment';
     case InGameDeposit = 'in_game_deposit';
     case AdminReset = 'admin_reset';
+    case VaultFee = 'vault_fee';
+    case VaultUpgrade = 'vault_upgrade';
 }
