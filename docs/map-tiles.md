@@ -111,13 +111,41 @@ After it finishes you should see `./data/map-tiles/tiles.sqlite` and the loose p
 
 If packing is interrupted, re-run `--pack-only` (or regenerate with `--force`).
 
-### Resource expectations
+### Resource expectations / disk lag
 
-Local isometric render is demanding (pzmap2dzi’s own guidance is high RAM/disk for full maps). Preview-quality settings used by this stack (`layer_range`, `omit_levels`, WebP) reduce cost, but still plan for:
+Local isometric render is **extremely disk-heavy** (millions of small tile writes). On the same disk as the game world this can briefly push **disk util to 100%** and lag the dedicated server.
 
-- Long runtime (tens of minutes to hours depending on CPU)
-- Temporary disk spike while the loose pyramid exists **before** pack+delete
-- Prefer running generate when the host is idle
+This stack throttles generation by default:
+
+| Control | Default | Env |
+|---------|---------|-----|
+| Render workers | **1** | `PZ_MAP_WORKERS` |
+| CPU/I/O priority | `nice -n 19` + `ionice -c 3` (idle) | `PZ_MAP_LOW_PRIORITY=true` |
+| Pack micro-pauses | every 100 tiles, 10ms | `PZ_MAP_PACK_PAUSE_EVERY` / `PZ_MAP_PACK_PAUSE_US` |
+
+Still plan for:
+
+- Long runtime (hours with 1 worker is normal and intentional)
+- Temporary disk use while the loose pyramid exists **before** pack+delete
+- Prefer generating when few players are online
+
+Quieter host (even slower generate):
+
+```bash
+# in .env / app env
+PZ_MAP_WORKERS=1
+PZ_MAP_LOW_PRIORITY=true
+PZ_MAP_PACK_PAUSE_EVERY=50
+PZ_MAP_PACK_PAUSE_US=20000
+```
+
+Faster generate (more lag risk):
+
+```bash
+PZ_MAP_WORKERS=4
+# or one-shot:
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --workers=4
+```
 
 ### Progress
 

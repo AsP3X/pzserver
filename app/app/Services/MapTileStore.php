@@ -307,8 +307,10 @@ class MapTileStore
 
         $insert = $pdo->prepare('INSERT OR REPLACE INTO tiles (z, x, y, format, data) VALUES (?, ?, ?, ?, ?)');
         $count = 0;
-        $batchSize = 500;
-        $progressEvery = 1000;
+        $batchSize = 200;
+        $progressEvery = 500;
+        $pauseEvery = max(50, (int) config('zomboid.map.pack_pause_every', 100));
+        $pauseUs = max(0, (int) config('zomboid.map.pack_pause_us', 10000));
 
         $pdo->beginTransaction();
 
@@ -356,6 +358,11 @@ class MapTileStore
             if ($count % $batchSize === 0) {
                 $pdo->commit();
                 $pdo->beginTransaction();
+            }
+
+            // Yield disk to the game server / OS
+            if ($pauseUs > 0 && $count % $pauseEvery === 0) {
+                usleep($pauseUs);
             }
 
             if ($onProgress !== null && ($count % $progressEvery === 0 || ($totalEstimate > 0 && $count >= $totalEstimate))) {

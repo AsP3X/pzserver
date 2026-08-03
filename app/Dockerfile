@@ -13,7 +13,8 @@ RUN apk add --no-cache \
     npm \
     python3 \
     py3-pip \
-    git
+    git \
+    util-linux
 
 # Install PHP extensions
 RUN docker-php-ext-install \

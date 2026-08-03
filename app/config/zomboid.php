@@ -69,6 +69,14 @@ return [
             'y0' => -152032,
             'sqr' => 128,
         ],
+        // Generation is I/O heavy — keep workers low so the game disk is not saturated.
+        // Override with PZ_MAP_WORKERS=1 for quietest hosts.
+        'generate_workers' => max(1, (int) env('PZ_MAP_WORKERS', 1)),
+        // nice -n 19 + ionice -c 3 (idle) when available
+        'generate_low_priority' => filter_var(env('PZ_MAP_LOW_PRIORITY', true), FILTER_VALIDATE_BOOL),
+        // Micro-pauses while packing millions of files into SQLite
+        'pack_pause_every' => max(50, (int) env('PZ_MAP_PACK_PAUSE_EVERY', 100)),
+        'pack_pause_us' => max(0, (int) env('PZ_MAP_PACK_PAUSE_US', 10000)),
     ],
 
     /*

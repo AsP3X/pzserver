@@ -112,9 +112,23 @@ class MapTileGenerator
 
         // setsid detaches from php-fpm so the job survives request end
         // IMPORTANT: use CLI php binary — PHP_BINARY under FPM is php-fpm and cannot run artisan
+        // nice/ionice so map gen does not starve the game disk
+        $prio = '';
+        if (config('zomboid.map.generate_low_priority', true)) {
+            $prio = 'nice -n 19 ';
+            // ionice may be missing on minimal images — ignore failure via shell
+            $prio .= 'ionice -c 3 2>/dev/null; ';
+            // Re-run with ionice only if available
+            $prio = 'nice -n 19 ';
+            exec('command -v ionice 2>/dev/null', $ioniceOut, $ioniceCode);
+            if ($ioniceCode === 0) {
+                $prio = 'nice -n 19 ionice -c 3 ';
+            }
+        }
         $cmd = sprintf(
-            'cd %s && setsid %s %s zomboid:generate-map-tiles %s >> %s 2>&1 < /dev/null & echo $!',
+            'cd %s && setsid %s%s %s zomboid:generate-map-tiles %s >> %s 2>&1 < /dev/null & echo $!',
             escapeshellarg(base_path()),
+            $prio,
             escapeshellarg($php),
             escapeshellarg($artisan),
             $flags,

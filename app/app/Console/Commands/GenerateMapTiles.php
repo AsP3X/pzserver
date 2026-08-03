@@ -163,17 +163,22 @@ class GenerateMapTiles extends Command
         $confPath = $this->generateConfig($serverPath, $tilesPath, $pzmapRoot);
         $this->info("Generated config: {$confPath}");
 
-        // Step 1: Unpack textures
-        $this->info('Step 1/3: Unpacking textures...');
+        // Step 1: Unpack textures (very disk-heavy — skip when cache already present on resume)
+        $this->info('Step 1/3: Unpacking textures (low I/O priority; may take a while)…');
         $this->progress->update([
             'stage' => 'unpack',
             'step' => 1,
             'steps' => 3,
-            'message' => 'Unpacking textures…',
+            'message' => 'Unpacking textures (throttled I/O)…',
             'completed' => 0,
             'total' => 0,
         ]);
-        if (! $this->runPzmap($pzmap2dziPath, $confPath, 'unpack', trackJobProgress: false)) {
+        if ($resume && $this->textureUnpackLooksPresent($tilesPath, $serverPath)) {
+            $this->info('Skipping unpack — texture cache already present (resume).');
+            $this->progress->update([
+                'message' => 'Skipped unpack (cache present)…',
+            ]);
+        } elseif (! $this->runPzmap($pzmap2dziPath, $confPath, 'unpack', trackJobProgress: false)) {
             if ($this->wasStopped) {
                 return $this->finishInterrupted();
             }
@@ -185,14 +190,15 @@ class GenerateMapTiles extends Command
         $this->newLine();
 
         // Step 2: Render isometric tiles (base layer) — creates many small files temporarily
-        $this->info('Step 2/3: Rendering isometric tiles (temporary multi-file pyramid)...');
+        $this->info('Step 2/3: Rendering isometric tiles (low workers + idle I/O class)…');
         $this->info('Tip: stop safely with: php artisan zomboid:generate-map-tiles --stop  (or Admin → Stop)');
         $this->info('Resume later with: php artisan zomboid:generate-map-tiles --resume');
+        $this->warn('Generation intentionally throttles disk so the game server stays playable.');
         $this->progress->update([
             'stage' => 'render',
             'step' => 2,
             'steps' => 3,
-            'message' => $resume ? 'Resuming isometric render…' : 'Rendering isometric tiles…',
+            'message' => $resume ? 'Resuming isometric render (throttled)…' : 'Rendering isometric tiles (throttled)…',
             'completed' => 0,
             'total' => 0,
         ]);
@@ -433,20 +439,27 @@ class GenerateMapTiles extends Command
     {
         $pzmap2dziDir = dirname($pzmap2dziPath);
         $logFile = storage_path('logs/pzmap2dzi.log');
-        @file_put_contents($logFile, '');
+        // Append separator so resume/re-runs keep history without wiping mid-flight tails
+        file_put_contents($logFile, "\n==== ".now()->toIso8601String()." {$subcommand} ====\n", FILE_APPEND);
 
-        $command = sprintf(
-            'cd %s && python3 %s -c %s %s',
-            escapeshellarg($pzmap2dziDir),
+        $inner = sprintf(
+            'python3 %s -c %s %s',
             escapeshellarg($pzmap2dziPath),
             escapeshellarg($confPath),
             $subcommand,
+        );
+        $inner = $this->prefixLowIoPriority($inner);
+
+        $command = sprintf(
+            'cd %s && %s',
+            escapeshellarg($pzmap2dziDir),
+            $inner,
         );
 
         $this->line("Running: {$command}");
         $this->line("Output logged to: {$logFile}");
         if ($trackJobProgress) {
-            $this->line('Progress updates every ~1s from pzmap2dzi (job: done/total).');
+            $this->line('Progress updates every ~2s from pzmap2dzi (job: done/total). Disk scans throttled.');
         }
 
         $descriptors = [
@@ -459,7 +472,7 @@ class GenerateMapTiles extends Command
         if (! is_resource($process)) {
             // Fallback to blocking exec if proc_open is unavailable
             $result = 0;
-            exec($command.' > '.escapeshellarg($logFile).' 2>&1', $output, $result);
+            exec($command.' >> '.escapeshellarg($logFile).' 2>&1', $output, $result);
 
             return $this->handlePzmapExit($subcommand, $result, $logFile);
         }
@@ -502,7 +515,7 @@ class GenerateMapTiles extends Command
                 break;
             }
 
-            usleep(1000000); // 1s
+            usleep(2000000); // 2s — less find(1)/stat spam on the game disk
         }
 
         // Final progress sample before we close
@@ -544,7 +557,8 @@ class GenerateMapTiles extends Command
         $job = $this->progress->parseJobProgressFromLog($logFile);
 
         $now = time();
-        if ($now - $this->lastDiskCountAt >= 10) {
+        // find(1) over a multi-million-file tree is itself a disk storm — do it rarely
+        if ($now - $this->lastDiskCountAt >= 45) {
             $this->lastTilesOnDisk = $this->progress->countLooseTiles($this->tileStore->looseLayerPath());
             $this->lastDiskCountAt = $now;
         }
@@ -692,9 +706,9 @@ class GenerateMapTiles extends Command
     private function generateConfig(string $serverPath, string $tilesPath, string $pzmapRoot): string
     {
         $mapOption = $this->option('map') ?: 'default';
-        $workerCount = (int) ($this->option('workers') ?: $this->detectCpuCores());
+        $workerCount = $this->detectCpuCores();
 
-        $this->info("Using {$workerCount} render workers");
+        $this->info("Using {$workerCount} render worker(s) (disk-friendly default; set --workers=N or PZ_MAP_WORKERS)");
 
         // Workshop content lives under the dedicated server install on this stack
         $modRoot = $serverPath.'/steamapps/workshop/content/108600';
@@ -777,16 +791,76 @@ YAML;
         return $confPath;
     }
 
-    private function detectCpuCores(): int
+    /**
+     * Prefix a shell command with nice/ionice so map gen yields disk to the game server.
+     */
+    private function prefixLowIoPriority(string $command): string
     {
-        $cores = 4;
-
-        if (is_readable('/proc/cpuinfo')) {
-            $cpuinfo = file_get_contents('/proc/cpuinfo');
-            $cores = substr_count($cpuinfo, 'processor');
+        if (! config('zomboid.map.generate_low_priority', true)) {
+            return $command;
         }
 
-        return max(1, $cores);
+        $prefix = '';
+        if ($this->shellCommandExists('nice')) {
+            $prefix .= 'nice -n 19 ';
+        }
+        // idle I/O class — only uses disk when nothing else needs it
+        if ($this->shellCommandExists('ionice')) {
+            $prefix .= 'ionice -c 3 ';
+        }
+
+        return $prefix !== '' ? $prefix.$command : $command;
+    }
+
+    private function shellCommandExists(string $bin): bool
+    {
+        $out = [];
+        $code = 1;
+        @exec('command -v '.escapeshellarg($bin).' 2>/dev/null', $out, $code);
+
+        return $code === 0 && ($out[0] ?? '') !== '';
+    }
+
+    /**
+     * Heuristic: textures already unpacked under tiles or install tree.
+     */
+    private function textureUnpackLooksPresent(string $tilesPath, string $serverPath): bool
+    {
+        $candidates = [
+            rtrim($tilesPath, '/').'/html/texture',
+            rtrim($tilesPath, '/').'/texture',
+            rtrim($serverPath, '/').'/media/texturepacks',
+        ];
+        foreach ($candidates as $dir) {
+            if (is_dir($dir) && (glob($dir.'/*') ?: []) !== []) {
+                return true;
+            }
+        }
+
+        // Resume with an existing loose pyramid implies unpack already ran once
+        return $this->tileStore->hasLooseTiles();
+    }
+
+    private function detectCpuCores(): int
+    {
+        // Prefer explicit low default — parallel workers saturate disks
+        $configured = (int) config('zomboid.map.generate_workers', 1);
+        if ($this->option('workers')) {
+            return max(1, (int) $this->option('workers'));
+        }
+
+        if ($configured > 0) {
+            return max(1, $configured);
+        }
+
+        $cores = 2;
+        if (is_readable('/proc/cpuinfo')) {
+            $cpuinfo = (string) file_get_contents('/proc/cpuinfo');
+            $cores = max(1, substr_count($cpuinfo, 'processor'));
+        }
+
+        // Never use all cores by default
+        return max(1, min(2, (int) floor($cores / 2)));
     }
 
     private function findPzmap2dzi(): ?string
