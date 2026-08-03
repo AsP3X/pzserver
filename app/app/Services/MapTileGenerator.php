@@ -116,11 +116,9 @@ class MapTileGenerator
         $prio = '';
         if (config('zomboid.map.generate_low_priority', true)) {
             $prio = 'nice -n 19 ';
-            // ionice may be missing on minimal images — ignore failure via shell
-            $prio .= 'ionice -c 3 2>/dev/null; ';
-            // Re-run with ionice only if available
-            $prio = 'nice -n 19 ';
-            exec('command -v ionice 2>/dev/null', $ioniceOut, $ioniceCode);
+            $ioniceOut = [];
+            $ioniceCode = 1;
+            @exec('command -v ionice 2>/dev/null', $ioniceOut, $ioniceCode);
             if ($ioniceCode === 0) {
                 $prio = 'nice -n 19 ionice -c 3 ';
             }
