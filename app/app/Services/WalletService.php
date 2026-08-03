@@ -23,7 +23,10 @@ class WalletService
      */
     public function getOrCreateWallet(User $user): Wallet
     {
-        return $user->wallet ?? $user->wallet()->create([
+        // Query rather than reading $user->wallet: a relation cached as null
+        // before the wallet existed would otherwise cause a duplicate insert
+        // on a second call against the same in-memory user.
+        return $user->wallet()->first() ?? $user->wallet()->create([
             'balance' => 0,
             'total_earned' => 0,
             'total_spent' => 0,

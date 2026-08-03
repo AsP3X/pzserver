@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\TransactionSource;
 use App\Models\User;
 use App\Models\Vault;
 use App\Models\VaultItem;
@@ -17,6 +18,8 @@ use InvalidArgumentException;
  */
 class VaultService
 {
+    public function __construct(private readonly WalletService $walletService) {}
+
     /**
      * Get the player's vault, creating it with the configured default capacity.
      */
@@ -132,6 +135,41 @@ class VaultService
             }
 
             $item->save();
+        });
+    }
+
+    /**
+     * Buy one capacity increment with wallet coins.
+     */
+    public function purchaseSlots(User $user): Vault
+    {
+        $settings = VaultSetting::instance();
+        $vault = $this->getOrCreateVault($user);
+
+        $newCapacity = $vault->slot_capacity + $settings->slot_upgrade_increment;
+
+        if ($newCapacity > $settings->max_slots) {
+            throw new InvalidArgumentException('Vault is already at its maximum size.');
+        }
+
+        if ($this->walletService->getAvailableBalance($user) < $settings->slot_upgrade_cost) {
+            throw new InvalidArgumentException('Insufficient available balance for the upgrade.');
+        }
+
+        return DB::transaction(function () use ($user, $vault, $settings, $newCapacity) {
+            $this->walletService->debit(
+                $this->walletService->getOrCreateWallet($user),
+                (float) $settings->slot_upgrade_cost,
+                TransactionSource::VaultUpgrade,
+                "Vault capacity upgrade to {$newCapacity} slots",
+                Vault::class,
+                $vault->id,
+            );
+
+            $vault->slot_capacity = $newCapacity;
+            $vault->save();
+
+            return $vault;
         });
     }
 
