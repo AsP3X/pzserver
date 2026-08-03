@@ -14,6 +14,47 @@ class MapTileProgress
         return storage_path('app/map-tiles.progress.json');
     }
 
+    public function stopFlagPath(): string
+    {
+        return storage_path('app/map-tiles.stop');
+    }
+
+    public function lockPath(): string
+    {
+        return storage_path('app/map-tiles.generating');
+    }
+
+    /**
+     * Request cooperative stop of a running generate job.
+     */
+    public function requestStop(): void
+    {
+        $path = $this->stopFlagPath();
+        $dir = dirname($path);
+        if (! is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        file_put_contents($path, json_encode([
+            'requested_at' => now()->toIso8601String(),
+        ]));
+        $this->update([
+            'message' => 'Stop requested — waiting for workers to exit…',
+        ]);
+    }
+
+    public function clearStopRequest(): void
+    {
+        $path = $this->stopFlagPath();
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+
+    public function shouldStop(): bool
+    {
+        return is_file($this->stopFlagPath());
+    }
+
     /**
      * @return array{
      *     generating: bool,
@@ -101,7 +142,8 @@ class MapTileProgress
         $current = $this->read() ?? [];
         $fields['updated_at'] = now()->toIso8601String();
         if (! array_key_exists('generating', $fields)) {
-            $fields['generating'] = true;
+            // Keep previous generating flag when finishing/stopped updates set it explicitly
+            $fields['generating'] = (bool) ($current['generating'] ?? true);
         }
 
         $merged = array_merge($current, $fields);
@@ -277,7 +319,7 @@ class MapTileProgress
             'render' => 8 + (int) round($ratio * 82), // ~8–90%
             'pack' => 90 + (int) round($ratio * 9), // ~90–99%
             'done' => 100,
-            'failed' => max(0, min(99, (int) ($data['percent'] ?? 0))),
+            'stopped', 'failed' => max(0, min(99, (int) ($data['percent'] ?? 0))),
             default => (int) ($data['percent'] ?? 0),
         };
     }

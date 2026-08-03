@@ -77,14 +77,20 @@ Local basemap tiles are **optional**. By default the panel uses proxy tiles from
 After generation, tiles are **packed into a single SQLite file** (`data/map-tiles/tiles.sqlite`) so the host does not retain millions of loose DZI image files. See [map-tiles.md](map-tiles.md) for full details.
 
 ```bash
-# Render + pack into tiles.sqlite (CPU/disk heavy; opt-in only)
+# Clear previous tiles (cleanup before a clean test)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear
+
+# Full generate (wipes previous, then render + pack)
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
+
+# Stop a running job (keeps partial loose tiles)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop
+
+# Resume after stop / interrupt
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume
 
 # Pack an existing multi-file pyramid without re-rendering
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
-
-# Same via Compose service name
-docker compose exec app php artisan zomboid:generate-map-tiles --force
 ```
 
 Make / Windows wrappers:

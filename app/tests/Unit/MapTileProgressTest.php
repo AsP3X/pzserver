@@ -65,3 +65,16 @@ it('returns null when log has no job lines', function () {
 
     @unlink($log);
 });
+
+it('tracks stop requests', function () {
+    $this->progress->clearStopRequest();
+    expect($this->progress->shouldStop())->toBeFalse();
+
+    $this->progress->start(['stage' => 'render']);
+    $this->progress->requestStop();
+
+    expect($this->progress->shouldStop())->toBeTrue();
+
+    $this->progress->clearStopRequest();
+    expect($this->progress->shouldStop())->toBeFalse();
+});

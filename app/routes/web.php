@@ -57,6 +57,7 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         // Map Tiles
         Route::get('map-tiles/{level}/{tile}', [Admin\PlayerMapController::class, 'tile'])->name('map.tile')->where('tile', '.*');
         Route::post('players/map/generate-tiles', [Admin\PlayerMapController::class, 'generateTiles'])->name('players.map.generate-tiles')->middleware('throttle:admin-sensitive');
+        Route::post('players/map/stop-tiles', [Admin\PlayerMapController::class, 'stopTiles'])->name('players.map.stop-tiles')->middleware('throttle:admin-sensitive');
 
         // Config
         Route::get('config', [Admin\ConfigController::class, 'index'])->name('config');

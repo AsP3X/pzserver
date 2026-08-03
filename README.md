@@ -154,14 +154,20 @@ The panel serves tiles from the pack at `/admin/map-tiles/{z}/{x}_{y}`.
 Run inside the **app** container (`pz-app`). Stack must already be up.
 
 ```bash
+# Clear previous tiles / partial runs
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear
+
 # Full generate (render → pack into tiles.sqlite → remove loose files)
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
 
+# Stop a running job (keeps partial tiles for resume)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop
+
+# Resume after stop or crash (incremental; does not wipe)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume
+
 # Already have a multi-file DZI pyramid? Pack it without re-rendering
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
-
-# Debug only: keep the multi-file pyramid after packing (not recommended)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --keep-loose
 ```
 
 Via Compose service name (same effect):
@@ -184,7 +190,10 @@ make exec CMD="php artisan zomboid:generate-map-tiles --force"
 
 | Flag | Meaning |
 |------|---------|
-| `--force` | Clear existing pack/loose tiles and re-render |
+| `--force` | Clear existing pack/loose tiles and re-render from scratch |
+| `--resume` | Continue an interrupted render (never deletes loose tiles) |
+| `--stop` | Request stop of a running job (keeps partial tiles) |
+| `--clear` | Only delete tiles + progress state, then exit |
 | `--pack-only` | Convert an existing loose pyramid into `tiles.sqlite` (no re-render) |
 | `--keep-loose` | Do not delete the multi-file pyramid after packing |
 | `--workers=N` | Override render worker count (default: CPU cores) |

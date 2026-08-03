@@ -40,6 +40,7 @@ type Props = {
     hasTiles: boolean;
     tileSource?: 'local' | 'proxy' | 'none' | string;
     localTilesReady?: boolean;
+    canResume?: boolean;
     tileProgress: TileProgress | null;
     tilesGenerating?: boolean;
     safeZones: SafeZone[];
@@ -61,18 +62,31 @@ export default function PlayerMap({
     hasTiles,
     tileSource = 'proxy',
     localTilesReady = false,
+    canResume = false,
     tileProgress,
     tilesGenerating = false,
     safeZones,
 }: Props) {
     const { t } = useTranslation();
     const [genLoading, setGenLoading] = useState(false);
+    const [stopLoading, setStopLoading] = useState(false);
     const [genMessage, setGenMessage] = useState<string | null>(null);
     usePoll(5000, {
-        only: ['markers', 'onlineCount', 'serverStatus', 'hasTiles', 'tileProgress', 'safeZones', 'tileSource', 'localTilesReady', 'tilesGenerating'],
+        only: [
+            'markers',
+            'onlineCount',
+            'serverStatus',
+            'hasTiles',
+            'tileProgress',
+            'safeZones',
+            'tileSource',
+            'localTilesReady',
+            'tilesGenerating',
+            'canResume',
+        ],
     });
 
-    async function generateTiles(force = false) {
+    async function generateTiles(opts: { force?: boolean; resume?: boolean } = {}) {
         setGenLoading(true);
         setGenMessage(null);
         try {
@@ -86,17 +100,46 @@ export default function PlayerMap({
                     'X-Requested-With': 'XMLHttpRequest',
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({ force }),
+                body: JSON.stringify({ force: !!opts.force, resume: !!opts.resume }),
             });
             const json = await res.json().catch(() => ({}));
             setGenMessage(json.message || (res.ok ? 'Started' : 'Failed to start'));
             if (res.ok) {
-                router.reload({ only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady'] });
+                router.reload({
+                    only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady', 'canResume'],
+                });
             }
         } catch {
             setGenMessage('Network error starting tile generation');
         }
         setGenLoading(false);
+    }
+
+    async function stopTiles() {
+        setStopLoading(true);
+        setGenMessage(null);
+        try {
+            const csrf = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+            const res = await fetch('/admin/players/map/stop-tiles', {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({}),
+            });
+            const json = await res.json().catch(() => ({}));
+            setGenMessage(json.message || (res.ok ? 'Stop requested' : 'Failed to stop'));
+            router.reload({
+                only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady', 'canResume'],
+            });
+        } catch {
+            setGenMessage('Network error stopping tile generation');
+        }
+        setStopLoading(false);
     }
 
     const zoneOverlays: ZoneOverlay[] = useMemo(
@@ -167,17 +210,63 @@ export default function PlayerMap({
                         <Badge variant={localTilesReady ? 'default' : 'secondary'} className="text-sm">
                             tiles: {tileSource}
                         </Badge>
-                        <button
-                            type="button"
-                            disabled={genLoading || tilesGenerating}
-                            onClick={() => generateTiles(!localTilesReady)}
-                            className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-                        >
-                            {genLoading || tilesGenerating ? (
-                                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                            ) : null}
-                            {localTilesReady ? 'Regenerate tiles' : 'Generate local tiles'}
-                        </button>
+                        {tilesGenerating ? (
+                            <button
+                                type="button"
+                                disabled={stopLoading}
+                                onClick={() => stopTiles()}
+                                className="inline-flex items-center rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                            >
+                                {stopLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                                {t('admin.player_map.stop_generation')}
+                            </button>
+                        ) : canResume ? (
+                            <>
+                                <button
+                                    type="button"
+                                    disabled={genLoading}
+                                    onClick={() => generateTiles({ resume: true })}
+                                    className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                                >
+                                    {genLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                                    {t('admin.player_map.resume_generation')}
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={genLoading}
+                                    onClick={() => {
+                                        if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
+                                            return;
+                                        }
+                                        generateTiles({ force: true });
+                                    }}
+                                    className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                                >
+                                    {t('admin.player_map.force_regenerate')}
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                type="button"
+                                disabled={genLoading}
+                                onClick={() => {
+                                    if (localTilesReady) {
+                                        if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
+                                            return;
+                                        }
+                                        generateTiles({ force: true });
+                                        return;
+                                    }
+                                    generateTiles({});
+                                }}
+                                className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                            >
+                                {genLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                                {localTilesReady
+                                    ? t('admin.player_map.regenerate_tiles')
+                                    : t('admin.player_map.generate_tiles')}
+                            </button>
+                        )}
                     </div>
                 </div>
 

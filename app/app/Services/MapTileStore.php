@@ -440,6 +440,20 @@ class MapTileStore
             @unlink($temp);
         }
 
+        // Wipe entire tiles root contents carefully (keeps the directory itself)
+        $root = $this->rootPath();
+        if (is_dir($root)) {
+            $html = $root.'/html';
+            if (is_dir($html)) {
+                if (PHP_OS_FAMILY !== 'Windows') {
+                    exec('rm -rf '.escapeshellarg($html));
+                }
+                if (is_dir($html)) {
+                    $this->deleteDirectoryRecursive($html);
+                }
+            }
+        }
+
         $this->removeLooseTiles();
     }
 

@@ -110,6 +110,7 @@ class PlayerMapController extends Controller
         $mapConfig = $this->mapConfigBuilder->build();
         $safeZoneConfig = $this->safeZoneManager->getConfig();
         $hasBasemap = $mapConfig['tileUrl'] !== null && $mapConfig['dzi'] !== null;
+        $canResume = $this->tileStore->hasLooseTiles() && ! $this->isTileGenerationRunning();
 
         return Inertia::render('admin/player-map', [
             'markers' => $markers,
@@ -119,6 +120,7 @@ class PlayerMapController extends Controller
             'hasTiles' => $hasBasemap,
             'tileSource' => $mapConfig['source'] ?? 'none',
             'localTilesReady' => (bool) ($mapConfig['local_ready'] ?? false),
+            'canResume' => $canResume,
             'tileProgress' => $this->readTileProgress(),
             'tilesGenerating' => $this->isTileGenerationRunning(),
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
@@ -131,29 +133,46 @@ class PlayerMapController extends Controller
     public function generateTiles(Request $request): JsonResponse
     {
         $force = (bool) $request->boolean('force');
-        $lock = storage_path('app/map-tiles.generating');
+        $resume = (bool) $request->boolean('resume');
+        $lock = $this->tileProgress->lockPath();
 
         if ($this->isTileGenerationRunning()) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Tile generation is already running. Check storage/logs/map-tiles.log',
+                'message' => 'Tile generation is already running. Use Stop, or wait for it to finish.',
             ], 409);
         }
+
+        if ($force && $resume) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Choose either force regenerate or resume, not both.',
+            ], 422);
+        }
+
+        $this->tileProgress->clearStopRequest();
 
         file_put_contents($lock, json_encode([
             'started_at' => now()->toIso8601String(),
             'pid' => getmypid(),
             'force' => $force,
+            'resume' => $resume,
         ]));
+
+        $flags = '';
+        if ($force) {
+            $flags = '--force';
+        } elseif ($resume) {
+            $flags = '--resume';
+        }
 
         // Run in background so the HTTP request returns immediately
         $artisan = base_path('artisan');
         $log = storage_path('logs/map-tiles.log');
-        $forceFlag = $force ? '--force' : '';
         $cmd = sprintf(
             'php %s zomboid:generate-map-tiles %s >> %s 2>&1; rm -f %s',
             escapeshellarg($artisan),
-            $forceFlag,
+            $flags,
             escapeshellarg($log),
             escapeshellarg($lock),
         );
@@ -164,10 +183,36 @@ class PlayerMapController extends Controller
             exec('nohup '.$cmd.' > /dev/null 2>&1 &');
         }
 
+        $message = $force
+            ? 'Full regenerate started (previous tiles cleared). This can take a long time.'
+            : ($resume
+                ? 'Resume started — continuing from existing loose tiles.'
+                : 'Map tile generation started. This can take 10–60+ minutes.');
+
         return response()->json([
             'ok' => true,
-            'message' => 'Map tile generation started. This can take 10–60+ minutes. Refresh the map later.',
+            'message' => $message,
             'log' => 'storage/logs/map-tiles.log',
+        ]);
+    }
+
+    /**
+     * Request stop of a running generation job (keeps partial tiles for resume).
+     */
+    public function stopTiles(): JsonResponse
+    {
+        if (! $this->isTileGenerationRunning()) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'No map tile generation is running.',
+            ], 409);
+        }
+
+        $this->tileProgress->requestStop();
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Stop requested. Workers will exit shortly; partial tiles are kept for Resume.',
         ]);
     }
 
@@ -199,7 +244,7 @@ class PlayerMapController extends Controller
             return true;
         }
 
-        $lock = storage_path('app/map-tiles.generating');
+        $lock = $this->tileProgress->lockPath();
         if (! is_file($lock)) {
             return false;
         }

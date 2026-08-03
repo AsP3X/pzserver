@@ -11,7 +11,10 @@ class GenerateMapTiles extends Command
 {
     /** @var string */
     protected $signature = 'zomboid:generate-map-tiles
-        {--force : Regenerate tiles even if they already exist}
+        {--force : Clear all tiles and regenerate from scratch}
+        {--resume : Continue an interrupted render (never deletes existing loose tiles)}
+        {--clear : Only delete packed/loose tiles and progress state, then exit}
+        {--stop : Request stop of a running generation job, then exit}
         {--map= : Specific map name to generate (default: all)}
         {--workers= : Number of render workers (default: auto-detect CPU cores)}
         {--keep-loose : Keep multi-file tile pyramid after packing (not recommended)}
@@ -28,6 +31,8 @@ class GenerateMapTiles extends Command
 
     private int $lastCliLogAt = 0;
 
+    private bool $wasStopped = false;
+
     public function __construct(
         private readonly MapTileStore $tileStore,
         private readonly MapTileProgress $progress,
@@ -41,9 +46,26 @@ class GenerateMapTiles extends Command
         $tilesPath = $this->tileStore->rootPath();
         $serverPath = config('zomboid.game_server_path');
 
+        if ($this->option('stop')) {
+            return $this->requestStopOnly();
+        }
+
+        if ($this->option('clear')) {
+            return $this->clearOnly();
+        }
+
         // Pack-only path: convert an existing loose pyramid without re-render
         if ($this->option('pack-only')) {
             return $this->packExisting();
+        }
+
+        $force = (bool) $this->option('force');
+        $resume = (bool) $this->option('resume');
+
+        if ($force && $resume) {
+            $this->error('Use either --force or --resume, not both.');
+
+            return self::FAILURE;
         }
 
         if (! is_dir($serverPath)) {
@@ -81,10 +103,30 @@ class GenerateMapTiles extends Command
         $pzmapRoot = dirname($pzmap2dziPath);
         $this->ensureMapConfDefaults($pzmapRoot);
 
-        if (! $this->option('force') && $this->tileStore->hasTiles()) {
-            $this->warn('Tiles already exist (packed SQLite or loose pyramid). Use --force to regenerate, or --pack-only to pack loose tiles.');
+        $hasPacked = $this->tileStore->hasPackedTiles();
+        $hasLoose = $this->tileStore->hasLooseTiles();
+
+        // Default: skip only when a finished pack exists (not a partial loose pyramid)
+        if (! $force && ! $resume && $hasPacked && ! $hasLoose) {
+            $this->warn('Packed tiles already exist. Use --force to regenerate, or --resume after a partial run.');
 
             return self::SUCCESS;
+        }
+
+        // Auto-resume when loose pyramid remains from an interrupted run
+        if (! $force && ! $resume && $hasLoose) {
+            $resume = true;
+            $this->info('Partial/loose tile pyramid detected — resuming (incremental render, no wipe).');
+        }
+
+        if ($resume && $hasPacked && ! $hasLoose) {
+            $this->warn('Nothing to resume: only a finished pack is present. Use --force to regenerate from scratch.');
+
+            return self::SUCCESS;
+        }
+
+        if ($resume) {
+            $this->info('Resume mode: existing loose tiles will be kept; pzmap2dzi continues incrementally.');
         }
 
         // Create output directory
@@ -92,14 +134,15 @@ class GenerateMapTiles extends Command
             mkdir($tilesPath, 0755, true);
         }
 
+        $this->progress->clearStopRequest();
         $this->progress->start([
             'stage' => 'starting',
             'step' => 0,
             'steps' => 3,
-            'message' => 'Starting map tile generation…',
+            'message' => $resume ? 'Resuming map tile generation…' : 'Starting map tile generation…',
         ]);
 
-        if ($this->option('force')) {
+        if ($force) {
             $this->info('Clearing previous tiles...');
             $this->progress->update([
                 'stage' => 'clear',
@@ -124,6 +167,9 @@ class GenerateMapTiles extends Command
             'total' => 0,
         ]);
         if (! $this->runPzmap($pzmap2dziPath, $confPath, 'unpack', trackJobProgress: false)) {
+            if ($this->wasStopped) {
+                return $this->finishInterrupted();
+            }
             $this->progress->finish(false, 'Unpack failed.', 'pzmap2dzi unpack failed');
 
             return self::FAILURE;
@@ -132,20 +178,29 @@ class GenerateMapTiles extends Command
 
         // Step 2: Render isometric tiles (base layer) — creates many small files temporarily
         $this->info('Step 2/3: Rendering isometric tiles (temporary multi-file pyramid)...');
+        $this->info('Tip: stop safely with: php artisan zomboid:generate-map-tiles --stop  (or Admin → Stop)');
+        $this->info('Resume later with: php artisan zomboid:generate-map-tiles --resume');
         $this->progress->update([
             'stage' => 'render',
             'step' => 2,
             'steps' => 3,
-            'message' => 'Rendering isometric tiles…',
+            'message' => $resume ? 'Resuming isometric render…' : 'Rendering isometric tiles…',
             'completed' => 0,
             'total' => 0,
         ]);
         if (! $this->runPzmap($pzmap2dziPath, $confPath, 'render base', trackJobProgress: true)) {
+            if ($this->wasStopped) {
+                return $this->finishInterrupted();
+            }
             $this->progress->finish(false, 'Render failed.', 'pzmap2dzi render base failed');
 
             return self::FAILURE;
         }
         $this->newLine();
+
+        if ($this->progress->shouldStop()) {
+            return $this->finishInterrupted();
+        }
 
         // Step 3: Pack into a single SQLite file and remove the file explosion
         $this->info('Step 3/3: Packing tiles into single SQLite database...');
@@ -158,16 +213,73 @@ class GenerateMapTiles extends Command
             'total' => 0,
         ]);
         if (! $this->packRenderedTiles()) {
+            if ($this->wasStopped) {
+                return $this->finishInterrupted();
+            }
             $this->progress->finish(false, 'Packing failed.', 'Failed to pack tiles into SQLite');
 
             return self::FAILURE;
         }
         $this->newLine();
 
+        $this->progress->clearStopRequest();
         $this->progress->finish(true, 'Map tiles ready at '.$this->tileStore->packPath());
         $this->info('Map tiles ready at: '.$this->tileStore->packPath());
         $this->info('Loose tile files were packed away so backups/deletes stay fast.');
         $this->info('Total time: '.$this->formatElapsed(microtime(true) - $this->startedAt));
+
+        return self::SUCCESS;
+    }
+
+    private function requestStopOnly(): int
+    {
+        if (! $this->progress->isRunning() && ! is_file($this->progress->lockPath())) {
+            $this->warn('No map tile generation appears to be running.');
+        }
+
+        $this->progress->requestStop();
+        $this->info('Stop requested. The running job will exit after the current work unit and keep loose tiles for --resume.');
+
+        return self::SUCCESS;
+    }
+
+    private function clearOnly(): int
+    {
+        $this->info('Clearing map tiles, progress, and stop/lock flags...');
+        $this->tileStore->clearAll();
+        $this->progress->clear();
+        $this->progress->clearStopRequest();
+        $lock = $this->progress->lockPath();
+        if (is_file($lock)) {
+            @unlink($lock);
+        }
+        $this->info('Cleared: '.$this->tileStore->rootPath());
+
+        return self::SUCCESS;
+    }
+
+    private function finishInterrupted(): int
+    {
+        $this->wasStopped = true;
+        $this->newLine();
+        $tiles = $this->progress->countLooseTiles($this->tileStore->looseLayerPath());
+        $current = $this->progress->read();
+        $this->progress->clearStopRequest();
+        $this->progress->update([
+            'generating' => false,
+            'stage' => 'stopped',
+            'message' => 'Stopped. Partial tiles kept — run with --resume to continue.',
+            'error' => null,
+            'tiles_on_disk' => $tiles,
+            'percent' => (int) ($current['percent'] ?? 0),
+            'completed' => (int) ($current['completed'] ?? 0),
+            'total' => (int) ($current['total'] ?? 0),
+            'finished_at' => now()->toIso8601String(),
+        ]);
+
+        $this->warn('Generation stopped. Loose tiles preserved for resume.');
+        $this->info("Tiles on disk: ~{$tiles}");
+        $this->info('Resume: docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume');
 
         return self::SUCCESS;
     }
@@ -215,6 +327,10 @@ class GenerateMapTiles extends Command
             $result = $this->tileStore->packLooseTiles(
                 removeLoose: ! $this->option('keep-loose'),
                 onProgress: function (int $packed, int $total): void {
+                    if ($this->progress->shouldStop()) {
+                        $this->wasStopped = true;
+                        throw new \RuntimeException('Stop requested during packing');
+                    }
                     $this->progress->update([
                         'stage' => 'pack',
                         'message' => 'Packing tiles into SQLite…',
@@ -247,6 +363,12 @@ class GenerateMapTiles extends Command
             return true;
         } catch (Throwable $e) {
             $this->newLine();
+            if ($this->wasStopped || str_contains($e->getMessage(), 'Stop requested')) {
+                $this->wasStopped = true;
+                $this->warn('Packing interrupted by stop request (loose tiles kept).');
+
+                return false;
+            }
             $this->error('Failed to pack tiles: '.$e->getMessage());
 
             return false;
@@ -314,6 +436,15 @@ class GenerateMapTiles extends Command
                 break;
             }
 
+            if ($this->progress->shouldStop()) {
+                $this->wasStopped = true;
+                $this->newLine();
+                $this->warn('Stop requested — terminating pzmap2dzi…');
+                $this->terminateProcessTree($process, $status['pid'] ?? null);
+                $exitCode = 130;
+                break;
+            }
+
             if ($trackJobProgress) {
                 $this->pollRenderProgress($logFile);
             } else {
@@ -337,13 +468,37 @@ class GenerateMapTiles extends Command
         }
 
         // Final progress sample before we close
-        if ($trackJobProgress) {
+        if ($trackJobProgress && ! $this->wasStopped) {
             $this->pollRenderProgress($logFile);
         }
 
-        proc_close($process);
+        if (is_resource($process)) {
+            proc_close($process);
+        }
+
+        if ($this->wasStopped) {
+            return false;
+        }
 
         return $this->handlePzmapExit($subcommand, $exitCode, $logFile);
+    }
+
+    /**
+     * @param  resource  $process
+     */
+    private function terminateProcessTree($process, ?int $pid): void
+    {
+        if ($pid !== null && $pid > 0 && function_exists('posix_kill')) {
+            // Kill process group if possible (shell + python workers)
+            @posix_kill(-$pid, defined('SIGTERM') ? SIGTERM : 15);
+            @posix_kill($pid, defined('SIGTERM') ? SIGTERM : 15);
+            usleep(500000);
+            @posix_kill(-$pid, defined('SIGKILL') ? SIGKILL : 9);
+            @posix_kill($pid, defined('SIGKILL') ? SIGKILL : 9);
+        }
+
+        // Also ask PHP to terminate the handle
+        @proc_terminate($process, defined('SIGTERM') ? SIGTERM : 15);
     }
 
     private function pollRenderProgress(string $logFile): void

@@ -133,6 +133,23 @@ docker exec pz-app cat /var/www/html/storage/app/map-tiles.progress.json
 docker exec pz-app tail -f /var/www/html/storage/logs/pzmap2dzi.log
 ```
 
+### Stop & resume
+
+You can interrupt generation without losing the multi-file pyramid, then continue later (pzmap2dzi is incremental).
+
+| Action | Docker / CLI | Admin UI |
+|--------|--------------|----------|
+| **Stop** (keep partial tiles) | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop` | **Stop generation** |
+| **Resume** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume` | **Resume generation** |
+| **Clear everything** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear` | **Start over** (confirm) |
+| **Full regenerate** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --force` | **Start over** / regenerate |
+
+Notes:
+
+- **Do not use `--force`** if you want to resume — it deletes the partial pyramid.
+- Auto-resume: if loose tiles exist and you run without flags, the command continues incrementally.
+- After a full successful run, only `tiles.sqlite` remains (loose files removed).
+
 Logs:
 
 - Artisan / UI background job: `app/storage/logs/map-tiles.log`
