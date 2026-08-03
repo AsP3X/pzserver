@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\Enums\DeliveryStatus;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionType;
+use App\Enums\VaultDirection;
+use App\Enums\VaultTransactionStatus;
 use App\Exceptions\InsufficientBalanceException;
-use App\Enums\DeliveryStatus;
 use App\Models\ShopPurchase;
 use App\Models\User;
+use App\Models\VaultTransaction;
 use App\Models\Wallet;
 use App\Models\WalletTransaction;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -20,7 +23,10 @@ class WalletService
      */
     public function getOrCreateWallet(User $user): Wallet
     {
-        return $user->wallet ?? $user->wallet()->create([
+        // Query rather than reading $user->wallet: a relation cached as null
+        // before the wallet existed would otherwise cause a duplicate insert
+        // on a second call against the same in-memory user.
+        return $user->wallet()->first() ?? $user->wallet()->create([
             'balance' => 0,
             'total_earned' => 0,
             'total_spent' => 0,
@@ -170,6 +176,15 @@ class WalletService
                 DeliveryStatus::Delivered->value,
             ])
             ->sum('total_price');
+
+        // Pending vault withdrawals hold their fee the same way, so a player
+        // cannot spend the same coins on a purchase and a withdrawal at once.
+        $pendingHolds += (float) VaultTransaction::query()
+            ->whereHas('vault', fn ($query) => $query->where('user_id', $user->id))
+            ->where('direction', VaultDirection::Withdraw->value)
+            ->where('status', VaultTransactionStatus::Pending->value)
+            ->whereNull('wallet_transaction_id')
+            ->sum('fee_charged');
 
         return max(0, $balance - $pendingHolds);
     }

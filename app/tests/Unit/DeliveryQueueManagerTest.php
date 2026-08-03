@@ -138,3 +138,21 @@ it('writes queue atomically (file exists after write)', function () {
     $content = json_decode(file_get_contents($this->queuePath), true);
     expect($content['entries'])->toHaveCount(1);
 });
+
+it('queues a remove_verified entry', function () {
+    $entry = $this->manager->removeItemVerified('TestPlayer', 'Base.Axe', 3);
+
+    expect($entry['action'])->toBe('remove_verified')
+        ->and($entry['count'])->toBe(3)
+        ->and($entry['status'])->toBe('pending');
+
+    $queue = $this->manager->readQueue();
+    expect($queue['entries'])->toHaveCount(1);
+});
+
+it('queues a give_with_condition entry carrying the condition', function () {
+    $entry = $this->manager->giveItemWithCondition('TestPlayer', 'Base.Axe', 1, 0.42);
+
+    expect($entry['action'])->toBe('give_with_condition')
+        ->and($entry['condition'])->toBe(0.42);
+});

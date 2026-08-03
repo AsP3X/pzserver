@@ -24,6 +24,7 @@ import {
     Trophy,
     User,
     Users,
+    Vault,
     Wallet,
     Wrench,
 } from 'lucide-react';
@@ -83,6 +84,7 @@ export function AppSidebar() {
                 { title: t('nav.promotions'), href: '/admin/shop/promotions', icon: Tag },
                 { title: t('nav.purchases'), href: '/admin/shop/purchases', icon: ShoppingBag },
                 { title: t('nav.wallets'), href: '/admin/wallets', icon: Wallet },
+                { title: t('nav.vault'), href: '/admin/vault', icon: Vault },
             ],
         },
     ];
@@ -93,6 +95,7 @@ export function AppSidebar() {
             items: [
                 { title: t('nav.player_portal'), href: '/portal', icon: Gamepad2 },
                 { title: t('nav.my_inventory'), href: '/portal/inventory', icon: Backpack },
+                { title: t('nav.my_vault'), href: '/portal/vault', icon: Vault },
                 { title: t('nav.my_wallet'), href: '/shop/my/wallet', icon: Coins },
                 { title: t('nav.shop'), href: '/shop', icon: ShoppingBag },
                 { title: t('nav.rankings'), href: '/rankings', icon: Trophy },

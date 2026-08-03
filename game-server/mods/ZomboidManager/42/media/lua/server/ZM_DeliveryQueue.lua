@@ -357,6 +357,140 @@ removeOneItem = function(player, itemType)
     return true
 end
 
+--- Remove one matching item and return its identity, or nil if none found.
+local function removeOneItemDetailed(player, itemType)
+    local inventory = player:getInventory()
+    if not inventory then
+        return nil
+    end
+
+    local item = nil
+    for _, container in ipairs(collectContainers(player)) do
+        item = findItemInContainer(container, itemType)
+        if item then
+            break
+        end
+    end
+
+    if not item and inventory.getFirstTypeRecurse then
+        item = inventory:getFirstTypeRecurse(shortTypeName(itemType))
+        if not item then
+            item = inventory:getFirstTypeRecurse(itemType)
+        end
+    end
+
+    if not item then
+        return nil
+    end
+
+    -- Capture identity BEFORE removal; the object is unusable afterwards.
+    local detail = {
+        full_type = item:getFullType(),
+        name = item:getName(),
+        category = tostring(item:getDisplayCategory() or "General"),
+        condition = 1.0,
+    }
+    if item.getCondition and item.getMaxCondition then
+        local maxCond = item:getMaxCondition()
+        if maxCond > 0 then
+            detail.condition = math.floor((item:getCondition() / maxCond) * 100) / 100
+        end
+    end
+
+    if player:isEquipped(item) then
+        player:removeWornItem(item)
+    end
+    if player:getPrimaryHandItem() == item then
+        player:setPrimaryHandItem(nil)
+    end
+    if player:getSecondaryHandItem() == item then
+        player:setSecondaryHandItem(nil)
+    end
+
+    local container = item:getContainer()
+    if container and container.DoRemoveItem then
+        container:DoRemoveItem(item)
+    elseif container and container.Remove then
+        container:Remove(item)
+    elseif inventory.DoRemoveItem then
+        inventory:DoRemoveItem(item)
+    else
+        inventory:Remove(item)
+    end
+
+    return detail
+end
+
+--- Remove up to `count` items, reporting exactly what came out.
+--- Always succeeds; the caller decides what a partial removal means.
+local function removeItemVerified(player, itemType, count)
+    count = count or 1
+    local removed = {}
+
+    for _ = 1, count do
+        local detail = removeOneItemDetailed(player, itemType)
+        if not detail then
+            break
+        end
+        table.insert(removed, detail)
+    end
+
+    if isServer() and #removed > 0 then
+        sendServerCommand(player, "ZomboidManager", "removeItem", {
+            item_type = itemType,
+            count = tostring(#removed),
+        })
+        syncRemoveToClient(player)
+    end
+
+    return true, nil, {removed = removed, removed_count = #removed}
+end
+
+--- Give items and restore a specific condition fraction (0..1) on each.
+local function giveItemWithCondition(player, itemType, count, condition)
+    local inventory = player:getInventory()
+    if not inventory then
+        return false, "player has no inventory", nil
+    end
+
+    condition = tonumber(condition) or 1.0
+    if condition < 0 then condition = 0 end
+    if condition > 1 then condition = 1 end
+
+    local countBefore = countItemType(player, itemType)
+    local addedCount = 0
+
+    for i = 1, count do
+        local item = inventory:AddItem(itemType)
+        if not item then
+            -- Roll back whatever landed so the caller can retry cleanly.
+            for _ = 1, addedCount do
+                removeOneItem(player, itemType)
+            end
+            return false, "failed to add item " .. itemType .. " (attempt " .. i .. "/" .. count .. ")", nil
+        end
+        if item.setCondition and item.getMaxCondition then
+            local maxCond = item:getMaxCondition()
+            if maxCond and maxCond > 0 then
+                item:setCondition(math.max(1, math.floor(condition * maxCond)))
+            end
+        end
+        addedCount = addedCount + 1
+    end
+
+    local countAfter = countItemType(player, itemType)
+    if countAfter < countBefore + count then
+        for _ = 1, (countAfter - countBefore) do
+            removeOneItem(player, itemType)
+        end
+        return false, "verification failed: expected >=" .. (countBefore + count) .. " but found " .. countAfter, nil
+    end
+
+    syncAddToClient(player, itemType, count)
+
+    return true, nil, {count_before = countBefore, count_after = countAfter, verified = true}
+end
+
 --- Remove item from player
 local function removeItem(player, itemType, count)
     local inventory = player:getInventory()
@@ -447,6 +581,10 @@ function ZM_DeliveryQueue.process()
                     success, errMsg, verificationData = giveItemVerified(player, entry.item_type, entry.count or 1)
                 elseif entry.action == "remove" then
                     success, errMsg = removeItem(player, entry.item_type, entry.count or 1)
+                elseif entry.action == "remove_verified" then
+                    success, errMsg, verificationData = removeItemVerified(player, entry.item_type, entry.count or 1)
+                elseif entry.action == "give_with_condition" then
+                    success, errMsg, verificationData = giveItemWithCondition(player, entry.item_type, entry.count or 1, entry.condition or 1.0)
                 else
                     errMsg = "unknown action: " .. tostring(entry.action)
                 end
@@ -459,6 +597,8 @@ function ZM_DeliveryQueue.process()
                         result.verified = true
                         result.count_before = verificationData.count_before
                         result.count_after = verificationData.count_after
+                        result.removed = verificationData.removed
+                        result.removed_count = verificationData.removed_count
                     end
                     -- Re-export inventory so the web reflects the change immediately
                     ZM_InventoryExporter.exportPlayer(player)

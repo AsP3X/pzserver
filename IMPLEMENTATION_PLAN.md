@@ -839,5 +839,6 @@ php artisan scribe:generate
 | Phase 19 — Admin Player Map | DONE | Leaflet.js map with PZ tile rendering, player markers (online/offline/dead), action dialogs (kick/ban/access), usePoll 5s live updates, players.db SQLite connection; local tiles packed to single tiles.sqlite (MapTileStore) — docs/map-tiles.md |
 | Phase 20 — Admin Inventory Management | DONE | Inventory grid with item icons, give/remove dialogs, delivery queue integration, audit logged, 17 tests |
 | Phase 21 — Dashboard & UX Polish | DONE | Toast notifications (Sonner), error handling, deferred props with skeletons, game time/weather widget (Lua export), player stats/leaderboards (Lua export), Log Extender event ingestion, activity feed, mobile responsive polish, 23 new tests |
+| Phase 24 — Player Item Vault | DONE | vaults/vault_items/vault_transactions schema, items-first deposit via remove_verified, deliver-then-debit withdrawal via give_with_condition, coin-purchasable capacity, admin settings page, 54 tests. Requires ZomboidManager mod 1.1 |
 | Phase 22+ — Subscriptions | TODO | Cashier/Stripe (deferred — monetization) |
 | Phase 23+ — Item Shop | TODO | Shop CRUD, payments, reuses Lua bridge delivery queue (deferred — monetization) |

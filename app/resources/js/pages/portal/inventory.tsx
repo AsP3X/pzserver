@@ -1,15 +1,17 @@
-import { Head, usePoll } from '@inertiajs/react';
+import { Head, router, usePoll } from '@inertiajs/react';
 import { Backpack, RefreshCw, TriangleAlert, UserX } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { InventoryStats } from '@/components/inventory/inventory-stats';
 import { InventoryTable } from '@/components/inventory/inventory-table';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/use-translation';
 import AppLayout from '@/layouts/app-layout';
 import { formatRelativeTime } from '@/lib/dates';
+import { fetchAction } from '@/lib/fetch-action';
 import { stackItems } from '@/lib/inventory';
 import type { BreadcrumbItem } from '@/types';
-import type { InventorySnapshot } from '@/types/server';
+import type { InventorySnapshot, StackedItem } from '@/types/server';
 
 type Props = {
     username: string | null;
@@ -36,8 +38,23 @@ function EmptyState({ icon, title, description }: { icon: React.ReactNode; title
 
 export default function PortalInventory({ username, inventory, isOnline, hasPzAccount }: Props) {
     const { t } = useTranslation();
+    const [depositing, setDepositing] = useState<string | null>(null);
 
     usePoll(5000, { only: ['inventory', 'isOnline'] });
+
+    async function handleDeposit(item: StackedItem) {
+        setDepositing(item.full_type);
+        await fetchAction('/portal/vault/deposit', {
+            data: {
+                full_type: item.full_type,
+                name: item.name,
+                category: item.category,
+                count: item.totalCount,
+            },
+        });
+        setDepositing(null);
+        router.reload({ only: ['inventory'] });
+    }
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: t('portal.title'), href: '/portal' },
@@ -97,7 +114,19 @@ export default function PortalInventory({ username, inventory, isOnline, hasPzAc
 
                         <InventoryStats inventory={inventory} stackedItems={stackedItems} />
 
-                        <InventoryTable items={stackedItems} />
+                        <InventoryTable
+                            items={stackedItems}
+                            rowActions={(item) => (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={depositing !== null}
+                                    onClick={() => handleDeposit(item)}
+                                >
+                                    {t('vault.deposit')}
+                                </Button>
+                            )}
+                        />
                     </>
                 )}
             </div>

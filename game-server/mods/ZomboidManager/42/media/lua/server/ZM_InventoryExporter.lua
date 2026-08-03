@@ -63,33 +63,64 @@ function ZM_InventoryExporter.exportPlayer(player)
 
     local items = {}
     local totalWeight = 0
+    local seenContainers = {}
 
-    -- Main inventory
-    local allItems = inventory:getItems()
-    if allItems then
-        for i = 0, allItems:size() - 1 do
-            local item = allItems:get(i)
+    --- Walk a container and every nested container inside it.
+    local function collect(container, containerName)
+        if not container then
+            return
+        end
+        local key = tostring(container)
+        if seenContainers[key] then
+            return
+        end
+        seenContainers[key] = true
+
+        local containerItems = container:getItems()
+        if not containerItems then
+            return
+        end
+
+        for i = 0, containerItems:size() - 1 do
+            local item = containerItems:get(i)
             if item then
-                table.insert(items, serializeItem(item, "inventory", primaryItem, secondaryItem))
+                table.insert(items, serializeItem(item, containerName, primaryItem, secondaryItem))
                 totalWeight = totalWeight + (item:getWeight() or 0)
+
+                if item.getItemContainer then
+                    local nested = item:getItemContainer()
+                    if nested then
+                        collect(nested, item:getName() or containerName)
+                    end
+                end
             end
         end
     end
 
-    -- Equipped bags / secondary containers
-    local backpack = player:getClothingItem_Back()
-    if backpack and backpack:getItemContainer() then
-        local bagItems = backpack:getItemContainer():getItems()
-        if bagItems then
-            local bagName = backpack:getName() or "backpack"
-            for i = 0, bagItems:size() - 1 do
-                local item = bagItems:get(i)
-                if item then
-                    table.insert(items, serializeItem(item, bagName, primaryItem, secondaryItem))
-                    totalWeight = totalWeight + (item:getWeight() or 0)
+    collect(inventory, "inventory")
+
+    if player.getWornItems then
+        local worn = player:getWornItems()
+        if worn then
+            for i = 0, worn:size() - 1 do
+                local wornItem = worn:get(i)
+                local item = wornItem
+                if wornItem and wornItem.getItem then
+                    item = wornItem:getItem()
+                end
+                if item and item.getItemContainer then
+                    local c = item:getItemContainer()
+                    if c then
+                        collect(c, item:getName() or "worn")
+                    end
                 end
             end
         end
+    end
+
+    local backpack = player:getClothingItem_Back()
+    if backpack and backpack:getItemContainer() then
+        collect(backpack:getItemContainer(), backpack:getName() or "backpack")
     end
 
     local data = {

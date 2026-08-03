@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PlayerInventoryController;
 use App\Http\Controllers\PlayerProfileController;
+use App\Http\Controllers\PlayerVaultController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\RankingsController;
 use App\Http\Controllers\ShopController;
@@ -27,6 +28,12 @@ Route::prefix('shop')->name('shop.')->group(function () {
 Route::middleware(['auth'])->group(function () {
     Route::get('portal', PortalController::class)->name('portal');
     Route::get('portal/inventory', PlayerInventoryController::class)->name('portal.inventory');
+
+    // Item vault
+    Route::get('portal/vault', [PlayerVaultController::class, 'show'])->name('portal.vault');
+    Route::post('portal/vault/deposit', [PlayerVaultController::class, 'deposit'])->name('portal.vault.deposit')->middleware('throttle:10,1');
+    Route::post('portal/vault/withdraw', [PlayerVaultController::class, 'withdraw'])->name('portal.vault.withdraw')->middleware('throttle:10,1');
+    Route::post('portal/vault/upgrade', [PlayerVaultController::class, 'upgrade'])->name('portal.vault.upgrade')->middleware('throttle:5,1');
 
     // Auth-only shop actions
     Route::prefix('shop')->name('shop.')->group(function () {
@@ -163,6 +170,10 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         Route::patch('shop/promotions/{promotion}', [Admin\ShopPromotionController::class, 'update'])->name('shop.promotions.update');
         Route::delete('shop/promotions/{promotion}', [Admin\ShopPromotionController::class, 'destroy'])->name('shop.promotions.destroy');
         Route::post('shop/promotions/{promotion}/toggle', [Admin\ShopPromotionController::class, 'toggle'])->name('shop.promotions.toggle');
+
+        // Item Vault
+        Route::get('vault', [Admin\VaultSettingController::class, 'index'])->name('vault');
+        Route::patch('vault', [Admin\VaultSettingController::class, 'update'])->name('vault.update')->middleware('throttle:admin-sensitive');
 
         // Wallets
         Route::get('wallets', [Admin\WalletController::class, 'index'])->name('wallets');

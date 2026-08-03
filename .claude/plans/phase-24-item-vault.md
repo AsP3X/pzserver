@@ -30,6 +30,23 @@
 
 ---
 
+## Correction applied during execution
+
+`app/tests/Pest.php` binds `Tests\TestCase` with `->in('Feature')` only. Tests under
+`tests/Unit/` therefore run as plain PHPUnit with **no Laravel application** — no
+container, no Eloquent, no `RefreshDatabase`. (This is also why the 10 pre-existing
+`BindingResolutionException` failures in `tests/Unit/` exist.)
+
+Every vault test that touches the database or the service container therefore lives in
+`tests/Feature/`, not `tests/Unit/`:
+
+- `tests/Feature/VaultModelTest.php` (Task 1)
+- `tests/Feature/VaultServiceTest.php` (Task 2)
+- `tests/Feature/WalletVaultHoldTest.php` (Task 7)
+
+Only `tests/Unit/DeliveryQueueManagerTest.php` (Task 6) stays in `Unit` — it is pure
+file I/O against temp paths and needs no application.
+
 ## Technical Discovery
 
 ### Reusable as-is
