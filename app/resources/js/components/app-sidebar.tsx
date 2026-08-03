@@ -2,6 +2,7 @@ import { Link, usePage } from '@inertiajs/react';
 import {
     Activity,
     Archive,
+    Backpack,
     Bell,
     Coins,
     Crosshair,
@@ -91,6 +92,7 @@ export function AppSidebar() {
             label: t('nav.group.menu'),
             items: [
                 { title: t('nav.player_portal'), href: '/portal', icon: Gamepad2 },
+                { title: t('nav.my_inventory'), href: '/portal/inventory', icon: Backpack },
                 { title: t('nav.my_wallet'), href: '/shop/my/wallet', icon: Coins },
                 { title: t('nav.shop'), href: '/shop', icon: ShoppingBag },
                 { title: t('nav.rankings'), href: '/rankings', icon: Trophy },

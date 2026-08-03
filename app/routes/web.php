@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\PlayerInventoryController;
 use App\Http\Controllers\PlayerProfileController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\RankingsController;
@@ -25,6 +26,7 @@ Route::prefix('shop')->name('shop.')->group(function () {
 
 Route::middleware(['auth'])->group(function () {
     Route::get('portal', PortalController::class)->name('portal');
+    Route::get('portal/inventory', PlayerInventoryController::class)->name('portal.inventory');
 
     // Auth-only shop actions
     Route::prefix('shop')->name('shop.')->group(function () {

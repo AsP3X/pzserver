@@ -318,6 +318,20 @@ export type InventorySnapshot = {
     max_weight: number;
 };
 
+/**
+ * One inventory row per item type, with counts summed across containers.
+ */
+export type StackedItem = {
+    full_type: string;
+    name: string;
+    category: string;
+    icon: string;
+    totalCount: number;
+    condition: number | null;
+    equipped: boolean;
+    containers: string[];
+};
+
 export type ItemCatalogEntry = {
     full_type: string;
     name: string;

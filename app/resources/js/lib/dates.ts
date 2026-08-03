@@ -30,3 +30,27 @@ export function formatShortDate(dateStr: string): string {
 export function formatTime(date: Date = new Date()): string {
     return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
+
+/**
+ * Translated "3 m ago" style label. Pass `t` from useTranslation().
+ */
+export function formatRelativeTime(
+    dateStr: string,
+    t: (key: string, replacements?: Record<string, string>) => string,
+): string {
+    const diffMin = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
+
+    if (diffMin < 1) {
+        return t('common.just_now');
+    }
+    if (diffMin < 60) {
+        return t('common.minutes_ago', { count: String(diffMin) });
+    }
+
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) {
+        return t('common.hours_ago', { count: String(diffHr) });
+    }
+
+    return t('common.days_ago', { count: String(Math.floor(diffHr / 24)) });
+}

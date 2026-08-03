@@ -1,21 +1,18 @@
-import { Head, Link, router, usePoll } from '@inertiajs/react';
+import { Head, router, usePoll } from '@inertiajs/react';
 import {
-    Backpack,
     ChevronDown,
     Circle,
     Loader2,
-    Package,
     Plus,
     RefreshCw,
     Search,
-    Swords,
     Trash2,
     X,
-    Weight,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { SortableHeader } from '@/components/sortable-header';
-import { useTableSort } from '@/hooks/use-table-sort';
+import { InventoryStats } from '@/components/inventory/inventory-stats';
+import { InventoryTable } from '@/components/inventory/inventory-table';
+import { ItemIcon } from '@/components/inventory/item-icon';
 import { useTranslation } from '@/hooks/use-translation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,7 +30,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import AppLayout from '@/layouts/app-layout';
+import { formatRelativeTime } from '@/lib/dates';
 import { fetchAction } from '@/lib/fetch-action';
+import { stackItems } from '@/lib/inventory';
 import type { BreadcrumbItem } from '@/types';
 import type {
     DeliveryEntry,
@@ -42,17 +41,6 @@ import type {
     InventorySnapshot,
     ItemCatalogEntry,
 } from '@/types/server';
-
-type StackedItem = {
-    full_type: string;
-    name: string;
-    category: string;
-    icon: string;
-    totalCount: number;
-    condition: number | null;
-    equipped: boolean;
-    containers: string[];
-};
 
 type Props = {
     username: string;
@@ -64,62 +52,8 @@ type Props = {
     };
 };
 
-function ItemIcon({ src, name, size = 48 }: { src: string; name: string; size?: number }) {
-    return (
-        <img
-            src={src}
-            alt={name}
-            width={size}
-            height={size}
-            className="rounded object-contain"
-            onError={(e) => {
-                (e.target as HTMLImageElement).src = '/images/items/placeholder.svg';
-            }}
-        />
-    );
-}
-
-function ConditionBar({ condition }: { condition: number | null }) {
-    if (condition === null) return null;
-
-    const percent = Math.round(condition * 100);
-    let colorClass = 'bg-green-500';
-    if (percent < 30) colorClass = 'bg-red-500';
-    else if (percent < 60) colorClass = 'bg-yellow-500';
-
-    return (
-        <div className="flex items-center gap-2">
-            <div className="h-1.5 w-full rounded-full bg-muted">
-                <div
-                    className={`h-1.5 rounded-full ${colorClass}`}
-                    style={{ width: `${percent}%` }}
-                />
-            </div>
-            <span className="text-muted-foreground text-xs tabular-nums">{percent}%</span>
-        </div>
-    );
-}
-
-function formatRelativeTime(dateStr: string): string {
-    const now = Date.now();
-    const then = new Date(dateStr).getTime();
-    const diffMs = now - then;
-    const diffMin = Math.floor(diffMs / 60000);
-
-    if (diffMin < 1) return 'just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return `${Math.floor(diffHr / 24)}d ago`;
-}
-
-const ITEMS_PER_PAGE = 20;
-
 export default function PlayerInventory({ username, inventory, catalog, deliveries }: Props) {
     const { t } = useTranslation();
-    const [filter, setFilter] = useState('');
-    const { sortKey: sortBy, sortDir, toggleSort } = useTableSort<'name' | 'category' | 'condition' | 'totalCount'>('name', 'asc');
-    const [page, setPage] = useState(1);
     const [giveOpen, setGiveOpen] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<InventoryItem | null>(null);
     const [giveSearch, setGiveSearch] = useState('');
@@ -139,68 +73,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
     ];
 
     const items = inventory?.items ?? [];
-
-    const stackedItems = useMemo(() => {
-        const map = new Map<string, StackedItem>();
-        for (const item of items) {
-            const existing = map.get(item.full_type);
-            if (existing) {
-                existing.totalCount += item.count;
-                if (item.equipped) existing.equipped = true;
-                if (item.condition !== null) {
-                    existing.condition = existing.condition !== null
-                        ? Math.min(existing.condition, item.condition)
-                        : item.condition;
-                }
-                if (!existing.containers.includes(item.container)) {
-                    existing.containers.push(item.container);
-                }
-            } else {
-                map.set(item.full_type, {
-                    full_type: item.full_type,
-                    name: item.name,
-                    category: item.category,
-                    icon: item.icon,
-                    totalCount: item.count,
-                    condition: item.condition,
-                    equipped: item.equipped,
-                    containers: [item.container],
-                });
-            }
-        }
-        return [...map.values()];
-    }, [items]);
-
-    const filteredItems = useMemo(() => {
-        const result = stackedItems.filter(
-            (item) =>
-                item.name.toLowerCase().includes(filter.toLowerCase()) ||
-                item.full_type.toLowerCase().includes(filter.toLowerCase()) ||
-                item.category.toLowerCase().includes(filter.toLowerCase()),
-        );
-
-        const sorted = [...result];
-        sorted.sort((a, b) => {
-            let cmp = 0;
-            if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
-            else if (sortBy === 'category') cmp = a.category.localeCompare(b.category) || a.name.localeCompare(b.name);
-            else if (sortBy === 'condition') cmp = (a.condition ?? 0) - (b.condition ?? 0);
-            else if (sortBy === 'totalCount') cmp = a.totalCount - b.totalCount;
-            return sortDir === 'desc' ? -cmp : cmp;
-        });
-
-        return sorted;
-    }, [stackedItems, filter, sortBy, sortDir]);
-
-    const categories = useMemo(() => [...new Set(items.map((i) => i.category))], [items]);
-    const totalItemCount = useMemo(() => items.reduce((sum, i) => sum + i.count, 0), [items]);
-
-    const lastPage = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
-    const currentPage = Math.min(page, lastPage);
-    const paginatedItems = useMemo(
-        () => filteredItems.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
-        [filteredItems, currentPage],
-    );
+    const stackedItems = useMemo(() => stackItems(items), [items]);
 
     const filteredCatalog = useMemo(() => {
         if (!giveSearch) return catalog.slice(0, 50);
@@ -268,7 +141,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
                         </h1>
                         {inventory ? (
                             <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
-                                {t('admin.player_inventory.last_updated', { time: formatRelativeTime(inventory.timestamp) })}
+                                {t('admin.player_inventory.last_updated', { time: formatRelativeTime(inventory.timestamp, t) })}
                                 <RefreshCw className="size-3 animate-spin" />
                             </p>
                         ) : (
@@ -309,195 +182,33 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
                     </Card>
                 ) : (
                     <>
-                        {/* Stats Row */}
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                            <Card>
-                                <CardContent className="flex items-center gap-3 pt-6">
-                                    <Backpack className="text-muted-foreground size-5" />
-                                    <div>
-                                        <p className="text-2xl font-bold">
-                                            {totalItemCount}
-                                            <span className="text-muted-foreground text-sm font-normal">
-                                                {' '}({t('admin.player_inventory.unique', { count: String(stackedItems.length) })})
-                                            </span>
-                                        </p>
-                                        <p className="text-muted-foreground text-xs">
-                                            {t('admin.player_inventory.total_items')}
-                                        </p>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                            <Card>
-                                <CardContent className="flex items-center gap-3 pt-6">
-                                    <Weight className="text-muted-foreground size-5" />
-                                    <div>
-                                        <p className="text-2xl font-bold">
-                                            {inventory.weight.toFixed(1)}
-                                            <span className="text-muted-foreground text-sm font-normal">
-                                                {' '}
-                                                / {inventory.max_weight.toFixed(1)}
-                                            </span>
-                                        </p>
-                                        <p className="text-muted-foreground text-xs">{t('common.weight')}</p>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                            <Card>
-                                <CardContent className="flex items-center gap-3 pt-6">
-                                    <Package className="text-muted-foreground size-5" />
-                                    <div>
-                                        <p className="text-2xl font-bold">{categories.length}</p>
-                                        <p className="text-muted-foreground text-xs">{t('admin.player_inventory.categories')}</p>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </div>
+                        <InventoryStats inventory={inventory} stackedItems={stackedItems} />
 
-                        {/* Inventory Table */}
-                        <Card>
-                            <CardHeader>
-                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                    <div>
-                                        <CardTitle>{t('admin.player_inventory.items')}</CardTitle>
-                                        <CardDescription>
-                                            {t('admin.player_inventory.items_count', { filtered: String(filteredItems.length), total: String(stackedItems.length) })}
-                                        </CardDescription>
-                                    </div>
-                                    <div className="relative">
-                                        <Search className="text-muted-foreground absolute left-2.5 top-2.5 size-4" />
-                                        <Input
-                                            placeholder={t('admin.player_inventory.filter_items')}
-                                            value={filter}
-                                            onChange={(e) => { setFilter(e.target.value); setPage(1); }}
-                                            className="pl-9 sm:w-[200px]"
-                                        />
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="overflow-x-auto">
-                                {filteredItems.length > 0 ? (
-                                    <>
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead className="w-[50px]" />
-                                                <TableHead>
-                                                    <SortableHeader column="name" label={t('admin.player_inventory.item')} sortKey={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                                                </TableHead>
-                                                <TableHead>
-                                                    <SortableHeader column="category" label={t('common.category')} sortKey={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                                                </TableHead>
-                                                <TableHead className="text-center">
-                                                    <SortableHeader column="totalCount" label={t('admin.player_inventory.qty')} sortKey={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                                                </TableHead>
-                                                <TableHead className="w-[120px]">
-                                                    <SortableHeader column="condition" label={t('admin.player_inventory.condition')} sortKey={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                                                </TableHead>
-                                                <TableHead>{t('common.actions')}</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {paginatedItems.map((item) => (
-                                                <TableRow key={item.full_type}>
-                                                    <TableCell>
-                                                        <ItemIcon
-                                                            src={item.icon}
-                                                            name={item.name}
-                                                            size={32}
-                                                        />
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <div className="flex min-w-0 flex-col">
-                                                            <span className="text-sm font-medium">
-                                                                {item.name}
-                                                            </span>
-                                                            <span className="text-muted-foreground text-xs">
-                                                                {item.full_type}
-                                                            </span>
-                                                            {item.equipped && (
-                                                                <span className="text-muted-foreground flex items-center gap-1 text-xs">
-                                                                    <Swords className="size-3" />
-                                                                    {t('common.equipped')}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge variant="outline" className="text-xs">
-                                                            {item.category}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-center">
-                                                        <span className="font-medium tabular-nums">
-                                                            {item.totalCount}
-                                                        </span>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <ConditionBar condition={item.condition} />
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="size-8 p-0"
-                                                            onClick={() => {
-                                                                setRemoveCount(1);
-                                                                setRemoveTarget({
-                                                                    full_type: item.full_type,
-                                                                    name: item.name,
-                                                                    category: item.category,
-                                                                    count: item.totalCount,
-                                                                    condition: item.condition,
-                                                                    equipped: item.equipped,
-                                                                    container: item.containers[0],
-                                                                    icon: item.icon,
-                                                                });
-                                                            }}
-                                                        >
-                                                            <Trash2 className="size-4 text-destructive" />
-                                                        </Button>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-
-                                    {/* Pagination */}
-                                    {lastPage > 1 && (
-                                        <div className="mt-4 flex items-center justify-between">
-                                            <p className="text-muted-foreground text-sm">
-                                                {t('admin.player_inventory.of_items', { start: String((currentPage - 1) * ITEMS_PER_PAGE + 1), end: String(Math.min(currentPage * ITEMS_PER_PAGE, filteredItems.length)), total: String(filteredItems.length) })}
-                                            </p>
-                                            <div className="flex items-center gap-1">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    disabled={currentPage <= 1}
-                                                    onClick={() => setPage(currentPage - 1)}
-                                                >
-                                                    {t('common.previous')}
-                                                </Button>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    disabled={currentPage >= lastPage}
-                                                    onClick={() => setPage(currentPage + 1)}
-                                                >
-                                                    {t('common.next')}
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    )}
-                                    </>
-                                ) : (
-                                    <p className="text-muted-foreground py-8 text-center">
-                                        {filter
-                                            ? t('admin.player_inventory.no_items_filter')
-                                            : t('admin.player_inventory.no_items_empty')}
-                                    </p>
-                                )}
-                            </CardContent>
-                        </Card>
+                        <InventoryTable
+                            items={stackedItems}
+                            rowActions={(item) => (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="size-8 p-0"
+                                    onClick={() => {
+                                        setRemoveCount(1);
+                                        setRemoveTarget({
+                                            full_type: item.full_type,
+                                            name: item.name,
+                                            category: item.category,
+                                            count: item.totalCount,
+                                            condition: item.condition,
+                                            equipped: item.equipped,
+                                            container: item.containers[0],
+                                            icon: item.icon,
+                                        });
+                                    }}
+                                >
+                                    <Trash2 className="size-4 text-destructive" />
+                                </Button>
+                            )}
+                        />
                     </>
                 )}
 
@@ -564,7 +275,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
                                                     </TableCell>
                                                     <TableCell>
                                                         <span className="text-muted-foreground text-xs">
-                                                            {formatRelativeTime(entry.created_at)}
+                                                            {formatRelativeTime(entry.created_at, t)}
                                                         </span>
                                                     </TableCell>
                                                 </TableRow>
@@ -599,7 +310,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
                                                     </TableCell>
                                                     <TableCell>
                                                         <span className="text-muted-foreground text-xs">
-                                                            {formatRelativeTime(result.processed_at)}
+                                                            {formatRelativeTime(result.processed_at, t)}
                                                         </span>
                                                     </TableCell>
                                                 </TableRow>
