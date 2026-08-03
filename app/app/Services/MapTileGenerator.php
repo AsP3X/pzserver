@@ -12,37 +12,49 @@ class MapTileGenerator
         private readonly MapTileStore $tileStore,
     ) {}
 
+    /**
+     * Whether a live generation process is actually running.
+     * Reconciles stale lock/progress left after container restarts.
+     */
     public function isRunning(): bool
     {
-        if ($this->progress->isRunning()) {
+        return $this->reconcileRunningState();
+    }
+
+    /**
+     * Drop stale "generating" state when the worker PID is dead (e.g. after restart).
+     */
+    public function reconcileRunningState(): bool
+    {
+        $lock = $this->progress->lockPath();
+        $lockData = $this->readLock();
+        $pid = (int) ($lockData['pid'] ?? 0);
+
+        $alive = $this->isProcessAlive($pid) || $this->findGenerateProcessPid() !== null;
+
+        if ($alive) {
             return true;
         }
 
-        $lock = $this->progress->lockPath();
-        if (! is_file($lock)) {
-            return false;
+        // No live worker — clear ghost state so the UI can start again
+        $progress = $this->progress->read();
+        if ($progress !== null && ! empty($progress['generating'])) {
+            $this->progress->update([
+                'generating' => false,
+                'stage' => 'failed',
+                'message' => 'Generation stopped (process no longer running — often after a container restart). Click Generate again.',
+                'error' => 'stale_after_restart',
+                'finished_at' => now()->toIso8601String(),
+            ]);
         }
 
-        // Stale lock after 6 hours
-        if (filemtime($lock) < time() - 21600) {
+        if (is_file($lock)) {
             @unlink($lock);
-
-            return false;
         }
 
-        // If lock exists but process is gone and progress is not generating, clear lock
-        $data = json_decode((string) @file_get_contents($lock), true);
-        $pid = is_array($data) ? (int) ($data['pid'] ?? 0) : 0;
-        if ($pid > 1 && function_exists('posix_kill') && ! @posix_kill($pid, 0)) {
-            // Process dead — keep lock only briefly so UI can show failure via progress
-            if (! $this->progress->isRunning()) {
-                @unlink($lock);
+        $this->progress->clearStopRequest();
 
-                return false;
-            }
-        }
-
-        return true;
+        return false;
     }
 
     /**
@@ -58,7 +70,8 @@ class MapTileGenerator
             ];
         }
 
-        if ($this->isRunning()) {
+        // Always reconcile first — restart leaves generating=true with a dead PID
+        if ($this->reconcileRunningState()) {
             return [
                 'ok' => false,
                 'message' => 'Tile generation is already running. Use Stop, or wait for it to finish.',
@@ -68,7 +81,7 @@ class MapTileGenerator
 
         $this->progress->clearStopRequest();
 
-        // Immediate UI feedback (before the artisan process is fully up)
+        $php = $this->phpCliBinary();
         $this->progress->start([
             'stage' => 'starting',
             'step' => 0,
@@ -79,7 +92,13 @@ class MapTileGenerator
         ]);
 
         $log = $this->logPath();
-        @file_put_contents($log, '['.now()->toIso8601String()."] UI requested generate force=".($force ? '1' : '0').' resume='.($resume ? '1' : '0')."\n", FILE_APPEND);
+        @file_put_contents(
+            $log,
+            '['.now()->toIso8601String()."] UI generate force=".($force ? '1' : '0')
+            .' resume='.($resume ? '1' : '0')
+            ." php={$php}\n",
+            FILE_APPEND
+        );
 
         $flags = '';
         if ($force) {
@@ -89,10 +108,10 @@ class MapTileGenerator
         }
 
         $artisan = base_path('artisan');
-        $php = PHP_BINARY ?: 'php';
         $lock = $this->progress->lockPath();
 
         // setsid detaches from php-fpm so the job survives request end
+        // IMPORTANT: use CLI php binary — PHP_BINARY under FPM is php-fpm and cannot run artisan
         $cmd = sprintf(
             'cd %s && setsid %s %s zomboid:generate-map-tiles %s >> %s 2>&1 < /dev/null & echo $!',
             escapeshellarg(base_path()),
@@ -105,12 +124,11 @@ class MapTileGenerator
         $output = [];
         $exit = 0;
         exec($cmd, $output, $exit);
-        $pid = isset($output[0]) && ctype_digit(trim($output[0])) ? (int) trim($output[0]) : 0;
+        $pid = isset($output[0]) && ctype_digit(trim((string) $output[0])) ? (int) trim((string) $output[0]) : 0;
 
         if ($pid <= 0) {
-            // Fallback without setsid
             $cmd2 = sprintf(
-                'cd %s && nohup %s %s zomboid:generate-map-tiles %s >> %s 2>&1 & echo $!',
+                'cd %s && nohup %s %s zomboid:generate-map-tiles %s >> %s 2>&1 < /dev/null & echo $!',
                 escapeshellarg(base_path()),
                 escapeshellarg($php),
                 escapeshellarg($artisan),
@@ -119,7 +137,7 @@ class MapTileGenerator
             );
             $output = [];
             exec($cmd2, $output, $exit);
-            $pid = isset($output[0]) && ctype_digit(trim($output[0])) ? (int) trim($output[0]) : 0;
+            $pid = isset($output[0]) && ctype_digit(trim((string) $output[0])) ? (int) trim((string) $output[0]) : 0;
         }
 
         if ($pid <= 0) {
@@ -127,56 +145,184 @@ class MapTileGenerator
 
             return [
                 'ok' => false,
-                'message' => 'Failed to start background generation process. Check that exec() is allowed and see storage/logs/map-tiles.log',
+                'message' => 'Failed to start background generation. Check storage/logs/map-tiles.log (php CLI / exec).',
                 'log' => 'storage/logs/map-tiles.log',
             ];
         }
 
+        // Confirm the process is still alive a moment later
+        usleep(300000);
+        if (! $this->isProcessAlive($pid) && $this->findGenerateProcessPid() === null) {
+            $tail = $this->tailLog(40);
+            $this->progress->finish(
+                false,
+                'Generation process exited immediately. See storage/logs/map-tiles.log',
+                'spawn_exited'
+            );
+            @file_put_contents($log, "[spawn] PID {$pid} died immediately\n{$tail}\n", FILE_APPEND);
+
+            return [
+                'ok' => false,
+                'message' => 'Generation process exited immediately. Check storage/logs/map-tiles.log',
+                'log' => 'storage/logs/map-tiles.log',
+            ];
+        }
+
+        // Prefer the real artisan PID if setsid wrapped it
+        $realPid = $this->findGenerateProcessPid() ?? $pid;
+
         file_put_contents($lock, json_encode([
             'started_at' => now()->toIso8601String(),
-            'pid' => $pid,
+            'pid' => $realPid,
             'force' => $force,
             'resume' => $resume,
+            'php' => $php,
         ], JSON_PRETTY_PRINT));
 
-        // Do not delete lock from the shell — command/progress owns lifecycle
-        // A small watcher removes lock when the PID exits (optional best-effort)
-        $this->scheduleLockCleanup($pid, $lock);
+        $this->progress->update([
+            'message' => 'Generation running (PID '.$realPid.')…',
+            'generating' => true,
+        ]);
+
+        $this->scheduleLockCleanup($realPid, $lock);
 
         $message = $force
-            ? 'Full regenerate started (PID '.$pid.'). This can take a long time.'
+            ? 'Full regenerate started (PID '.$realPid.'). This can take a long time.'
             : ($resume
-                ? 'Resume started (PID '.$pid.').'
-                : 'Map tile generation started (PID '.$pid.'). This can take 10–60+ minutes.');
+                ? 'Resume started (PID '.$realPid.').'
+                : 'Map tile generation started (PID '.$realPid.'). This can take 10–60+ minutes.');
 
         return [
             'ok' => true,
             'message' => $message,
             'log' => 'storage/logs/map-tiles.log',
-            'pid' => $pid,
+            'pid' => $realPid,
         ];
     }
 
     public function requestStop(): array
     {
-        if (! $this->isRunning()) {
+        if (! $this->reconcileRunningState()) {
             return [
                 'ok' => false,
-                'message' => 'No map tile generation is running.',
+                'message' => 'No map tile generation is running (cleared stale state if any).',
             ];
         }
 
         $this->progress->requestStop();
 
+        $lock = $this->readLock();
+        $pid = (int) ($lock['pid'] ?? 0);
+        if ($pid > 1 && $this->isProcessAlive($pid) && function_exists('posix_kill')) {
+            @posix_kill($pid, defined('SIGTERM') ? SIGTERM : 15);
+        }
+
         return [
             'ok' => true,
-            'message' => 'Stop requested. Workers will exit shortly; partial tiles are kept for Resume.',
+            'message' => 'Stop requested. Partial tiles are kept for Resume.',
         ];
     }
 
     public function logPath(): string
     {
         return storage_path('logs/map-tiles.log');
+    }
+
+    /**
+     * CLI php binary — never php-fpm (PHP_BINARY under FPM).
+     */
+    public function phpCliBinary(): string
+    {
+        $candidates = [];
+
+        if (defined('PHP_BINARY') && is_string(PHP_BINARY) && PHP_BINARY !== '' && ! str_contains(PHP_BINARY, 'php-fpm')) {
+            $candidates[] = PHP_BINARY;
+        }
+
+        $candidates = array_merge($candidates, [
+            '/usr/local/bin/php',
+            '/usr/bin/php',
+            'php',
+        ]);
+
+        foreach ($candidates as $bin) {
+            if ($bin === 'php') {
+                return 'php';
+            }
+            if (is_executable($bin)) {
+                return $bin;
+            }
+        }
+
+        return 'php';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function readLock(): array
+    {
+        $lock = $this->progress->lockPath();
+        if (! is_file($lock)) {
+            return [];
+        }
+
+        $data = json_decode((string) @file_get_contents($lock), true);
+
+        return is_array($data) ? $data : [];
+    }
+
+    private function isProcessAlive(int $pid): bool
+    {
+        if ($pid <= 1) {
+            return false;
+        }
+
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+
+        if (PHP_OS_FAMILY !== 'Windows' && is_dir('/proc/'.$pid)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Find a running zomboid:generate-map-tiles artisan process.
+     */
+    private function findGenerateProcessPid(): ?int
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            return null;
+        }
+
+        $out = [];
+        @exec("pgrep -f 'artisan zomboid:generate-map-tiles' 2>/dev/null", $out);
+        foreach ($out as $line) {
+            $pid = (int) trim($line);
+            if ($pid > 1 && $pid !== getmypid()) {
+                return $pid;
+            }
+        }
+
+        return null;
+    }
+
+    private function tailLog(int $lines): string
+    {
+        $path = $this->logPath();
+        if (! is_file($path)) {
+            return '(no log file)';
+        }
+
+        $content = @file($path);
+        if (! is_array($content) || $content === []) {
+            return '(empty log)';
+        }
+
+        return implode('', array_slice($content, -$lines));
     }
 
     /**
@@ -194,7 +340,12 @@ pid="$1"
 lock="$2"
 progress="$3"
 while kill -0 "$pid" 2>/dev/null; do sleep 5; done
-rm -f "$lock"
+# If another generate started, leave its lock alone
+if [ -f "$lock" ]; then
+  if grep -q "\"pid\": $pid" "$lock" 2>/dev/null || grep -q "\"pid\":$pid" "$lock" 2>/dev/null; then
+    rm -f "$lock"
+  fi
+fi
 if [ -f "$progress" ]; then
   php -r '
     $p = $argv[1];
@@ -202,13 +353,16 @@ if [ -f "$progress" ]; then
     if (!is_array($j) || empty($j["generating"])) { exit(0); }
     $j["generating"] = false;
     $j["stage"] = "failed";
-    $j["message"] = "Generation process exited unexpectedly. Check storage/logs/map-tiles.log";
+    $j["message"] = "Generation process exited. Check storage/logs/map-tiles.log";
     $j["updated_at"] = date("c");
     $j["finished_at"] = date("c");
     file_put_contents($p, json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
   ' "$progress" 2>/dev/null || true
 fi
 SH;
+
+        $php = $this->phpCliBinary();
+        $script = str_replace('php -r', escapeshellarg($php).' -r', $script);
 
         $cmd = sprintf(
             'setsid sh -c %s -- %s %s %s >/dev/null 2>&1 &',

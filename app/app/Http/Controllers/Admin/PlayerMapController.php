@@ -190,12 +190,13 @@ class PlayerMapController extends Controller
      */
     private function readTileProgress(): ?array
     {
-        $progress = $this->tileProgress->read();
+        // Clears ghost "generating" state after restarts before the page reads it
         $running = $this->tileGenerator->isRunning();
+        $progress = $this->tileProgress->read();
 
-        if ($progress !== null && ($progress['generating'] || $running || in_array($progress['stage'], ['failed', 'stopped', 'done'], true))) {
+        if ($progress !== null && ($running || in_array($progress['stage'], ['failed', 'stopped', 'done', 'starting', 'unpack', 'render', 'pack'], true) || $progress['generating'])) {
             return [
-                'generating' => (bool) ($progress['generating'] || $running),
+                'generating' => $running,
                 'completed' => (int) $progress['completed'],
                 'total' => (int) $progress['total'],
                 'percent' => (int) $progress['percent'],
