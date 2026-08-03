@@ -61,6 +61,7 @@ case "${1:-}" in
     exit 0
     ;;
   --down)
+    echo "Stopping stack…"
     pz_down
     exit 0
     ;;

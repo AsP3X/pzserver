@@ -121,17 +121,24 @@ PZ_STACK_CONTAINERS=(
   pz-caddy
 )
 
-# Remove leftover containers by name (survives compose project / profile mismatches)
+# Remove leftover containers by name (survives compose project / profile mismatches).
+# $1 = stop timeout seconds (default 15). Game-server compose grace is 60s — we cap it.
 pz_force_remove_stack_containers() {
+  local timeout="${1:-${PZ_STOP_TIMEOUT:-15}}"
   local name
   local any=0
   for name in "${PZ_STACK_CONTAINERS[@]}"; do
     if docker container inspect "$name" >/dev/null 2>&1; then
       any=1
-      echo "  Stopping/removing: ${name}"
+      local state
+      state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo unknown)"
+      echo "  [${name}] status=${state} — stop -t ${timeout}…"
       # Bounded stop so game-server (stop_grace_period: 60s) cannot hang deploy forever
-      docker stop -t 15 "$name" >/dev/null 2>&1 || true
-      docker rm -f "$name" >/dev/null 2>&1 || true
+      if ! docker stop -t "$timeout" "$name" 2>&1; then
+        echo "  [${name}] stop failed or timed out — force remove"
+      fi
+      docker rm -f "$name" 2>&1 || true
+      echo "  [${name}] removed"
     fi
   done
   if [[ "$any" -eq 0 ]]; then
@@ -167,20 +174,35 @@ pz_rebuild_game() {
 }
 
 pz_down() {
-  echo "Stopping compose project (all web modes / profiles)..."
+  local timeout="${PZ_STOP_TIMEOUT:-15}"
+  echo "Stopping stack (per-container timeout: ${timeout}s)…"
+  echo "  Note: game-server used to wait up to 60s with no output; we stop by name first."
+  echo ""
+
+  # 1) Stop fixed-name containers with visible progress (avoids silent compose down hang)
+  echo "→ Step 1/3: stop/remove known containers…"
+  pz_force_remove_stack_containers "$timeout"
+  echo ""
+
+  # 2) Compose down for project metadata / orphans (short timeout; stderr visible)
+  echo "→ Step 2/3: docker compose down -t ${timeout} (all web modes / profiles)…"
   # Include every overlay + caddy profile so nothing is left behind when WEB_PROXY_MODE changes
-  docker compose \
+  if ! docker compose \
     -f "${PZ_REPO_ROOT}/docker-compose.yml" \
     -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}" \
     -f "${PZ_REPO_ROOT}/docker-compose.web-caddy.yml" \
     -f "${PZ_REPO_ROOT}/docker-compose.web-npm.yml" \
     --profile caddy \
-    down --remove-orphans "$@" 2>/dev/null || true
+    down -t "$timeout" --remove-orphans "$@"; then
+    echo "  (compose down reported an error — continuing with force cleanup)"
+  fi
+  echo ""
 
-  # Compose may miss containers created under another project name / cwd / old mode
-  echo "Cleaning fixed-name stack containers..."
-  pz_force_remove_stack_containers
-  echo "Stack stopped."
+  # 3) Final sweep if compose left anything
+  echo "→ Step 3/3: final container sweep…"
+  pz_force_remove_stack_containers "$timeout"
+  echo ""
+  echo "→ Stack stopped."
 }
 
 pz_ps() {
