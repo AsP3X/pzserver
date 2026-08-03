@@ -150,9 +150,10 @@ if echo "$@" | grep -q "supervisord"; then
     fi
 
     # Map tiles — do NOT auto-generate (CPU/disk heavy). Run manually if needed:
-    #   php artisan zomboid:generate-map-tiles --force
+    #   docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
     # Output is packed into a single tiles.sqlite (not millions of loose files).
-    # If you already have a loose DZI pyramid: php artisan zomboid:generate-map-tiles --pack-only
+    # If you already have a loose DZI pyramid:
+    #   docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
     # or Admin → Player map → "Generate local tiles"
 
     # Item icons — download in background if catalog exists but icons are missing

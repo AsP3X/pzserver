@@ -151,18 +151,31 @@ The panel serves tiles from the pack at `/admin/map-tiles/{z}/{x}_{y}`.
 
 ### Commands
 
+Run inside the **app** container (`pz-app`). Stack must already be up.
+
 ```bash
 # Full generate (render → pack into tiles.sqlite → remove loose files)
-make exec CMD="php artisan zomboid:generate-map-tiles --force"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
 
 # Already have a multi-file DZI pyramid? Pack it without re-rendering
-make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
 
 # Debug only: keep the multi-file pyramid after packing (not recommended)
-make exec CMD="php artisan zomboid:generate-map-tiles --force --keep-loose"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --keep-loose
 ```
 
-Windows PowerShell:
+Via Compose service name (same effect):
+
+```bash
+docker compose exec app php artisan zomboid:generate-map-tiles --force
+docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
+```
+
+Or with Make / PowerShell wrappers:
+
+```bash
+make exec CMD="php artisan zomboid:generate-map-tiles --force"
+```
 
 ```powershell
 .\make.ps1 exec php artisan zomboid:generate-map-tiles --force

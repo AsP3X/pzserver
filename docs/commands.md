@@ -78,13 +78,20 @@ After generation, tiles are **packed into a single SQLite file** (`data/map-tile
 
 ```bash
 # Render + pack into tiles.sqlite (CPU/disk heavy; opt-in only)
-make exec CMD="php artisan zomboid:generate-map-tiles --force"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
 
 # Pack an existing multi-file pyramid without re-rendering
-make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
+
+# Same via Compose service name
+docker compose exec app php artisan zomboid:generate-map-tiles --force
 ```
 
-Windows:
+Make / Windows wrappers:
+
+```bash
+make exec CMD="php artisan zomboid:generate-map-tiles --force"
+```
 
 ```powershell
 .\make.ps1 exec php artisan zomboid:generate-map-tiles --force

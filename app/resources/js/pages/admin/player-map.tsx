@@ -16,6 +16,11 @@ type TileProgress = {
     completed: number;
     total: number;
     percent: number;
+    stage?: string;
+    step?: number;
+    steps?: number;
+    message?: string;
+    tiles_on_disk?: number;
 };
 
 type SafeZone = {
@@ -195,14 +200,19 @@ export default function PlayerMap({
 
                 <Card className="isolate flex-1">
                     <CardContent className="relative h-[350px] p-0 sm:h-[500px] lg:h-[600px]">
-                        {!hasTiles && tileProgress?.generating && (
-                            <div className="absolute top-2 left-1/2 z-[1000] w-64 -translate-x-1/2 rounded-lg border bg-background/90 px-4 py-3 shadow-sm backdrop-blur-sm sm:w-72">
+                        {(tileProgress?.generating || tilesGenerating) && (
+                            <div className="absolute top-2 left-1/2 z-[1000] w-72 -translate-x-1/2 rounded-lg border bg-background/90 px-4 py-3 shadow-sm backdrop-blur-sm sm:w-80">
                                 <div className="flex items-center gap-2 text-sm font-medium">
                                     <Loader2 className="size-4 animate-spin text-primary" />
                                     {t('admin.player_map.generating_tiles')}
+                                    {tileProgress?.step && tileProgress?.steps ? (
+                                        <span className="text-muted-foreground text-xs font-normal">
+                                            ({tileProgress.step}/{tileProgress.steps})
+                                        </span>
+                                    ) : null}
                                 </div>
                                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                                    {tileProgress.completed > 0 ? (
+                                    {tileProgress && tileProgress.percent > 0 ? (
                                         <div
                                             className="h-full rounded-full bg-primary transition-all duration-500"
                                             style={{ width: `${Math.max(tileProgress.percent, 2)}%` }}
@@ -212,10 +222,24 @@ export default function PlayerMap({
                                     )}
                                 </div>
                                 <p className="text-muted-foreground mt-1 text-xs">
-                                    {tileProgress.completed > 0
-                                        ? t('admin.player_map.tiles_rendered', { count: tileProgress.completed.toLocaleString(), percent: String(tileProgress.percent) })
-                                        : t('admin.player_map.preparing_render')}
+                                    {tileProgress?.message
+                                        ? tileProgress.message
+                                        : tileProgress && tileProgress.completed > 0
+                                          ? t('admin.player_map.tiles_rendered', {
+                                                count: tileProgress.completed.toLocaleString(),
+                                                percent: String(tileProgress.percent),
+                                            })
+                                          : t('admin.player_map.preparing_render')}
                                 </p>
+                                {tileProgress && tileProgress.total > 0 && (
+                                    <p className="text-muted-foreground mt-0.5 text-xs">
+                                        {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()}{' '}
+                                        ({tileProgress.percent}%)
+                                        {tileProgress.tiles_on_disk
+                                            ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
+                                            : ''}
+                                    </p>
+                                )}
                             </div>
                         )}
                         {!hasTiles && !tileProgress?.generating && (

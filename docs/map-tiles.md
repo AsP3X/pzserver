@@ -57,14 +57,34 @@ data/map-tiles/html/map_data/base/layer0_files/{z}/{x}_{y}.webp
 
 **UI:** Admin → **Player map** → **Generate local tiles** (or **Regenerate tiles**).
 
-**CLI (preferred for logs / SSH):**
+**CLI (Docker — preferred for logs / SSH):**
+
+The artisan command runs in the **app** container (`container_name: pz-app`). Stack must already be up (`make up` / `docker compose up -d`).
 
 ```bash
-# Linux
-make exec CMD="php artisan zomboid:generate-map-tiles --force"
+# Full generate: render → pack into tiles.sqlite → remove loose files
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
 
-# Windows PowerShell
+# Pack only (no re-render)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
+```
+
+Equivalent via Compose service name:
+
+```bash
+docker compose exec app php artisan zomboid:generate-map-tiles --force
+docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
+```
+
+Make / PowerShell wrappers (optional):
+
+```bash
+make exec CMD="php artisan zomboid:generate-map-tiles --force"
+```
+
+```powershell
 .\make.ps1 exec php artisan zomboid:generate-map-tiles --force
+.\make.ps1 exec php artisan zomboid:generate-map-tiles --pack-only
 ```
 
 Generation is **not** scheduled and **not** run automatically on container start (too heavy).
@@ -84,7 +104,7 @@ Generation is **not** scheduled and **not** run automatically on container start
 If you already generated tiles **before** packing existed, you likely have a huge `layer0_files/` tree. Convert without re-rendering:
 
 ```bash
-make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
 ```
 
 After it finishes you should see `./data/map-tiles/tiles.sqlite` and the loose pyramid removed. Backups and deletes become normal again.
@@ -99,10 +119,25 @@ Local isometric render is demanding (pzmap2dzi’s own guidance is high RAM/disk
 - Temporary disk spike while the loose pyramid exists **before** pack+delete
 - Prefer running generate when the host is idle
 
+### Progress
+
+While generation runs, progress is written to `app/storage/app/map-tiles.progress.json` and shown:
+
+- **CLI** — live status line (`job: done/total`, files on disk, elapsed time) when using `docker exec -it`
+- **Admin UI** — progress bar on the Player map page (polls every 5s)
+
+Inspect progress manually:
+
+```bash
+docker exec pz-app cat /var/www/html/storage/app/map-tiles.progress.json
+docker exec pz-app tail -f /var/www/html/storage/logs/pzmap2dzi.log
+```
+
 Logs:
 
 - Artisan / UI background job: `app/storage/logs/map-tiles.log`
 - pzmap2dzi subprocess: `app/storage/logs/pzmap2dzi.log`
+- Shared progress JSON: `app/storage/app/map-tiles.progress.json`
 
 ### Configuration
 
@@ -135,6 +170,6 @@ Pack schema (version `1`):
 
 ### Related docs
 
-- [Command reference](commands.md) — artisan examples via `make exec`
+- [Command reference](commands.md) — artisan examples via `docker exec` / `make exec`
 - [Troubleshooting](troubleshooting.md) — map / disk issues
 - [README — Map tiles](../README.md#map-tiles-admin-player-map) — short operator summary

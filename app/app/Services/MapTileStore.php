@@ -242,9 +242,10 @@ class MapTileStore
     /**
      * Pack a loose pzmap2dzi tile pyramid into a single SQLite file, then remove loose tiles.
      *
+     * @param  (callable(int $packed, int $total): void)|null  $onProgress
      * @return array{tiles: int, path: string}
      */
-    public function packLooseTiles(bool $removeLoose = true): array
+    public function packLooseTiles(bool $removeLoose = true, ?callable $onProgress = null): array
     {
         $layer0 = $this->looseLayerPath();
         if (! is_dir($layer0)) {
@@ -261,6 +262,14 @@ class MapTileStore
 
         if (is_file($tempPath)) {
             @unlink($tempPath);
+        }
+
+        // Pre-count tile files so packing can report percent
+        $totalEstimate = 0;
+        if ($onProgress !== null) {
+            $progressService = new MapTileProgress;
+            $totalEstimate = $progressService->countLooseTiles($layer0);
+            $onProgress(0, $totalEstimate);
         }
 
         $pdo = new PDO('sqlite:'.$tempPath, null, null, [
@@ -299,6 +308,7 @@ class MapTileStore
         $insert = $pdo->prepare('INSERT OR REPLACE INTO tiles (z, x, y, format, data) VALUES (?, ?, ?, ?, ?)');
         $count = 0;
         $batchSize = 500;
+        $progressEvery = 1000;
 
         $pdo->beginTransaction();
 
@@ -347,6 +357,14 @@ class MapTileStore
                 $pdo->commit();
                 $pdo->beginTransaction();
             }
+
+            if ($onProgress !== null && ($count % $progressEvery === 0 || ($totalEstimate > 0 && $count >= $totalEstimate))) {
+                $onProgress($count, max($totalEstimate, $count));
+            }
+        }
+
+        if ($onProgress !== null && $count > 0) {
+            $onProgress($count, max($totalEstimate, $count));
         }
 
         $pdo->commit();

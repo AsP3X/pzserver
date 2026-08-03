@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\MapConfigBuilder;
+use App\Services\MapTileProgress;
 use App\Services\MapTileStore;
 use App\Services\OnlinePlayersReader;
 use App\Services\PlayerPositionReader;
@@ -26,6 +27,7 @@ class PlayerMapController extends Controller
         private readonly MapConfigBuilder $mapConfigBuilder,
         private readonly SafeZoneManager $safeZoneManager,
         private readonly MapTileStore $tileStore,
+        private readonly MapTileProgress $tileProgress,
     ) {}
 
     public function __invoke(): InertiaResponse
@@ -192,6 +194,11 @@ class PlayerMapController extends Controller
 
     private function isTileGenerationRunning(): bool
     {
+        // Progress file is written by artisan (CLI or UI-triggered)
+        if ($this->tileProgress->isRunning()) {
+            return true;
+        }
+
         $lock = storage_path('app/map-tiles.generating');
         if (! is_file($lock)) {
             return false;
@@ -208,19 +215,51 @@ class PlayerMapController extends Controller
     }
 
     /**
-     * @return array{generating: bool, completed: int, total: int, percent: int}|null
+     * @return array{
+     *     generating: bool,
+     *     completed: int,
+     *     total: int,
+     *     percent: int,
+     *     stage?: string,
+     *     step?: int,
+     *     steps?: int,
+     *     message?: string,
+     *     tiles_on_disk?: int
+     * }|null
      */
     private function readTileProgress(): ?array
     {
+        $progress = $this->tileProgress->read();
+
+        if ($progress !== null && ($progress['generating'] || $this->isTileGenerationRunning())) {
+            return [
+                'generating' => (bool) ($progress['generating'] || $this->isTileGenerationRunning()),
+                'completed' => (int) $progress['completed'],
+                'total' => (int) $progress['total'],
+                'percent' => (int) $progress['percent'],
+                'stage' => (string) $progress['stage'],
+                'step' => (int) $progress['step'],
+                'steps' => (int) $progress['steps'],
+                'message' => (string) $progress['message'],
+                'tiles_on_disk' => (int) $progress['tiles_on_disk'],
+            ];
+        }
+
         if (! $this->isTileGenerationRunning()) {
             return null;
         }
 
+        // Lock present but progress not written yet
         return [
             'generating' => true,
             'completed' => 0,
             'total' => 0,
             'percent' => 0,
+            'stage' => 'starting',
+            'step' => 0,
+            'steps' => 3,
+            'message' => 'Starting map tile generation…',
+            'tiles_on_disk' => 0,
         ];
     }
 }

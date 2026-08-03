@@ -44,7 +44,8 @@ make init
 2. Optional: generate **local** tiles from the panel (**Admin → Player map → Generate local tiles**) or:
 
 ```bash
-make exec CMD="php artisan zomboid:generate-map-tiles --force"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
+# or: docker compose exec app php artisan zomboid:generate-map-tiles --force
 ```
 
 3. Check logs: `app/storage/logs/map-tiles.log` and `app/storage/logs/pzmap2dzi.log`.
@@ -55,7 +56,8 @@ make exec CMD="php artisan zomboid:generate-map-tiles --force"
 Older runs left a raw DZI pyramid (`html/map_data/base/layer0_files/`). Pack it into a single SQLite file and remove the loose tree:
 
 ```bash
-make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
+# or: docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
 ```
 
 Confirm `data/map-tiles/tiles.sqlite` exists and the `layer0_files` directory is gone. New generates pack automatically after render.

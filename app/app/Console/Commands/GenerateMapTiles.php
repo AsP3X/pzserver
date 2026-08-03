@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\MapTileProgress;
 use App\Services\MapTileStore;
 use Illuminate\Console\Command;
 use Throwable;
@@ -19,13 +20,24 @@ class GenerateMapTiles extends Command
     /** @var string */
     protected $description = 'Generate map tiles (pzmap2dzi) and pack them into a single SQLite file';
 
-    public function __construct(private readonly MapTileStore $tileStore)
-    {
+    private float $startedAt = 0.0;
+
+    private int $lastDiskCountAt = 0;
+
+    private int $lastTilesOnDisk = 0;
+
+    private int $lastCliLogAt = 0;
+
+    public function __construct(
+        private readonly MapTileStore $tileStore,
+        private readonly MapTileProgress $progress,
+    ) {
         parent::__construct();
     }
 
     public function handle(): int
     {
+        $this->startedAt = microtime(true);
         $tilesPath = $this->tileStore->rootPath();
         $serverPath = config('zomboid.game_server_path');
 
@@ -80,8 +92,20 @@ class GenerateMapTiles extends Command
             mkdir($tilesPath, 0755, true);
         }
 
+        $this->progress->start([
+            'stage' => 'starting',
+            'step' => 0,
+            'steps' => 3,
+            'message' => 'Starting map tile generation…',
+        ]);
+
         if ($this->option('force')) {
             $this->info('Clearing previous tiles...');
+            $this->progress->update([
+                'stage' => 'clear',
+                'step' => 0,
+                'message' => 'Clearing previous tiles…',
+            ]);
             $this->tileStore->clearAll();
         }
 
@@ -91,24 +115,59 @@ class GenerateMapTiles extends Command
 
         // Step 1: Unpack textures
         $this->info('Step 1/3: Unpacking textures...');
-        if (! $this->runPzmap($pzmap2dziPath, $confPath, 'unpack')) {
+        $this->progress->update([
+            'stage' => 'unpack',
+            'step' => 1,
+            'steps' => 3,
+            'message' => 'Unpacking textures…',
+            'completed' => 0,
+            'total' => 0,
+        ]);
+        if (! $this->runPzmap($pzmap2dziPath, $confPath, 'unpack', trackJobProgress: false)) {
+            $this->progress->finish(false, 'Unpack failed.', 'pzmap2dzi unpack failed');
+
             return self::FAILURE;
         }
+        $this->newLine();
 
         // Step 2: Render isometric tiles (base layer) — creates many small files temporarily
         $this->info('Step 2/3: Rendering isometric tiles (temporary multi-file pyramid)...');
-        if (! $this->runPzmap($pzmap2dziPath, $confPath, 'render base')) {
+        $this->progress->update([
+            'stage' => 'render',
+            'step' => 2,
+            'steps' => 3,
+            'message' => 'Rendering isometric tiles…',
+            'completed' => 0,
+            'total' => 0,
+        ]);
+        if (! $this->runPzmap($pzmap2dziPath, $confPath, 'render base', trackJobProgress: true)) {
+            $this->progress->finish(false, 'Render failed.', 'pzmap2dzi render base failed');
+
             return self::FAILURE;
         }
+        $this->newLine();
 
         // Step 3: Pack into a single SQLite file and remove the file explosion
         $this->info('Step 3/3: Packing tiles into single SQLite database...');
+        $this->progress->update([
+            'stage' => 'pack',
+            'step' => 3,
+            'steps' => 3,
+            'message' => 'Packing tiles into SQLite…',
+            'completed' => 0,
+            'total' => 0,
+        ]);
         if (! $this->packRenderedTiles()) {
+            $this->progress->finish(false, 'Packing failed.', 'Failed to pack tiles into SQLite');
+
             return self::FAILURE;
         }
+        $this->newLine();
 
+        $this->progress->finish(true, 'Map tiles ready at '.$this->tileStore->packPath());
         $this->info('Map tiles ready at: '.$this->tileStore->packPath());
         $this->info('Loose tile files were packed away so backups/deletes stay fast.');
+        $this->info('Total time: '.$this->formatElapsed(microtime(true) - $this->startedAt));
 
         return self::SUCCESS;
     }
@@ -127,13 +186,25 @@ class GenerateMapTiles extends Command
             return self::FAILURE;
         }
 
+        $this->startedAt = microtime(true);
+        $this->progress->start([
+            'stage' => 'pack',
+            'step' => 1,
+            'steps' => 1,
+            'message' => 'Packing existing loose tiles…',
+        ]);
         $this->info('Packing existing loose tiles...');
 
         if (! $this->packRenderedTiles()) {
+            $this->progress->finish(false, 'Packing failed.', 'Failed to pack tiles into SQLite');
+
             return self::FAILURE;
         }
 
+        $this->newLine();
+        $this->progress->finish(true, 'Packed tiles ready at '.$this->tileStore->packPath());
         $this->info('Packed tiles ready at: '.$this->tileStore->packPath());
+        $this->info('Total time: '.$this->formatElapsed(microtime(true) - $this->startedAt));
 
         return self::SUCCESS;
     }
@@ -141,7 +212,27 @@ class GenerateMapTiles extends Command
     private function packRenderedTiles(): bool
     {
         try {
-            $result = $this->tileStore->packLooseTiles(removeLoose: ! $this->option('keep-loose'));
+            $result = $this->tileStore->packLooseTiles(
+                removeLoose: ! $this->option('keep-loose'),
+                onProgress: function (int $packed, int $total): void {
+                    $this->progress->update([
+                        'stage' => 'pack',
+                        'message' => 'Packing tiles into SQLite…',
+                        'completed' => $packed,
+                        'total' => $total,
+                        'tiles_on_disk' => $total,
+                    ]);
+                    $this->writeCliStatus(sprintf(
+                        '[pack] %s / %s tiles (%s%%)  elapsed %s',
+                        number_format($packed),
+                        number_format(max($total, $packed)),
+                        $total > 0 ? (string) min(100, (int) round(100 * $packed / max(1, $total))) : '?',
+                        $this->formatElapsed(microtime(true) - $this->startedAt),
+                    ));
+                },
+            );
+
+            $this->newLine();
             $this->info(sprintf(
                 'Packed %s tiles into %s (%s)',
                 number_format($result['tiles']),
@@ -155,6 +246,7 @@ class GenerateMapTiles extends Command
 
             return true;
         } catch (Throwable $e) {
+            $this->newLine();
             $this->error('Failed to pack tiles: '.$e->getMessage());
 
             return false;
@@ -174,26 +266,134 @@ class GenerateMapTiles extends Command
         return round($size, 1).' '.$units[$i];
     }
 
-    private function runPzmap(string $pzmap2dziPath, string $confPath, string $subcommand): bool
+    /**
+     * Run pzmap2dzi while streaming progress from the log (and optional disk counts).
+     */
+    private function runPzmap(string $pzmap2dziPath, string $confPath, string $subcommand, bool $trackJobProgress): bool
     {
         $pzmap2dziDir = dirname($pzmap2dziPath);
         $logFile = storage_path('logs/pzmap2dzi.log');
+        @file_put_contents($logFile, '');
+
         $command = sprintf(
-            'cd %s && python3 %s -c %s %s > %s 2>&1',
+            'cd %s && python3 %s -c %s %s',
             escapeshellarg($pzmap2dziDir),
             escapeshellarg($pzmap2dziPath),
             escapeshellarg($confPath),
             $subcommand,
-            escapeshellarg($logFile),
         );
 
         $this->line("Running: {$command}");
         $this->line("Output logged to: {$logFile}");
+        if ($trackJobProgress) {
+            $this->line('Progress updates every ~1s from pzmap2dzi (job: done/total).');
+        }
 
-        $result = 0;
-        exec($command, $output, $result);
+        $descriptors = [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['file', $logFile, 'a'],
+            2 => ['file', $logFile, 'a'],
+        ];
 
+        $process = @proc_open($command, $descriptors, $pipes, $pzmap2dziDir);
+        if (! is_resource($process)) {
+            // Fallback to blocking exec if proc_open is unavailable
+            $result = 0;
+            exec($command.' > '.escapeshellarg($logFile).' 2>&1', $output, $result);
+
+            return $this->handlePzmapExit($subcommand, $result, $logFile);
+        }
+
+        $this->lastDiskCountAt = 0;
+        $this->lastTilesOnDisk = 0;
+        $exitCode = 1;
+
+        while (true) {
+            $status = proc_get_status($process);
+            if ($status === false) {
+                break;
+            }
+
+            if ($trackJobProgress) {
+                $this->pollRenderProgress($logFile);
+            } else {
+                $this->writeCliStatus(sprintf(
+                    '[%s] running…  elapsed %s',
+                    $subcommand,
+                    $this->formatElapsed(microtime(true) - $this->startedAt),
+                ));
+                $this->progress->update([
+                    'message' => 'Running '.$subcommand.'…',
+                ]);
+            }
+
+            if (! $status['running']) {
+                // exitcode is only reliable the first time after the process exits
+                $exitCode = (int) $status['exitcode'];
+                break;
+            }
+
+            usleep(1000000); // 1s
+        }
+
+        // Final progress sample before we close
+        if ($trackJobProgress) {
+            $this->pollRenderProgress($logFile);
+        }
+
+        proc_close($process);
+
+        return $this->handlePzmapExit($subcommand, $exitCode, $logFile);
+    }
+
+    private function pollRenderProgress(string $logFile): void
+    {
+        $job = $this->progress->parseJobProgressFromLog($logFile);
+
+        $now = time();
+        if ($now - $this->lastDiskCountAt >= 10) {
+            $this->lastTilesOnDisk = $this->progress->countLooseTiles($this->tileStore->looseLayerPath());
+            $this->lastDiskCountAt = $now;
+        }
+
+        $completed = $job['done'] ?? 0;
+        $total = $job['total'] ?? 0;
+        $percent = $total > 0 ? (int) round(100 * $completed / $total) : 0;
+
+        $this->progress->update([
+            'stage' => 'render',
+            'step' => 2,
+            'steps' => 3,
+            'message' => $total > 0
+                ? sprintf('Rendering tiles %s / %s…', number_format($completed), number_format($total))
+                : 'Rendering isometric tiles (planning / preparing)…',
+            'completed' => $completed,
+            'total' => $total,
+            'tiles_on_disk' => $this->lastTilesOnDisk,
+        ]);
+
+        if ($total > 0) {
+            $this->writeCliStatus(sprintf(
+                '[render] job %s / %s (%d%%)  files on disk ~%s  elapsed %s',
+                number_format($completed),
+                number_format($total),
+                $percent,
+                number_format($this->lastTilesOnDisk),
+                $this->formatElapsed(microtime(true) - $this->startedAt),
+            ));
+        } else {
+            $this->writeCliStatus(sprintf(
+                '[render] preparing…  files on disk ~%s  elapsed %s',
+                number_format($this->lastTilesOnDisk),
+                $this->formatElapsed(microtime(true) - $this->startedAt),
+            ));
+        }
+    }
+
+    private function handlePzmapExit(string $subcommand, int $result, string $logFile): bool
+    {
         if ($result !== 0) {
+            $this->newLine();
             $this->error("pzmap2dzi '{$subcommand}' failed with exit code: {$result}");
             if (is_file($logFile)) {
                 $lines = file($logFile);
@@ -204,9 +404,42 @@ class GenerateMapTiles extends Command
             return false;
         }
 
+        $this->newLine();
         $this->info("Completed: {$subcommand}");
 
         return true;
+    }
+
+    private function writeCliStatus(string $line): void
+    {
+        // In-place status line for interactive terminals
+        if (function_exists('posix_isatty') && defined('STDOUT') && @posix_isatty(STDOUT)) {
+            $this->output->write("\r\033[K".$line);
+
+            return;
+        }
+
+        // Non-TTY (docker logs without -t): throttle so logs stay readable
+        $now = time();
+        if ($now - $this->lastCliLogAt < 15 && $this->lastCliLogAt !== 0) {
+            return;
+        }
+        $this->lastCliLogAt = $now;
+        $this->output->writeln($line);
+    }
+
+    private function formatElapsed(float $seconds): string
+    {
+        $seconds = max(0, (int) floor($seconds));
+        $h = intdiv($seconds, 3600);
+        $m = intdiv($seconds % 3600, 60);
+        $s = $seconds % 60;
+
+        if ($h > 0) {
+            return sprintf('%d:%02d:%02d', $h, $m, $s);
+        }
+
+        return sprintf('%d:%02d', $m, $s);
     }
 
     /**
