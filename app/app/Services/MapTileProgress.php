@@ -187,24 +187,10 @@ class MapTileProgress
      */
     public function parseJobProgressFromLog(string $logPath): ?array
     {
-        if (! is_file($logPath)) {
+        $tail = $this->readLogTail($logPath, 8192);
+        if ($tail === null || $tail === '') {
             return null;
         }
-
-        $size = filesize($logPath);
-        if ($size === false || $size === 0) {
-            return null;
-        }
-
-        $fp = fopen($logPath, 'rb');
-        if ($fp === false) {
-            return null;
-        }
-
-        $read = min(8192, $size);
-        fseek($fp, -$read, SEEK_END);
-        $tail = (string) fread($fp, $read);
-        fclose($fp);
 
         // \r progress updates leave many "job: X/Y" fragments in the log
         if (! preg_match_all('/job:\s*(\d+)\s*\/\s*(\d+)/i', $tail, $matches, PREG_SET_ORDER)) {
@@ -223,6 +209,84 @@ class MapTileProgress
             'done' => min($done, $total),
             'total' => $total,
         ];
+    }
+
+    /**
+     * Best-effort human status from the latest pzmap2dzi log lines (before job: X/Y exists).
+     */
+    public function parsePhaseFromLog(string $logPath): ?string
+    {
+        $tail = $this->readLogTail($logPath, 4096);
+        if ($tail === null || $tail === '') {
+            return null;
+        }
+
+        // Prefer the most recent known phase marker (log may use \r)
+        $patterns = [
+            '/Scanning files:\s*(\d+)\s*%/i' => 'Scanning map source files (:pct%)…',
+            '/(\d+)\s+files detected/i' => 'Detected :count source files…',
+            '/Scanning source files/i' => 'Scanning source files…',
+            '/Scanning existing tiles/i' => 'Scanning existing tiles…',
+            '/Planning tasks/i' => 'Planning render tasks…',
+            '/Preparing data/i' => 'Preparing map data…',
+            '/Cleaning stale/i' => 'Cleaning stale tiles…',
+            '/Working/i' => 'Starting tile workers…',
+            '/Stale tiles:\s*(\d+).*Affected tiles:\s*(\d+)/i' => 'Tasks ready (stale :s, affected :a)…',
+            '/Unit range:/i' => 'Computing unit range…',
+            '/PZ version:/i' => 'Reading PZ map version…',
+        ];
+
+        // Walk lines from end for the newest match
+        $normalized = preg_replace("/\r\n?/", "\n", $tail) ?? $tail;
+        $lines = array_reverse(explode("\n", $normalized));
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            foreach ($patterns as $regex => $template) {
+                if (preg_match($regex, $line, $m)) {
+                    $msg = $template;
+                    if (isset($m[1]) && str_contains($msg, ':pct')) {
+                        $msg = str_replace(':pct', $m[1], $msg);
+                    }
+                    if (isset($m[1]) && str_contains($msg, ':count')) {
+                        $msg = str_replace(':count', number_format((int) $m[1]), $msg);
+                    }
+                    if (isset($m[1], $m[2]) && str_contains($msg, ':s')) {
+                        $msg = str_replace([':s', ':a'], [number_format((int) $m[1]), number_format((int) $m[2])], $msg);
+                    }
+
+                    return $msg;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function readLogTail(string $logPath, int $bytes): ?string
+    {
+        if (! is_file($logPath)) {
+            return null;
+        }
+
+        $size = filesize($logPath);
+        if ($size === false || $size === 0) {
+            return null;
+        }
+
+        $fp = fopen($logPath, 'rb');
+        if ($fp === false) {
+            return null;
+        }
+
+        $read = min($bytes, $size);
+        fseek($fp, -$read, SEEK_END);
+        $tail = (string) fread($fp, $read);
+        fclose($fp);
+
+        return $tail;
     }
 
     /**

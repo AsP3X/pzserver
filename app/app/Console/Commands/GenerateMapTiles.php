@@ -555,6 +555,7 @@ class GenerateMapTiles extends Command
     private function pollRenderProgress(string $logFile): void
     {
         $job = $this->progress->parseJobProgressFromLog($logFile);
+        $phase = $this->progress->parsePhaseFromLog($logFile);
 
         $now = time();
         // find(1) over a multi-million-file tree is itself a disk storm — do it rarely
@@ -567,13 +568,15 @@ class GenerateMapTiles extends Command
         $total = $job['total'] ?? 0;
         $percent = $total > 0 ? (int) round(100 * $completed / $total) : 0;
 
+        $message = $total > 0
+            ? sprintf('Rendering tiles %s / %s…', number_format($completed), number_format($total))
+            : ($phase ?? 'Preparing render (scanning map — no tile files yet, this can take a long time)…');
+
         $this->progress->update([
             'stage' => 'render',
             'step' => 2,
             'steps' => 3,
-            'message' => $total > 0
-                ? sprintf('Rendering tiles %s / %s…', number_format($completed), number_format($total))
-                : 'Rendering isometric tiles (planning / preparing)…',
+            'message' => $message,
             'completed' => $completed,
             'total' => $total,
             'tiles_on_disk' => $this->lastTilesOnDisk,
@@ -590,7 +593,8 @@ class GenerateMapTiles extends Command
             ));
         } else {
             $this->writeCliStatus(sprintf(
-                '[render] preparing…  files on disk ~%s  elapsed %s',
+                '[render] %s  files ~%s  elapsed %s',
+                $phase ?? 'preparing (scan/plan — 0 tiles until workers start)',
                 number_format($this->lastTilesOnDisk),
                 $this->formatElapsed(microtime(true) - $this->startedAt),
             ));
