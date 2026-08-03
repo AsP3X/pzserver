@@ -645,6 +645,7 @@ Leaflet.js interactive map showing all player positions.
 
 **Admin Player Map page (`/admin/players/map`):**
 - Leaflet.js interactive map with PZ map tiles (from map.projectzomboid.com or self-hosted)
+- **Local tiles storage:** after `pzmap2dzi` render, pack the DZI pyramid into a single `tiles.sqlite` (via `MapTileStore`) and delete the multi-file tree — avoids millions of files for backup/delete. Serve tiles from SQLite at `/admin/map-tiles/{z}/{x}_{y}`. `--pack-only` migrates legacy loose pyramids. See `docs/map-tiles.md`.
 - Player markers plotted at (x, y) coordinates — online from `players_live.json`, offline from `players.db`
 - Marker popups: player name, alive/dead, coordinates, online status
 - Color-coded markers: green = online, grey = offline, red = dead
@@ -835,7 +836,7 @@ php artisan scribe:generate
 | Phase 16 — Player Registration + PZ Sync | DONE | Web registration → auto PZ account, password sync, player portal, email verification, 35 tests |
 | Phase 17 — Config Page UX Overhaul | DONE | Smart inputs (Switch/Select/number), grouped collapsible sections, search filter, sensitive field toggles, config metadata system, 6 new tests |
 | Phase 18 — PZ Lua Bridge Mod | DONE | Server-side Lua mod: inventory snapshots, delivery queue, position tracking via shared volume |
-| Phase 19 — Admin Player Map | DONE | Leaflet.js map with PZ tile rendering, player markers (online/offline/dead), action dialogs (kick/ban/access), usePoll 5s live updates, players.db SQLite connection |
+| Phase 19 — Admin Player Map | DONE | Leaflet.js map with PZ tile rendering, player markers (online/offline/dead), action dialogs (kick/ban/access), usePoll 5s live updates, players.db SQLite connection; local tiles packed to single tiles.sqlite (MapTileStore) — docs/map-tiles.md |
 | Phase 20 — Admin Inventory Management | DONE | Inventory grid with item icons, give/remove dialogs, delivery queue integration, audit logged, 17 tests |
 | Phase 21 — Dashboard & UX Polish | DONE | Toast notifications (Sonner), error handling, deferred props with skeletons, game time/weather widget (Lua export), player stats/leaderboards (Lua export), Log Extender event ingestion, activity feed, mobile responsive polish, 23 new tests |
 | Phase 22+ — Subscriptions | TODO | Cashier/Stripe (deferred — monetization) |

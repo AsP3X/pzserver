@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Services\MapTileStore;
 use Illuminate\Console\Command;
+use Throwable;
 
 class GenerateMapTiles extends Command
 {
@@ -10,15 +12,27 @@ class GenerateMapTiles extends Command
     protected $signature = 'zomboid:generate-map-tiles
         {--force : Regenerate tiles even if they already exist}
         {--map= : Specific map name to generate (default: all)}
-        {--workers= : Number of render workers (default: auto-detect CPU cores)}';
+        {--workers= : Number of render workers (default: auto-detect CPU cores)}
+        {--keep-loose : Keep multi-file tile pyramid after packing (not recommended)}
+        {--pack-only : Pack existing loose tiles into SQLite without re-rendering}';
 
     /** @var string */
-    protected $description = 'Generate DZI map tiles from PZ game data using pzmap2dzi';
+    protected $description = 'Generate map tiles (pzmap2dzi) and pack them into a single SQLite file';
+
+    public function __construct(private readonly MapTileStore $tileStore)
+    {
+        parent::__construct();
+    }
 
     public function handle(): int
     {
-        $tilesPath = config('zomboid.map.tiles_path');
+        $tilesPath = $this->tileStore->rootPath();
         $serverPath = config('zomboid.game_server_path');
+
+        // Pack-only path: convert an existing loose pyramid without re-render
+        if ($this->option('pack-only')) {
+            return $this->packExisting();
+        }
 
         if (! is_dir($serverPath)) {
             $this->error("Game server path does not exist: {$serverPath}");
@@ -55,24 +69,8 @@ class GenerateMapTiles extends Command
         $pzmapRoot = dirname($pzmap2dziPath);
         $this->ensureMapConfDefaults($pzmapRoot);
 
-        // Only skip when a usable tile pyramid exists (not just an empty/partial dir)
-        $layer0 = rtrim((string) $tilesPath, '/').'/html/map_data/base/layer0_files';
-        $ready = false;
-        foreach (['0', '1', '2', '3'] as $level) {
-            if (is_dir($layer0.'/'.$level)) {
-                $files = array_merge(
-                    glob($layer0.'/'.$level.'/*.webp') ?: [],
-                    glob($layer0.'/'.$level.'/*.jpg') ?: [],
-                );
-                if ($files !== []) {
-                    $ready = true;
-                    break;
-                }
-            }
-        }
-
-        if (! $this->option('force') && $ready) {
-            $this->warn('Tiles already exist. Use --force to regenerate.');
+        if (! $this->option('force') && $this->tileStore->hasTiles()) {
+            $this->warn('Tiles already exist (packed SQLite or loose pyramid). Use --force to regenerate, or --pack-only to pack loose tiles.');
 
             return self::SUCCESS;
         }
@@ -82,25 +80,98 @@ class GenerateMapTiles extends Command
             mkdir($tilesPath, 0755, true);
         }
 
+        if ($this->option('force')) {
+            $this->info('Clearing previous tiles...');
+            $this->tileStore->clearAll();
+        }
+
         // Generate pzmap2dzi config
         $confPath = $this->generateConfig($serverPath, $tilesPath, $pzmapRoot);
         $this->info("Generated config: {$confPath}");
 
         // Step 1: Unpack textures
-        $this->info('Step 1/2: Unpacking textures...');
+        $this->info('Step 1/3: Unpacking textures...');
         if (! $this->runPzmap($pzmap2dziPath, $confPath, 'unpack')) {
             return self::FAILURE;
         }
 
-        // Step 2: Render isometric tiles (base layer)
-        $this->info('Step 2/2: Rendering isometric tiles...');
+        // Step 2: Render isometric tiles (base layer) — creates many small files temporarily
+        $this->info('Step 2/3: Rendering isometric tiles (temporary multi-file pyramid)...');
         if (! $this->runPzmap($pzmap2dziPath, $confPath, 'render base')) {
             return self::FAILURE;
         }
 
-        $this->info('Map tiles generated successfully at: '.$tilesPath);
+        // Step 3: Pack into a single SQLite file and remove the file explosion
+        $this->info('Step 3/3: Packing tiles into single SQLite database...');
+        if (! $this->packRenderedTiles()) {
+            return self::FAILURE;
+        }
+
+        $this->info('Map tiles ready at: '.$this->tileStore->packPath());
+        $this->info('Loose tile files were packed away so backups/deletes stay fast.');
 
         return self::SUCCESS;
+    }
+
+    private function packExisting(): int
+    {
+        if (! $this->tileStore->hasLooseTiles()) {
+            if ($this->tileStore->hasPackedTiles()) {
+                $this->info('Tiles are already packed at: '.$this->tileStore->packPath());
+
+                return self::SUCCESS;
+            }
+
+            $this->error('No loose tiles found to pack under '.$this->tileStore->looseLayerPath());
+
+            return self::FAILURE;
+        }
+
+        $this->info('Packing existing loose tiles...');
+
+        if (! $this->packRenderedTiles()) {
+            return self::FAILURE;
+        }
+
+        $this->info('Packed tiles ready at: '.$this->tileStore->packPath());
+
+        return self::SUCCESS;
+    }
+
+    private function packRenderedTiles(): bool
+    {
+        try {
+            $result = $this->tileStore->packLooseTiles(removeLoose: ! $this->option('keep-loose'));
+            $this->info(sprintf(
+                'Packed %s tiles into %s (%s)',
+                number_format($result['tiles']),
+                $result['path'],
+                $this->humanFilesize((int) filesize($result['path'])),
+            ));
+
+            if ($this->option('keep-loose')) {
+                $this->warn('Kept loose tile files (--keep-loose). Delete them later with: php artisan zomboid:generate-map-tiles --pack-only');
+            }
+
+            return true;
+        } catch (Throwable $e) {
+            $this->error('Failed to pack tiles: '.$e->getMessage());
+
+            return false;
+        }
+    }
+
+    private function humanFilesize(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $i = 0;
+        $size = (float) $bytes;
+        while ($size >= 1024 && $i < count($units) - 1) {
+            $size /= 1024;
+            $i++;
+        }
+
+        return round($size, 1).' '.$units[$i];
     }
 
     private function runPzmap(string $pzmap2dziPath, string $confPath, string $subcommand): bool

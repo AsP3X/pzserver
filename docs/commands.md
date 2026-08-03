@@ -70,6 +70,37 @@ make exec CMD="npm run build"
 make exec CMD="php artisan config:clear"
 ```
 
+### Map tiles (admin player map)
+
+Local basemap tiles are **optional**. By default the panel uses proxy tiles from map.projectzomboid.com.
+
+After generation, tiles are **packed into a single SQLite file** (`data/map-tiles/tiles.sqlite`) so the host does not retain millions of loose DZI image files. See [map-tiles.md](map-tiles.md) for full details.
+
+```bash
+# Render + pack into tiles.sqlite (CPU/disk heavy; opt-in only)
+make exec CMD="php artisan zomboid:generate-map-tiles --force"
+
+# Pack an existing multi-file pyramid without re-rendering
+make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+```
+
+Windows:
+
+```powershell
+.\make.ps1 exec php artisan zomboid:generate-map-tiles --force
+.\make.ps1 exec php artisan zomboid:generate-map-tiles --pack-only
+```
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Clear existing tiles and re-render |
+| `--pack-only` | Convert loose DZI files → `tiles.sqlite` only |
+| `--keep-loose` | Keep multi-file pyramid after packing (not recommended) |
+| `--workers=N` | Render worker count |
+| `--map=` | Specific map name |
+
+Also available from the panel: **Admin → Player map → Generate local tiles**.
+
 ## Other
 
 | Linux | Windows | Description |

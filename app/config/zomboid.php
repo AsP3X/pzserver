@@ -51,6 +51,8 @@ return [
     'game_server_path' => env('PZ_SERVER_PATH', '/pz-server'),
 
     'map' => [
+        // Local tiles live as a single SQLite pack (tiles.sqlite) under this path.
+        // pzmap2dzi still renders a temporary multi-file pyramid; generation packs it and deletes the loose files.
         'tiles_path' => env('PZ_MAP_TILES_PATH', '/map-tiles'),
         'tile_size' => 256,
         'min_zoom' => 13,

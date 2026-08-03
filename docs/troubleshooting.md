@@ -38,6 +38,38 @@ make nuke    # WARNING: deletes everything
 make init
 ```
 
+## Player map has no basemap / only a grid
+
+1. By default the map uses **proxy tiles** (map.projectzomboid.com). If those fail (offline host, blocked CDN, CORS), the basemap may be empty.
+2. Optional: generate **local** tiles from the panel (**Admin → Player map → Generate local tiles**) or:
+
+```bash
+make exec CMD="php artisan zomboid:generate-map-tiles --force"
+```
+
+3. Check logs: `app/storage/logs/map-tiles.log` and `app/storage/logs/pzmap2dzi.log`.
+4. After a successful run you should have **one** file: `data/map-tiles/tiles.sqlite` (not millions of images). Full guide: [map-tiles.md](map-tiles.md).
+
+## Millions of files under `data/map-tiles/` (slow backup / delete)
+
+Older runs left a raw DZI pyramid (`html/map_data/base/layer0_files/`). Pack it into a single SQLite file and remove the loose tree:
+
+```bash
+make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+```
+
+Confirm `data/map-tiles/tiles.sqlite` exists and the `layer0_files` directory is gone. New generates pack automatically after render.
+
+If `rm` of the old tree is still running, let it finish once; afterward you only manage one pack file. Details: [map-tiles.md](map-tiles.md).
+
+## Map tile generation stuck or failed
+
+1. Ensure the game server has finished SteamCMD install (`data/server/media` exists).
+2. Generation needs Python3 + pzmap2dzi inside the **app** container (bundled in the image).
+3. Prefer idle host time; render can take a long time and uses a lot of RAM/CPU.
+4. Stale lock file after a crash: remove `app/storage/app/map-tiles.generating` if generation is not actually running, then retry.
+5. Re-pack without re-render if the pyramid finished but packing failed: `--pack-only`.
+
 ## Cloud Provider Notes
 
 If running on a cloud VM (Oracle Cloud, AWS, GCP, etc.), you also need to open these ports in your cloud provider's **security group / firewall rules**:

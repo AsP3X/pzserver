@@ -1,0 +1,84 @@
+<?php
+
+use App\Services\MapConfigBuilder;
+use App\Services\MapTileStore;
+
+beforeEach(function () {
+    $this->tempDir = sys_get_temp_dir().'/pz_map_cfg_'.getmypid().'_'.bin2hex(random_bytes(4));
+    mkdir($this->tempDir, 0755, true);
+    $this->store = new MapTileStore($this->tempDir);
+    $this->builder = new MapConfigBuilder($this->store);
+
+    config([
+        'zomboid.map.tiles_path' => $this->tempDir,
+        'zomboid.map.tile_size' => 256,
+        'zomboid.map.min_zoom' => 13,
+        'zomboid.map.max_zoom' => 17,
+        'zomboid.map.default_zoom' => 13,
+        'zomboid.map.center_x' => 10500.0,
+        'zomboid.map.center_y' => 9800.0,
+        'zomboid.map.proxy_url' => 'https://example.test/{z}/{x}_{y}.jpg',
+        'zomboid.map.proxy_tile_size' => 1024,
+        'zomboid.map.proxy_dzi' => [
+            'width' => 1000,
+            'height' => 2000,
+            'x0' => 1,
+            'y0' => 2,
+            'sqr' => 128,
+        ],
+    ]);
+});
+
+afterEach(function () {
+    $root = $this->tempDir;
+    if (! is_dir($root)) {
+        return;
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isDir()) {
+            @rmdir($file->getPathname());
+        } else {
+            @unlink($file->getPathname());
+        }
+    }
+
+    @rmdir($root);
+});
+
+it('falls back to proxy when no local tiles exist', function () {
+    $config = $this->builder->build();
+
+    expect($config['source'])->toBe('proxy')
+        ->and($config['local_ready'])->toBeFalse()
+        ->and($config['tileUrl'])->toBe('https://example.test/{z}/{x}_{y}.jpg')
+        ->and($this->builder->hasLocalTiles())->toBeFalse();
+});
+
+it('prefers packed local tiles over proxy', function () {
+    $layer = $this->tempDir.'/html/map_data/base/layer0_files/0';
+    mkdir($layer, 0755, true);
+    file_put_contents($layer.'/1_2.webp', 'TILE');
+    file_put_contents($this->tempDir.'/html/map_data/base/map_info.json', json_encode([
+        'w' => 4096,
+        'h' => 4096,
+        'x0' => 0,
+        'y0' => 0,
+        'sqr' => 1,
+    ]));
+
+    $this->store->packLooseTiles();
+
+    $config = $this->builder->build();
+
+    expect($config['source'])->toBe('local')
+        ->and($config['local_ready'])->toBeTrue()
+        ->and($config['tileUrl'])->toBe('/admin/map-tiles/{z}/{x}_{y}')
+        ->and($config['dzi']['width'])->toBe(4096)
+        ->and($this->builder->hasLocalTiles())->toBeTrue();
+});

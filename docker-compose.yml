@@ -232,7 +232,7 @@ networks:
 #   ./data/zomboid           game saves, Server/*.ini, Lua bridge
 #   ./data/server            SteamCMD dedicated server install
 #   ./data/backups           panel backups
-#   ./data/map-tiles         map tiles
+#   ./data/map-tiles         map tiles (tiles.sqlite pack after generation; see docs/map-tiles.md)
 #   ./data/postgres          PostgreSQL data
 #   ./data/redis             Redis AOF/data
 #   ./data/app-vendor        Composer vendor (seeded from image if empty)

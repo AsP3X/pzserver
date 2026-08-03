@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\MapConfigBuilder;
+use App\Services\MapTileStore;
 use App\Services\OnlinePlayersReader;
 use App\Services\PlayerPositionReader;
 use App\Services\PlayersDbReader;
@@ -14,7 +15,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class PlayerMapController extends Controller
 {
@@ -25,6 +25,7 @@ class PlayerMapController extends Controller
         private readonly ServerStatusResolver $statusResolver,
         private readonly MapConfigBuilder $mapConfigBuilder,
         private readonly SafeZoneManager $safeZoneManager,
+        private readonly MapTileStore $tileStore,
     ) {}
 
     public function __invoke(): InertiaResponse
@@ -169,28 +170,13 @@ class PlayerMapController extends Controller
     }
 
     /**
-     * Serve a map tile from the configured tiles path.
+     * Serve a map tile from the packed SQLite store (or legacy loose files).
      */
-    public function tile(string $level, string $tile): BinaryFileResponse|Response
+    public function tile(string $level, string $tile): Response
     {
-        $tilesPath = config('zomboid.map.tiles_path');
-        $dziPath = $tilesPath.'/html/map_data/base/layer0_files';
+        $result = $this->tileStore->getTile($level, $tile);
 
-        // Try webp first, then jpg
-        $baseTile = pathinfo($tile, PATHINFO_FILENAME);
-        $filePath = null;
-        $contentType = 'image/webp';
-
-        foreach (['webp', 'jpg'] as $ext) {
-            $candidate = $dziPath.'/'.$level.'/'.$baseTile.'.'.$ext;
-            if (is_file($candidate)) {
-                $filePath = $candidate;
-                $contentType = $ext === 'jpg' ? 'image/jpeg' : 'image/webp';
-                break;
-            }
-        }
-
-        if ($filePath === null) {
+        if ($result === null) {
             // Return transparent 1x1 PNG for missing tiles (avoids broken-image placeholders in Leaflet)
             return response(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), 200, [
                 'Content-Type' => 'image/png',
@@ -198,17 +184,9 @@ class PlayerMapController extends Controller
             ]);
         }
 
-        // Prevent path traversal
-        $realTilesPath = realpath($tilesPath);
-        $realFilePath = realpath($filePath);
-
-        if ($realTilesPath === false || $realFilePath === false || ! str_starts_with($realFilePath, $realTilesPath)) {
-            return response('Not found', 404);
-        }
-
-        return response()->file($realFilePath, [
+        return response($result['data'], 200, [
             'Cache-Control' => 'public, max-age=86400',
-            'Content-Type' => $contentType,
+            'Content-Type' => $result['content_type'],
         ]);
     }
 

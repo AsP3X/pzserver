@@ -66,6 +66,8 @@ This creates Windows Firewall rules automatically.
 - **Local:** http://localhost:8000
 - **Public:** `.\make.ps1 admin-expose`
 
+Optional: local player-map basemap tiles (packed as a single `tiles.sqlite` under `data/map-tiles/`) are documented in [map-tiles.md](map-tiles.md). Proxy tiles work without generation.
+
 ### PowerShell command reference
 
 | Command | Description |

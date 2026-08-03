@@ -93,6 +93,8 @@ make admin-expose
 
 Log in with the admin credentials you set during setup.
 
+Optional: local player-map basemap tiles (packed as a single `tiles.sqlite` under `data/map-tiles/`) are documented in [map-tiles.md](map-tiles.md). Proxy tiles work without generation.
+
 ## Step 5 — Connect in-game
 
 In Project Zomboid:

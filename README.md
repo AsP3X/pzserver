@@ -110,7 +110,7 @@ NPM Proxy Host example:
 | `./data/zomboid/` | Saves, `Server/*.ini`, logs, Lua bridge |
 | `./data/server/` | SteamCMD dedicated server install (~7 GB) |
 | `./data/backups/` | Panel backups |
-| `./data/map-tiles/` | Map tiles for the web map |
+| `./data/map-tiles/` | Admin player map basemap — **one** `tiles.sqlite` file after generation (see [Map tiles](#map-tiles-admin-player-map)) |
 | `./data/postgres/` | PostgreSQL database files |
 | `./data/redis/` | Redis AOF / data |
 | `./data/app-vendor/` | Composer `vendor/` (seeded from image if empty) |
@@ -128,6 +128,58 @@ These are generated on the host and are gitignored:
 - `.env`, `app/.env`
 - `.firewall.conf`, `ACCESS.local.txt`
 - `./data/**` (worlds, DB, binaries, backups)
+
+---
+
+## Map tiles (admin player map)
+
+The admin **Player map** shows live/offline player markers on a basemap. By default the panel uses **proxy tiles** from [map.projectzomboid.com](https://map.projectzomboid.com) (no local generation required).
+
+### Optional local tiles
+
+You can generate **local** isometric tiles from the game install with `pzmap2dzi` (Admin → Player map → **Generate local tiles**, or artisan). Generation is **opt-in** and heavy (CPU/RAM/disk); it is **not** scheduled or run on container start.
+
+**Important storage design:** raw DZI output is a pyramid of hundreds of thousands to **millions** of small image files. That makes deletes, host backups, and filesystem ops extremely slow. After render, this stack **packs all tiles into a single SQLite database** and deletes the loose pyramid:
+
+| Path | Role |
+|------|------|
+| `./data/map-tiles/tiles.sqlite` | **Canonical** local basemap (one file — fast to copy/delete/back up) |
+| `./data/map-tiles/html/map_data/base/map_info.json` | Small sidecar with map dimensions (optional; also stored inside the pack) |
+| `./data/map-tiles/html/.../layer0_files/` | **Temporary only** during render; removed after packing |
+
+The panel serves tiles from the pack at `/admin/map-tiles/{z}/{x}_{y}`.
+
+### Commands
+
+```bash
+# Full generate (render → pack into tiles.sqlite → remove loose files)
+make exec CMD="php artisan zomboid:generate-map-tiles --force"
+
+# Already have a multi-file DZI pyramid? Pack it without re-rendering
+make exec CMD="php artisan zomboid:generate-map-tiles --pack-only"
+
+# Debug only: keep the multi-file pyramid after packing (not recommended)
+make exec CMD="php artisan zomboid:generate-map-tiles --force --keep-loose"
+```
+
+Windows PowerShell:
+
+```powershell
+.\make.ps1 exec php artisan zomboid:generate-map-tiles --force
+.\make.ps1 exec php artisan zomboid:generate-map-tiles --pack-only
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--force` | Clear existing pack/loose tiles and re-render |
+| `--pack-only` | Convert an existing loose pyramid into `tiles.sqlite` (no re-render) |
+| `--keep-loose` | Do not delete the multi-file pyramid after packing |
+| `--workers=N` | Override render worker count (default: CPU cores) |
+| `--map=` | Specific map name for pzmap2dzi (default: all / vanilla) |
+
+Env: `PZ_MAP_TILES_PATH` (container path, default `/map-tiles`) / host bind `PZ_MAP_TILES_HOST` (default `./data/map-tiles`).
+
+Full details: **[docs/map-tiles.md](docs/map-tiles.md)**.
 
 ---
 
@@ -153,7 +205,7 @@ These are generated on the host and are gitignored:
 - **Config editors** — `server.ini` + sandbox (categorized UI)  
 - **Mods** — Workshop IDs + load order  
 - **Players** — kick, ban, teleport, access levels, XP, items  
-- **Map** — live player markers  
+- **Map** — live player markers (proxy basemap by default; optional local tiles packed as one `tiles.sqlite`)  
 - **Backups** — manual, scheduled, rollback  
 - **Whitelist, Discord webhooks, auto-restart, status page**
 
@@ -244,6 +296,8 @@ Admin  ──TCP 8000 / 443────► app (panel) ──RCON──► game-
 
 - Upstream feature list & screenshots: original [README history](https://github.com/trongio/Zomboid_Server_Manager_Docker)
 - Install deep-dives: `docs/installation-windows.md`, `docs/installation-linux.md`
+- Map tiles (local generation + SQLite pack): `docs/map-tiles.md`
+- Command reference: `docs/commands.md`
 - Troubleshooting: `docs/troubleshooting.md`
 
 ## Support

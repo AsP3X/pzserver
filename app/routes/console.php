@@ -42,6 +42,7 @@ Schedule::command('zomboid:refresh-item-catalog')
 
 // Map tiles are intentionally NOT scheduled — generation is heavy and opt-in only
 // (php artisan zomboid:generate-map-tiles or Admin → Player map button).
+// After render, tiles are packed into a single tiles.sqlite under PZ_MAP_TILES_PATH.
 
 Schedule::command('zomboid:download-item-icons')
     ->hourly()
