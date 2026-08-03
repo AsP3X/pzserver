@@ -71,7 +71,10 @@ export default function PlayerMap({
     const [genLoading, setGenLoading] = useState(false);
     const [stopLoading, setStopLoading] = useState(false);
     const [genMessage, setGenMessage] = useState<string | null>(null);
-    usePoll(5000, {
+
+    const isGenerating = Boolean(tilesGenerating || tileProgress?.generating);
+
+    usePoll(isGenerating ? 3000 : 5000, {
         only: [
             'markers',
             'onlineCount',
@@ -104,11 +107,9 @@ export default function PlayerMap({
             });
             const json = await res.json().catch(() => ({}));
             setGenMessage(json.message || (res.ok ? 'Started' : 'Failed to start'));
-            if (res.ok) {
-                router.reload({
-                    only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady', 'canResume'],
-                });
-            }
+            router.reload({
+                only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady', 'canResume'],
+            });
         } catch {
             setGenMessage('Network error starting tile generation');
         }
@@ -181,6 +182,11 @@ export default function PlayerMap({
         { title: t('admin.player_map.breadcrumb'), href: '/admin/players/map' },
     ];
 
+    const progressPercent = tileProgress?.percent ?? 0;
+    const progressMessage =
+        tileProgress?.message ||
+        (isGenerating ? t('admin.player_map.generating_tiles') : t('admin.player_map.tiles_panel_idle'));
+
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={t('admin.player_map.title')} />
@@ -210,111 +216,112 @@ export default function PlayerMap({
                         <Badge variant={localTilesReady ? 'default' : 'secondary'} className="text-sm">
                             tiles: {tileSource}
                         </Badge>
-                        {tilesGenerating ? (
-                            <button
-                                type="button"
-                                disabled={stopLoading}
-                                onClick={() => stopTiles()}
-                                className="inline-flex items-center rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-                            >
-                                {stopLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-                                {t('admin.player_map.stop_generation')}
-                            </button>
-                        ) : canResume ? (
-                            <>
-                                <button
-                                    type="button"
-                                    disabled={genLoading}
-                                    onClick={() => generateTiles({ resume: true })}
-                                    className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-                                >
-                                    {genLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-                                    {t('admin.player_map.resume_generation')}
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={genLoading}
-                                    onClick={() => {
-                                        if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
-                                            return;
-                                        }
-                                        generateTiles({ force: true });
-                                    }}
-                                    className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
-                                >
-                                    {t('admin.player_map.force_regenerate')}
-                                </button>
-                            </>
-                        ) : (
-                            <button
-                                type="button"
-                                disabled={genLoading}
-                                onClick={() => {
-                                    if (localTilesReady) {
-                                        if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
-                                            return;
-                                        }
-                                        generateTiles({ force: true });
-                                        return;
-                                    }
-                                    generateTiles({});
-                                }}
-                                className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-                            >
-                                {genLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-                                {localTilesReady
-                                    ? t('admin.player_map.regenerate_tiles')
-                                    : t('admin.player_map.generate_tiles')}
-                            </button>
-                        )}
                     </div>
                 </div>
 
-                {genMessage && (
-                    <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">{genMessage}</div>
-                )}
-
-                {tileProgress && (tileProgress.generating || tilesGenerating || ['failed', 'stopped', 'done'].includes(tileProgress.stage ?? '')) && (
-                    <div className="rounded-lg border border-border bg-background px-4 py-3 shadow-sm">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                            {(tileProgress.generating || tilesGenerating) && (
-                                <Loader2 className="size-4 animate-spin text-primary" />
+                {/* Always-visible map tile controls (not buried in header overflow) */}
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base">{t('admin.player_map.tiles_panel_title')}</CardTitle>
+                        <p className="text-muted-foreground text-sm">{t('admin.player_map.tiles_panel_help')}</p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {isGenerating ? (
+                                <button
+                                    type="button"
+                                    disabled={stopLoading}
+                                    onClick={() => stopTiles()}
+                                    className="inline-flex items-center rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                                >
+                                    {stopLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                    {t('admin.player_map.stop_generation')}
+                                </button>
+                            ) : (
+                                <>
+                                    {canResume && (
+                                        <button
+                                            type="button"
+                                            disabled={genLoading}
+                                            onClick={() => generateTiles({ resume: true })}
+                                            className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                                        >
+                                            {genLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                            {t('admin.player_map.resume_generation')}
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        disabled={genLoading}
+                                        onClick={() => generateTiles({})}
+                                        className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                                    >
+                                        {genLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                        {localTilesReady
+                                            ? t('admin.player_map.regenerate_tiles')
+                                            : t('admin.player_map.generate_tiles')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={genLoading}
+                                        onClick={() => {
+                                            if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
+                                                return;
+                                            }
+                                            generateTiles({ force: true });
+                                        }}
+                                        className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                                    >
+                                        {t('admin.player_map.force_regenerate')}
+                                    </button>
+                                </>
                             )}
-                            {tileProgress.message || t('admin.player_map.generating_tiles')}
-                            {tileProgress.step && tileProgress.steps ? (
-                                <span className="text-muted-foreground text-xs font-normal">
-                                    ({tileProgress.step}/{tileProgress.steps})
-                                </span>
-                            ) : null}
                         </div>
-                        {(tileProgress.generating || tilesGenerating) && (
-                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                                {tileProgress.percent > 0 ? (
-                                    <div
-                                        className="h-full rounded-full bg-primary transition-all duration-500"
-                                        style={{ width: `${Math.max(tileProgress.percent, 2)}%` }}
-                                    />
-                                ) : (
-                                    <div className="h-full w-full animate-pulse rounded-full bg-primary/30" />
-                                )}
+
+                        <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
+                            <div className="flex items-center gap-2 text-sm font-medium">
+                                {isGenerating && <Loader2 className="size-4 animate-spin text-primary" />}
+                                <span>{progressMessage}</span>
+                                {tileProgress?.step && tileProgress?.steps ? (
+                                    <span className="text-muted-foreground text-xs font-normal">
+                                        ({tileProgress.step}/{tileProgress.steps})
+                                    </span>
+                                ) : null}
                             </div>
+                            {isGenerating && (
+                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                                    {progressPercent > 0 ? (
+                                        <div
+                                            className="h-full rounded-full bg-primary transition-all duration-500"
+                                            style={{ width: `${Math.max(progressPercent, 2)}%` }}
+                                        />
+                                    ) : (
+                                        <div className="h-full w-full animate-pulse rounded-full bg-primary/30" />
+                                    )}
+                                </div>
+                            )}
+                            {tileProgress && tileProgress.total > 0 && (
+                                <p className="text-muted-foreground mt-1.5 text-xs">
+                                    {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()} (
+                                    {tileProgress.percent}%)
+                                    {tileProgress.tiles_on_disk
+                                        ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
+                                        : ''}
+                                </p>
+                            )}
+                            {tileProgress?.stage === 'failed' && (
+                                <p className="mt-1.5 text-xs text-red-400">{t('admin.player_map.tiles_failed_hint')}</p>
+                            )}
+                            {!isGenerating && !tileProgress && (
+                                <p className="text-muted-foreground mt-1 text-xs">{t('admin.player_map.tiles_panel_idle')}</p>
+                            )}
+                        </div>
+
+                        {genMessage && (
+                            <div className="rounded-md border border-border bg-background px-3 py-2 text-sm">{genMessage}</div>
                         )}
-                        {tileProgress.total > 0 && (
-                            <p className="text-muted-foreground mt-1 text-xs">
-                                {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()} (
-                                {tileProgress.percent}%)
-                                {tileProgress.tiles_on_disk
-                                    ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
-                                    : ''}
-                            </p>
-                        )}
-                        {tileProgress.stage === 'failed' && (
-                            <p className="mt-1 text-xs text-red-400">
-                                See container log: storage/logs/map-tiles.log
-                            </p>
-                        )}
-                    </div>
-                )}
+                    </CardContent>
+                </Card>
 
                 {serverStatus === 'offline' && (
                     <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
@@ -331,51 +338,10 @@ export default function PlayerMap({
 
                 <Card className="isolate flex-1">
                     <CardContent className="relative h-[350px] p-0 sm:h-[500px] lg:h-[600px]">
-                        {(tileProgress?.generating || tilesGenerating) && (
-                            <div className="absolute top-2 left-1/2 z-[1000] w-72 -translate-x-1/2 rounded-lg border bg-background/90 px-4 py-3 shadow-sm backdrop-blur-sm sm:w-80">
-                                <div className="flex items-center gap-2 text-sm font-medium">
-                                    <Loader2 className="size-4 animate-spin text-primary" />
-                                    {t('admin.player_map.generating_tiles')}
-                                    {tileProgress?.step && tileProgress?.steps ? (
-                                        <span className="text-muted-foreground text-xs font-normal">
-                                            ({tileProgress.step}/{tileProgress.steps})
-                                        </span>
-                                    ) : null}
-                                </div>
-                                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                                    {tileProgress && tileProgress.percent > 0 ? (
-                                        <div
-                                            className="h-full rounded-full bg-primary transition-all duration-500"
-                                            style={{ width: `${Math.max(tileProgress.percent, 2)}%` }}
-                                        />
-                                    ) : (
-                                        <div className="h-full w-full animate-pulse rounded-full bg-primary/30" />
-                                    )}
-                                </div>
-                                <p className="text-muted-foreground mt-1 text-xs">
-                                    {tileProgress?.message
-                                        ? tileProgress.message
-                                        : tileProgress && tileProgress.completed > 0
-                                          ? t('admin.player_map.tiles_rendered', {
-                                                count: tileProgress.completed.toLocaleString(),
-                                                percent: String(tileProgress.percent),
-                                            })
-                                          : t('admin.player_map.preparing_render')}
-                                </p>
-                                {tileProgress && tileProgress.total > 0 && (
-                                    <p className="text-muted-foreground mt-0.5 text-xs">
-                                        {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()}{' '}
-                                        ({tileProgress.percent}%)
-                                        {tileProgress.tiles_on_disk
-                                            ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
-                                            : ''}
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                        {!hasTiles && !tileProgress?.generating && (
+                        {!hasTiles && !isGenerating && (
                             <div className="bg-muted/80 text-muted-foreground absolute top-2 left-1/2 z-[1000] -translate-x-1/2 rounded-md px-3 py-1.5 text-xs backdrop-blur-sm">
-                                {t('admin.player_map.no_tiles')} <code className="font-mono">{t('admin.player_map.no_tiles_command')}</code> {t('admin.player_map.no_tiles_suffix')}
+                                {t('admin.player_map.no_tiles')} <code className="font-mono">{t('admin.player_map.no_tiles_command')}</code>{' '}
+                                {t('admin.player_map.no_tiles_suffix')}
                             </div>
                         )}
                         <PzMap
@@ -384,7 +350,7 @@ export default function PlayerMap({
                             hasTiles={hasTiles}
                             onMarkerAction={handleMarkerAction}
                             zones={zoneOverlays}
-                            className="rounded-xl"
+                            className="h-full w-full rounded-xl"
                         />
                     </CardContent>
                 </Card>

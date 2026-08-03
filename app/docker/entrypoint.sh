@@ -42,6 +42,26 @@ seed_bind_mount /var/www/html/vendor /opt/pz-seed/vendor autoload.php "Composer 
 seed_bind_mount /var/www/html/node_modules /opt/pz-seed/node_modules "" "npm node_modules"
 seed_bind_mount /var/www/html/public/build /opt/pz-seed/build manifest.json "Vite public/build"
 
+# Re-sync frontend assets when the image build is newer than the host bind mount.
+# Without this, data/app-build keeps an old Vite bundle forever and UI features
+# (map stop/resume/progress banner, etc.) never appear after git pull + rebuild.
+if [ -f /opt/pz-seed/build/manifest.json ]; then
+    need_frontend_sync=0
+    if [ ! -f /var/www/html/public/build/manifest.json ]; then
+        need_frontend_sync=1
+    elif ! cmp -s /opt/pz-seed/build/manifest.json /var/www/html/public/build/manifest.json 2>/dev/null; then
+        need_frontend_sync=1
+    fi
+    if [ "$need_frontend_sync" -eq 1 ]; then
+        echo "[entrypoint] Updating Vite public/build from image (manifest changed)..."
+        mkdir -p /var/www/html/public/build
+        # Replace contents so deleted assets do not linger
+        find /var/www/html/public/build -mindepth 1 -delete 2>/dev/null || rm -rf /var/www/html/public/build/* 2>/dev/null || true
+        cp -a /opt/pz-seed/build/. /var/www/html/public/build/
+        echo "[entrypoint] Frontend build updated."
+    fi
+fi
+
 # ── Storage permissions ──────────────────────────────────────────────
 # Bind mounts override Dockerfile permissions — fix at runtime
 # Only target directories and runtime files, skip .gitignore to avoid git noise

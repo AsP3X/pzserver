@@ -55,7 +55,14 @@ data/map-tiles/html/map_data/base/layer0_files/{z}/{x}_{y}.webp
 
 ### How to generate
 
-**UI:** Admin → **Player map** → **Generate local tiles** (or **Regenerate tiles**).
+**UI:** Admin → **Player map** → **Local map tiles** card (Generate / Stop / Resume / Start over + progress bar).
+
+> **Frontend not updating after git pull?** Host volume `./data/app-build` can pin an old Vite build. Redeploy rebuilds the app image; entrypoint now re-syncs `public/build` when the image manifest changes. Force refresh once:
+> ```bash
+> rm -rf data/app-build/*
+> ./deploy.sh
+> # hard-refresh browser (Ctrl+Shift+R)
+> ```
 
 **CLI (Docker — preferred for logs / SSH):**
 
