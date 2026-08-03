@@ -62,7 +62,7 @@ backups/*.tar.gz
 node_modules/
 
 # Workshop build artifacts
-workshop/ZomboidManager/Contents/mods/ZomboidManager/42/media/
+workshop/KnoxRelay/Contents/mods/KnoxRelay/42/media/
 
 # Test / Coverage
 /app/.phpunit.result.cache

@@ -126,7 +126,7 @@ function ZM_GameState.export()
 
     local encOk, jsonStr = pcall(json.encode, state)
     if not encOk then
-        print("[ZomboidManager] GameState: JSON encode error: " .. tostring(jsonStr))
+        print("[KnoxRelay] GameState: JSON encode error: " .. tostring(jsonStr))
         return false
     end
 

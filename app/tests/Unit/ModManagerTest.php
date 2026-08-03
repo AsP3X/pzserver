@@ -47,11 +47,11 @@ it('adds a mod to both lists', function () {
 
     $mods = $this->manager->list($this->iniPath);
 
-    // Existing fixture (2) + user-added (1) + auto-attached ZomboidManager (1) = 4
+    // Existing fixture (2) + user-added (1) + auto-attached KnoxRelay (1) = 4
     expect($mods)->toHaveCount(4)
         ->and($mods[2]['workshop_id'])->toBe('1111111111')
         ->and($mods[2]['mod_id'])->toBe('TestMod')
-        ->and($mods[3]['mod_id'])->toBe('ZomboidManager');
+        ->and($mods[3]['mod_id'])->toBe('KnoxRelay');
 });
 
 it('prevents duplicate workshop ids', function () {
@@ -66,10 +66,10 @@ it('removes a mod from both lists', function () {
     expect($removed)->toBe(['workshop_id' => '2561774086', 'mod_id' => 'SuperSurvivors']);
 
     $mods = $this->manager->list($this->iniPath);
-    // Hydrocraft survives + auto-attached ZomboidManager
+    // Hydrocraft survives + auto-attached KnoxRelay
     expect($mods)->toHaveCount(2)
         ->and($mods[0]['workshop_id'])->toBe('2286126274')
-        ->and($mods[1]['mod_id'])->toBe('ZomboidManager');
+        ->and($mods[1]['mod_id'])->toBe('KnoxRelay');
 });
 
 it('returns null when removing nonexistent mod', function () {
@@ -124,7 +124,7 @@ it('writes mod state file when adding a mod', function () {
     expect(file_exists($stateFile))->toBeTrue();
 
     $content = file_get_contents($stateFile);
-    expect($content)->toContain('Mods=SuperSurvivors;Hydrocraft;TestMod;ZomboidManager')
+    expect($content)->toContain('Mods=SuperSurvivors;Hydrocraft;TestMod;KnoxRelay')
         ->and($content)->toContain('WorkshopItems=2561774086;2286126274;1111111111;3685323705');
 });
 
@@ -136,7 +136,7 @@ it('writes mod state file when removing a mod', function () {
     expect(file_exists($stateFile))->toBeTrue();
 
     $content = file_get_contents($stateFile);
-    expect($content)->toContain('Mods=Hydrocraft;ZomboidManager')
+    expect($content)->toContain('Mods=Hydrocraft;KnoxRelay')
         ->and($content)->toContain('WorkshopItems=2286126274;3685323705');
 });
 
@@ -151,7 +151,7 @@ it('writes mod state file when reordering mods', function () {
     expect(file_exists($stateFile))->toBeTrue();
 
     $content = file_get_contents($stateFile);
-    expect($content)->toContain('Mods=Hydrocraft;SuperSurvivors;ZomboidManager')
+    expect($content)->toContain('Mods=Hydrocraft;SuperSurvivors;KnoxRelay')
         ->and($content)->toContain('WorkshopItems=2286126274;2561774086;3685323705');
 });
 
@@ -183,10 +183,10 @@ it('flags protected workshop ids', function () {
 });
 
 it('allows reorder that keeps required mod', function () {
-    $this->manager->add($this->iniPath, '3685323705', 'ZomboidManager');
+    $this->manager->add($this->iniPath, '3685323705', 'KnoxRelay');
 
     $this->manager->reorder($this->iniPath, [
-        ['workshop_id' => '3685323705', 'mod_id' => 'ZomboidManager'],
+        ['workshop_id' => '3685323705', 'mod_id' => 'KnoxRelay'],
         ['workshop_id' => '2561774086', 'mod_id' => 'SuperSurvivors'],
         ['workshop_id' => '2286126274', 'mod_id' => 'Hydrocraft'],
     ]);
@@ -258,10 +258,10 @@ it('returns state-file mods even when INI was clobbered to empty', function () {
 
     $mods = $this->manager->list($this->iniPath);
 
-    // 2 fixture + 1 added + auto ZomboidManager
+    // 2 fixture + 1 added + auto KnoxRelay
     expect($mods)->toHaveCount(4)
         ->and(collect($mods)->pluck('mod_id')->all())->toContain('TestMod')
-        ->and(collect($mods)->pluck('mod_id')->all())->toContain('ZomboidManager');
+        ->and(collect($mods)->pluck('mod_id')->all())->toContain('KnoxRelay');
 });
 
 it('preserves mods from .mod_state when the INI was pruned by PZ on shutdown', function () {
@@ -269,7 +269,7 @@ it('preserves mods from .mod_state when the INI was pruned by PZ on shutdown', f
     // .mod_state (web-UI source of truth) still reflects the user's choices.
     file_put_contents(
         $this->tempDir.'/Server/.mod_state',
-        "Mods=Hydrocraft;ZomboidManager\nWorkshopItems=2286126274;3685323705\n"
+        "Mods=Hydrocraft;KnoxRelay\nWorkshopItems=2286126274;3685323705\n"
     );
     $this->parser->write($this->iniPath, ['Mods' => '', 'WorkshopItems' => '']);
 
@@ -277,33 +277,33 @@ it('preserves mods from .mod_state when the INI was pruned by PZ on shutdown', f
 
     $stateContent = file_get_contents($this->tempDir.'/Server/.mod_state');
     expect($stateContent)
-        ->toContain('Mods=Hydrocraft;ZomboidManager;NewMod')
+        ->toContain('Mods=Hydrocraft;KnoxRelay;NewMod')
         ->and($stateContent)->toContain('WorkshopItems=2286126274;3685323705;4242424242');
 });
 
-it('re-attaches the protected ZomboidManager mod when add() runs without it', function () {
+it('re-attaches the protected KnoxRelay mod when add() runs without it', function () {
     $this->parser->write($this->iniPath, ['Mods' => '', 'WorkshopItems' => '']);
 
     $this->manager->add($this->iniPath, '4242424242', 'SoloMod');
 
     $stateContent = file_get_contents($this->tempDir.'/Server/.mod_state');
     expect($stateContent)
-        ->toContain('Mods=SoloMod;ZomboidManager')
+        ->toContain('Mods=SoloMod;KnoxRelay')
         ->and($stateContent)->toContain('WorkshopItems=4242424242;3685323705');
 });
 
-it('does not duplicate ZomboidManager when reorder already contains it', function () {
+it('does not duplicate KnoxRelay when reorder already contains it', function () {
     // Regression: PHP coerces numeric-string array keys (PROTECTED_MODS) to int,
     // and a naive in_array(..., $workshopIds, true) treats int 3685323705 and
     // "3685323705" as different — appending a duplicate every reorder call.
     $this->manager->reorder($this->iniPath, [
-        ['workshop_id' => '3685323705', 'mod_id' => 'ZomboidManager'],
+        ['workshop_id' => '3685323705', 'mod_id' => 'KnoxRelay'],
         ['workshop_id' => '2561774086', 'mod_id' => 'SuperSurvivors'],
         ['workshop_id' => '2286126274', 'mod_id' => 'Hydrocraft'],
     ]);
 
     $stateContent = file_get_contents($this->tempDir.'/Server/.mod_state');
-    expect(substr_count($stateContent, 'ZomboidManager'))->toBe(1)
+    expect(substr_count($stateContent, 'KnoxRelay'))->toBe(1)
         ->and(substr_count($stateContent, '3685323705'))->toBe(1);
 });
 
@@ -336,11 +336,11 @@ it('marks all mods stopped when server is not running', function () {
 it('marks mods active when state matches applied snapshot', function () {
     $this->manager->add($this->iniPath, '1111111111', 'TestMod');
 
-    // Include the auto-attached ZomboidManager in the applied snapshot so the
+    // Include the auto-attached KnoxRelay in the applied snapshot so the
     // user intent matches what the server last loaded.
     file_put_contents(
         $this->tempDir.'/Server/.mod_state_applied',
-        "Mods=SuperSurvivors;Hydrocraft;TestMod;ZomboidManager\nWorkshopItems=2561774086;2286126274;1111111111;3685323705\n"
+        "Mods=SuperSurvivors;Hydrocraft;TestMod;KnoxRelay\nWorkshopItems=2561774086;2286126274;1111111111;3685323705\n"
     );
 
     $result = $this->manager->listWithStatus($this->iniPath, serverRunning: true);
@@ -378,7 +378,7 @@ it('flags pending_restart when a mod was removed since last server start', funct
 
     $result = $this->manager->listWithStatus($this->iniPath, serverRunning: true);
 
-    // After remove() the auto-attached ZomboidManager (3685323705) is in user intent
+    // After remove() the auto-attached KnoxRelay (3685323705) is in user intent
     // but not in .mod_state_applied — so it's correctly flagged pending_restart.
     expect($result['pending_restart'])->toBeTrue();
 
@@ -429,7 +429,7 @@ it('bulk imports independent Mods and WorkshopItems lists, merging into existing
         ->and($summary['mods_added'])->toBe(3);
 
     $config = $this->parser->read($this->iniPath);
-    expect($config['Mods'])->toBe('SuperSurvivors;Hydrocraft;ModA;ModB;ModC;ZomboidManager')
+    expect($config['Mods'])->toBe('SuperSurvivors;Hydrocraft;ModA;ModB;ModC;KnoxRelay')
         ->and($config['WorkshopItems'])->toBe('2561774086;2286126274;1111111111;2222222222;3685323705');
 });
 
@@ -462,11 +462,11 @@ it('bulk import accepts mod IDs with spaces, brackets, ampersands and slashes', 
         ->and($mods)->toContain('1299328280/ToadTraits');
 });
 
-it('bulk import writes .mod_state and re-attaches ZomboidManager', function () {
+it('bulk import writes .mod_state and re-attaches KnoxRelay', function () {
     $this->manager->bulkImport($this->iniPath, ['1111111111'], ['ModA']);
 
     $state = file_get_contents($this->tempDir.'/Server/.mod_state');
-    expect($state)->toContain('Mods=SuperSurvivors;Hydrocraft;ModA;ZomboidManager')
+    expect($state)->toContain('Mods=SuperSurvivors;Hydrocraft;ModA;KnoxRelay')
         ->and($state)->toContain('WorkshopItems=2561774086;2286126274;1111111111;3685323705');
 });
 

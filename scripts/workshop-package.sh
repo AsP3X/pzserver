@@ -1,14 +1,14 @@
 #!/bin/bash
-# Package ZomboidManager mod files into the Workshop upload structure.
+# Package KnoxRelay mod files into the Workshop upload structure.
 # Copies Lua sources, mod.info, and images into the Build 42 layout.
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_MOD="${REPO_ROOT}/game-server/mods/ZomboidManager"
-DST_MOD="${REPO_ROOT}/workshop/ZomboidManager/Contents/mods/ZomboidManager/42"
+SRC_MOD="${REPO_ROOT}/game-server/mods/KnoxRelay"
+DST_MOD="${REPO_ROOT}/workshop/KnoxRelay/Contents/mods/KnoxRelay/42"
 
-echo "=== ZomboidManager Workshop Packager ==="
+echo "=== KnoxRelay Workshop Packager ==="
 echo "Source: ${SRC_MOD}"
 echo "Target: ${DST_MOD}"
 echo ""
@@ -55,5 +55,5 @@ find "${DST_MOD_ROOT}" -type f | sort | while read -r f; do
     echo "  ${f#${REPO_ROOT}/}"
 done
 echo ""
-echo "Workshop upload dir: workshop/ZomboidManager/Contents/"
+echo "Workshop upload dir: workshop/KnoxRelay/Contents/"
 echo "Ready for SteamCMD upload via workshop/workshop_upload.vdf"

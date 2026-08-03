@@ -133,7 +133,7 @@ function ZM_InventoryExporter.exportPlayer(player)
 
     local ok, jsonStr = pcall(JSON.encode, data)
     if not ok then
-        print("[ZomboidManager] ERROR encoding inventory for " .. username .. ": " .. tostring(jsonStr))
+        print("[KnoxRelay] ERROR encoding inventory for " .. username .. ": " .. tostring(jsonStr))
         return false
     end
 
@@ -146,11 +146,11 @@ function ZM_InventoryExporter.exportPlayer(player)
 
     local flatPath = "inventory_" .. username .. ".json"
     if ZM_Utils.writeRawFile(flatPath, jsonStr) then
-        print("[ZomboidManager] Wrote inventory via flat path: " .. flatPath)
+        print("[KnoxRelay] Wrote inventory via flat path: " .. flatPath)
         return true
     end
 
-    print("[ZomboidManager] ERROR: cannot open file writer for " .. username)
+    print("[KnoxRelay] ERROR: cannot open file writer for " .. username)
     return false
 end
 
@@ -190,7 +190,7 @@ function ZM_InventoryExporter.processExportRequests()
     ZM_Utils.writeJsonFile(EXPORT_REQUESTS_FILE, {usernames = {}, updated_at = ZM_Utils.getTimestamp()})
 
     if count > 0 then
-        print("[ZomboidManager] On-demand inventory export: " .. count .. " player(s)")
+        print("[KnoxRelay] On-demand inventory export: " .. count .. " player(s)")
     end
 
     return count

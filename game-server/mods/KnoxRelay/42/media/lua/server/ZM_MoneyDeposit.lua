@@ -182,7 +182,7 @@ local function removeAllOfType(container, fullType)
         end
         removed = removed + 1
         if removed > 10000 then
-            print("[ZomboidManager] WARNING: hit safety limit removing " .. fullType)
+            print("[KnoxRelay] WARNING: hit safety limit removing " .. fullType)
             break
         end
     end
@@ -200,13 +200,13 @@ local function removeMoney(player)
 
     if isServer() then
         if moneyRemoved > 0 then
-            sendServerCommand(player, "ZomboidManager", "removeItem", {
+            sendServerCommand(player, "KnoxRelay", "removeItem", {
                 item_type = "Base.Money",
                 count = tostring(moneyRemoved),
             })
         end
         if bundlesRemoved > 0 then
-            sendServerCommand(player, "ZomboidManager", "removeItem", {
+            sendServerCommand(player, "KnoxRelay", "removeItem", {
                 item_type = "Base.MoneyBundle",
                 count = tostring(bundlesRemoved),
             })
@@ -237,20 +237,20 @@ local function restoreMoney(player, moneyCount, bundleCount)
 
     if isServer() then
         if moneyCount > 0 then
-            sendServerCommand(player, "ZomboidManager", "addItem", {
+            sendServerCommand(player, "KnoxRelay", "addItem", {
                 item_type = "Base.Money",
                 count = tostring(moneyCount),
             })
         end
         if bundleCount > 0 then
-            sendServerCommand(player, "ZomboidManager", "addItem", {
+            sendServerCommand(player, "KnoxRelay", "addItem", {
                 item_type = "Base.MoneyBundle",
                 count = tostring(bundleCount),
             })
         end
     end
 
-    print("[ZomboidManager] Restored " .. moneyCount .. " Money + " .. bundleCount
+    print("[KnoxRelay] Restored " .. moneyCount .. " Money + " .. bundleCount
         .. " MoneyBundle to " .. (player:getUsername() or "?")
         .. " after failed deposit_results write")
 end
@@ -327,7 +327,7 @@ function ZM_MoneyDeposit.process()
                     if moneyAfter > 0 or bundlesAfter > 0 then
                         result.message = "removal failed: " .. moneyAfter .. " Money, " .. bundlesAfter
                             .. " MoneyBundle still in inventory"
-                        print("[ZomboidManager] WARNING: Money deposit removal incomplete for "
+                        print("[KnoxRelay] WARNING: Money deposit removal incomplete for "
                             .. req.username .. " — " .. moneyAfter .. " Money + " .. bundlesAfter
                             .. " MoneyBundle remaining")
                         if didRemove then
@@ -344,7 +344,7 @@ function ZM_MoneyDeposit.process()
                         result.stack_count = bundlesRemoved
                         result.total_coins = totalCoins
 
-                        print("[ZomboidManager] Money deposit: " .. req.username .. " deposited "
+                        print("[KnoxRelay] Money deposit: " .. req.username .. " deposited "
                             .. moneyRemoved .. " Money + " .. bundlesRemoved
                             .. " MoneyBundle = " .. totalCoins .. " coins (rates "
                             .. moneyValue .. "/" .. bundleValue .. ")")
@@ -354,7 +354,7 @@ function ZM_MoneyDeposit.process()
 
             local written = appendAndWriteResult(results, result)
             if not written then
-                print("[ZomboidManager] CRITICAL: deposit result not written for "
+                print("[KnoxRelay] CRITICAL: deposit result not written for "
                     .. tostring(req.username) .. " id=" .. tostring(req.id)
                     .. " — will retry next cycle; restoring items if any were removed")
                 if didRemove and player then
@@ -376,7 +376,7 @@ end
 
 function ZM_MoneyDeposit.init()
     local mv, bv = loadRates()
-    print("[ZomboidManager] Money deposit system initialized (money=" .. mv .. " bundle=" .. bv .. ")")
+    print("[KnoxRelay] Money deposit system initialized (money=" .. mv .. " bundle=" .. bv .. ")")
 end
 
 return ZM_MoneyDeposit

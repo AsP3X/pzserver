@@ -1,5 +1,5 @@
 --
--- ZM_Main.lua — Entry point for ZomboidManager server-side mod
+-- ZM_Main.lua — Entry point for KnoxRelay server-side mod
 -- Registers PZ event hooks for inventory export, delivery queue, and position tracking.
 --
 
@@ -15,7 +15,7 @@ require("ZM_SafeZone")
 require("ZM_PvpTracker")
 require("ZM_MoneyDeposit")
 
-print("[ZomboidManager] Initializing server-side bridge mod...")
+print("[KnoxRelay] Initializing server-side bridge mod...")
 
 -- Tick counters for reduced-frequency operations.
 -- NOTE: PZ EveryOneMinute fires every ~2.5 real seconds (one in-game minute),
@@ -39,7 +39,7 @@ local function onCreatePlayer(playerIndex, player)
     if not player then
         return
     end
-    print("[ZomboidManager] Player connected: " .. (player:getUsername() or "unknown"))
+    print("[KnoxRelay] Player connected: " .. (player:getUsername() or "unknown"))
 
     -- Export this player's inventory
     ZM_InventoryExporter.exportPlayer(player)
@@ -53,7 +53,7 @@ local function onEveryTenMinutes()
     -- Export player stats (kills, hours, skills)
     local statsCount = ZM_PlayerStats.exportAll()
     if statsCount > 0 then
-        print("[ZomboidManager] Exported stats for " .. statsCount .. " players")
+        print("[KnoxRelay] Exported stats for " .. statsCount .. " players")
     end
 end
 
@@ -69,7 +69,7 @@ local function onEveryOneMinute()
         deliveryTickCounter = 0
         local processed = ZM_DeliveryQueue.process()
         if processed > 0 then
-            print("[ZomboidManager] Processed " .. processed .. " delivery entries")
+            print("[KnoxRelay] Processed " .. processed .. " delivery entries")
         end
     end
 
@@ -79,7 +79,7 @@ local function onEveryOneMinute()
         depositTickCounter = 0
         local deposited = ZM_MoneyDeposit.process()
         if deposited > 0 then
-            print("[ZomboidManager] Processed " .. deposited .. " money deposit(s)")
+            print("[KnoxRelay] Processed " .. deposited .. " money deposit(s)")
         end
     end
 
@@ -128,14 +128,14 @@ local function onServerStarted()
 
     -- Export game state immediately so it's available even when server is paused
     if ZM_GameState.export() then
-        print("[ZomboidManager] Exported initial game state")
+        print("[KnoxRelay] Exported initial game state")
     end
 
     local ok, count = pcall(ZM_ItemCatalog.export)
     if ok and count and count > 0 then
-        print("[ZomboidManager] Exported item catalog: " .. count .. " items")
+        print("[KnoxRelay] Exported item catalog: " .. count .. " items")
     else
-        print("[ZomboidManager] WARNING: item catalog export failed or returned 0 items")
+        print("[KnoxRelay] WARNING: item catalog export failed or returned 0 items")
     end
 end
 
@@ -147,4 +147,4 @@ Events.EveryTenMinutes.Add(onEveryTenMinutes)
 Events.EveryOneMinute.Add(onEveryOneMinute)
 Events.OnServerStarted.Add(onServerStarted)
 
-print("[ZomboidManager] Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, MoneyDeposit")
+print("[KnoxRelay] Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, MoneyDeposit")

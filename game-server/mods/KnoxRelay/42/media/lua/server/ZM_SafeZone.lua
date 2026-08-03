@@ -64,7 +64,7 @@ local function flushViolations()
     end
 
     ZM_Utils.writeJsonFile(VIOLATIONS_FILE, { violations = list })
-    print("[ZomboidManager] SafeZone: flushed " .. #pendingViolations .. " violation(s) to disk")
+    print("[KnoxRelay] SafeZone: flushed " .. #pendingViolations .. " violation(s) to disk")
     pendingViolations = {}
 end
 
@@ -97,7 +97,7 @@ function ZM_SafeZone.onWeaponHitCharacter(attacker, target, weapon, damage)
         target:setHealth(newHealth)
     end)
     if not ok then
-        print("[ZomboidManager] SafeZone: ERROR restoring health: " .. tostring(err))
+        print("[KnoxRelay] SafeZone: ERROR restoring health: " .. tostring(err))
     end
 
     -- Track strikes for attacker
@@ -121,16 +121,16 @@ function ZM_SafeZone.onWeaponHitCharacter(attacker, target, weapon, damage)
             attacker:Say("[Safe Zone] PvP is not allowed here. Warning 1/2")
         end)
         if not warnOk then
-            print("[ZomboidManager] SafeZone: ERROR sending warning: " .. tostring(warnErr))
+            print("[KnoxRelay] SafeZone: ERROR sending warning: " .. tostring(warnErr))
         end
-        print("[ZomboidManager] SafeZone: warned " .. attackerName .. " (strike 1) in zone " .. zoneName)
+        print("[KnoxRelay] SafeZone: warned " .. attackerName .. " (strike 1) in zone " .. zoneName)
     else
         -- Strike 2+: warn + queue violation
         local warnOk, warnErr = pcall(function()
             attacker:Say("[Safe Zone] Violation reported to admins.")
         end)
         if not warnOk then
-            print("[ZomboidManager] SafeZone: ERROR sending warning: " .. tostring(warnErr))
+            print("[KnoxRelay] SafeZone: ERROR sending warning: " .. tostring(warnErr))
         end
 
         table.insert(pendingViolations, {
@@ -143,7 +143,7 @@ function ZM_SafeZone.onWeaponHitCharacter(attacker, target, weapon, damage)
             strike_number = strikeCount,
             occurred_at = os.time(),
         })
-        print("[ZomboidManager] SafeZone: violation queued for " .. attackerName .. " (strike " .. strikeCount .. ") in zone " .. zoneName)
+        print("[KnoxRelay] SafeZone: violation queued for " .. attackerName .. " (strike " .. strikeCount .. ") in zone " .. zoneName)
     end
 end
 
@@ -164,7 +164,7 @@ end
 --- Called on server start: load config
 function ZM_SafeZone.init()
     loadConfig()
-    print("[ZomboidManager] SafeZone: initialized (enabled=" .. tostring(config.enabled) .. ", zones=" .. #config.zones .. ")")
+    print("[KnoxRelay] SafeZone: initialized (enabled=" .. tostring(config.enabled) .. ", zones=" .. #config.zones .. ")")
 end
 
 return ZM_SafeZone

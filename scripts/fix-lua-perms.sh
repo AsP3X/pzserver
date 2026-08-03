@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Fix ZomboidManager Lua bridge write permissions on the host bind mount.
+# Fix KnoxRelay Lua bridge write permissions on the host bind mount.
 # Run on the host from the repo root if you see:
-#   [ZomboidManager] ERROR: cannot open file writer for <player>
-#   [ZomboidManager] ERROR: cannot write export_requests.json
+#   [KnoxRelay] ERROR: cannot open file writer for <player>
+#   [KnoxRelay] ERROR: cannot write export_requests.json
 #
 # Root cause: Laravel (www-data) and the game (steam/root) share this directory.
 # Sticky bit (1777) + 0644 files owned by www-data make getFileWriter() fail.

@@ -29,7 +29,7 @@ Scheduled: `zomboid:heal-lua-bridge` every 5 minutes.
 - Dry-run deposit simulate
 - Exchange rates (Money / MoneyBundle)
 - Deploy checklist + Docker resource sample
-- Recent `[ZomboidManager]` log errors
+- Recent `[KnoxRelay]` log errors
 - Workshop mod sample timestamps
 
 ## Hybrid deposit outbox

@@ -53,12 +53,12 @@ function ZM_PlayerTracker.exportPositions()
 
     local ok, jsonStr = pcall(JSON.encode, data)
     if not ok then
-        print("[ZomboidManager] ERROR encoding player positions: " .. tostring(jsonStr))
+        print("[KnoxRelay] ERROR encoding player positions: " .. tostring(jsonStr))
         return false
     end
 
     if not ZM_Utils.writeRawFile(POSITIONS_FILE, jsonStr) then
-        print("[ZomboidManager] ERROR: cannot write player positions")
+        print("[KnoxRelay] ERROR: cannot write player positions")
         return false
     end
 

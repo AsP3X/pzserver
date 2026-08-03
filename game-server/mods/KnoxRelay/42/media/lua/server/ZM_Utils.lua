@@ -1,5 +1,5 @@
 --
--- ZM_Utils.lua — Shared utility functions for ZomboidManager mod
+-- ZM_Utils.lua — Shared utility functions for KnoxRelay mod
 --
 
 local JSON = require("ZM_JSON")
@@ -62,8 +62,8 @@ local function logDocFolderOnce()
     end
     _docFolderLogged = true
     local folder = ZM_Utils.getDocumentFolder()
-    print("[ZomboidManager] Document folder (Lua root parent): " .. tostring(folder))
-    print("[ZomboidManager] File separator: " .. tostring(ZM_Utils.getPathSep()))
+    print("[KnoxRelay] Document folder (Lua root parent): " .. tostring(folder))
+    print("[KnoxRelay] File separator: " .. tostring(ZM_Utils.getPathSep()))
 end
 
 --- Try getFileWriter (standard PZ API).
@@ -161,15 +161,15 @@ function ZM_Utils.writeRawFile(path, content)
         if ok then
             if not _writeDiagDone then
                 _writeDiagDone = true
-                print("[ZomboidManager] File write OK via " .. s.name .. " → " .. path)
+                print("[KnoxRelay] File write OK via " .. s.name .. " → " .. path)
             end
             return true
         end
         table.insert(errors, s.name .. "=" .. tostring(err))
     end
 
-    print("[ZomboidManager] ERROR: cannot write " .. path .. " | " .. table.concat(errors, " | "))
-    print("[ZomboidManager] HINT: document folder=" .. tostring(ZM_Utils.getDocumentFolder())
+    print("[KnoxRelay] ERROR: cannot write " .. path .. " | " .. table.concat(errors, " | "))
+    print("[KnoxRelay] HINT: document folder=" .. tostring(ZM_Utils.getDocumentFolder())
         .. " — ensure host bind mount matches that path's Lua/ dir (0777/0666, no sticky)")
     return false
 end
@@ -197,7 +197,7 @@ function ZM_Utils.readJsonFile(path)
 
     local ok, data = pcall(JSON.decode, content)
     if not ok then
-        print("[ZomboidManager] ERROR parsing " .. path .. ": " .. tostring(data))
+        print("[KnoxRelay] ERROR parsing " .. path .. ": " .. tostring(data))
         return nil
     end
 
@@ -208,7 +208,7 @@ end
 function ZM_Utils.writeJsonFile(path, data)
     local ok, jsonStr = pcall(JSON.encode, data)
     if not ok then
-        print("[ZomboidManager] ERROR encoding " .. path .. ": " .. tostring(jsonStr))
+        print("[KnoxRelay] ERROR encoding " .. path .. ": " .. tostring(jsonStr))
         return false
     end
 
@@ -228,7 +228,7 @@ function ZM_Utils.writeJsonFile(path, data)
             return true
         end
         if attempt < attempts then
-            print("[ZomboidManager] ERROR: cannot write " .. path .. " (attempt " .. attempt .. "/" .. attempts .. "), retrying...")
+            print("[KnoxRelay] ERROR: cannot write " .. path .. " (attempt " .. attempt .. "/" .. attempts .. "), retrying...")
         end
     end
 
@@ -241,10 +241,10 @@ function ZM_Utils.selfTestBridge()
     local testPath = "zm_bridge_selftest.txt"
     local payload = "ok " .. ZM_Utils.getTimestamp()
     if ZM_Utils.writeRawFile(testPath, payload) then
-        print("[ZomboidManager] Bridge self-test PASSED (" .. testPath .. ")")
+        print("[KnoxRelay] Bridge self-test PASSED (" .. testPath .. ")")
         return true
     end
-    print("[ZomboidManager] Bridge self-test FAILED — inventory/deposits/stats will not work until writes succeed")
+    print("[KnoxRelay] Bridge self-test FAILED — inventory/deposits/stats will not work until writes succeed")
     return false
 end
 

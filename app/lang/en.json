@@ -115,7 +115,7 @@
     "admin.config.config_not_available": ":title — Config file not available. The server may not have been started yet.",
     "admin.config.cooldown_description": "No server restart required — changes apply within 60 seconds",
     "admin.config.cooldown_label": "Cooldown (minutes)",
-    "admin.config.custom_rules_description": "Server-side rules enforced by the ZomboidManager Lua mod",
+    "admin.config.custom_rules_description": "Server-side rules enforced by the Knox Relay Lua mod",
     "admin.config.custom_rules_title": "Custom Rules",
     "admin.config.description": "Edit server.ini and SandboxVars.lua settings",
     "admin.config.export_sandbox": "SandboxVars.lua",

@@ -7,13 +7,13 @@ class ModManager
     /**
      * Mods that must remain installed for the manager to work, keyed by
      * Workshop ID with the corresponding `mod_id` as the value. The
-     * proprietary ZomboidManager mod provides the Lua bridge used by
+     * proprietary KnoxRelay mod provides the Lua bridge used by
      * inventory, delivery, and player-position features — removing it
      * breaks core functionality, so the API/UI refuse to remove these
      * and write paths re-attach them automatically if they go missing.
      */
     public const PROTECTED_MODS = [
-        '3685323705' => 'ZomboidManager',
+        '3685323705' => 'KnoxRelay',
     ];
 
     public function __construct(
@@ -275,7 +275,7 @@ class ModManager
      * base map (PZ resolves overlapping cells in list order, vanilla last).
      *
      * Everything is written through `writeIniAndState`, so the merged lists land in
-     * `.mod_state` (authoritative across reboots), ZomboidManager is re-attached, and
+     * `.mod_state` (authoritative across reboots), KnoxRelay is re-attached, and
      * any Map change is persisted to `.config_state`.
      *
      * @param  list<string>  $workshopIds

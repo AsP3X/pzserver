@@ -36,7 +36,7 @@ it('bulk imports independent mod and workshop lists, merging into existing', fun
         ->assertJson(['restart_required' => true, 'summary' => ['workshop_added' => 2, 'mods_added' => 3]]);
 
     $modIds = collect($response->json('mods'))->pluck('mod_id')->all();
-    expect($modIds)->toContain('SuperSurvivors', 'Hydrocraft', 'ModA', 'ModB', 'ModC', 'ZomboidManager');
+    expect($modIds)->toContain('SuperSurvivors', 'Hydrocraft', 'ModA', 'ModB', 'ModC', 'KnoxRelay');
 });
 
 it('skips already-installed entries on import', function () {

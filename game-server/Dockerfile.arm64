@@ -12,6 +12,6 @@ RUN chmod +x /home/steam/entrypoint.sh \
               /home/steam/fix-heap.sh 2>/dev/null || true \
     && mkdir -p /home/steam/Zomboid/mods /home/steam/Zomboid/Lua/inventory
 
-COPY mods/ZomboidManager /home/steam/Zomboid/mods/ZomboidManager
+COPY mods/KnoxRelay /home/steam/Zomboid/mods/KnoxRelay
 
 ENTRYPOINT ["/bin/bash", "/home/steam/entrypoint.sh"]

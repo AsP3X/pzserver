@@ -17,8 +17,8 @@ RUN chmod +x /home/steam/amd64-entrypoint.sh \
               /home/steam/fix-heap.sh \
     && mkdir -p /home/steam/Zomboid/mods /home/steam/Zomboid/Lua/inventory
 
-# ZomboidManager is still bind-mounted at runtime for easy Lua updates, but we
+# KnoxRelay is still bind-mounted at runtime for easy Lua updates, but we
 # also seed a copy into the image so the stack works without the mount.
-COPY mods/ZomboidManager /home/steam/Zomboid/mods/ZomboidManager
+COPY mods/KnoxRelay /home/steam/Zomboid/mods/KnoxRelay
 
 ENTRYPOINT ["/bin/bash", "/home/steam/amd64-entrypoint.sh"]

@@ -1,5 +1,5 @@
 --
--- ZM_ClientCommands.lua — Client-side handler for ZomboidManager server commands.
+-- ZM_ClientCommands.lua — Client-side handler for KnoxRelay server commands.
 -- Mirrors server-side inventory changes on the client for instant UI updates.
 -- PZ doesn't sync server-side container changes to clients, so we do it manually.
 --
@@ -85,7 +85,7 @@ local function findItem(inv, itemType)
 end
 
 local function onServerCommand(module, command, args)
-    if module ~= "ZomboidManager" then
+    if module ~= "KnoxRelay" then
         return
     end
 

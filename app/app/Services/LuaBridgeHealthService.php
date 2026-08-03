@@ -172,7 +172,7 @@ class LuaBridgeHealthService
 
         $out = [];
         foreach (array_reverse($lines) as $line) {
-            if (stripos($line, '[ZomboidManager]') === false) {
+            if (stripos($line, '[KnoxRelay]') === false) {
                 continue;
             }
             if (stripos($line, 'ERROR') === false && stripos($line, 'CRITICAL') === false && stripos($line, 'WARNING') === false) {

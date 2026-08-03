@@ -29,13 +29,13 @@ end
 function ZM_ItemCatalog.export()
     local scriptManager = ScriptManager.instance
     if not scriptManager then
-        print("[ZomboidManager] ERROR: ScriptManager not available")
+        print("[KnoxRelay] ERROR: ScriptManager not available")
         return 0
     end
 
     local allItems = scriptManager:getAllItems()
     if not allItems then
-        print("[ZomboidManager] ERROR: getAllItems() returned nil")
+        print("[KnoxRelay] ERROR: getAllItems() returned nil")
         return 0
     end
 
@@ -90,12 +90,12 @@ function ZM_ItemCatalog.export()
 
     local ok, jsonStr = pcall(JSON.encode, data)
     if not ok then
-        print("[ZomboidManager] ERROR encoding item catalog: " .. tostring(jsonStr))
+        print("[KnoxRelay] ERROR encoding item catalog: " .. tostring(jsonStr))
         return 0
     end
 
     if not ZM_Utils.writeRawFile(CATALOG_FILE, jsonStr) then
-        print("[ZomboidManager] ERROR: cannot open file writer for item catalog")
+        print("[KnoxRelay] ERROR: cannot open file writer for item catalog")
         return 0
     end
 

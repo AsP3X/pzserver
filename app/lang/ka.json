@@ -115,7 +115,7 @@
     "admin.config.config_not_available": ":title — კონფიგურაციის ფაილი მიუწვდომელია. სერვერი შესაძლოა ჯერ არ გაშვებულა.",
     "admin.config.cooldown_description": "სერვერის გადატვირთვა არ არის საჭირო — ცვლილებები ძალაში შედის 60 წამში",
     "admin.config.cooldown_label": "გადაცივების დრო (წუთები)",
-    "admin.config.custom_rules_description": "სერვერის მხარის წესები, რომლებსაც ZomboidManager Lua მოდი ასრულებს",
+    "admin.config.custom_rules_description": "სერვერის მხარის წესები, რომლებსაც Knox Relay Lua მოდი ასრულებს",
     "admin.config.custom_rules_title": "მორგებული წესები",
     "admin.config.description": "server.ini და SandboxVars.lua პარამეტრების რედაქტირება",
     "admin.config.export_sandbox": "SandboxVars.lua",

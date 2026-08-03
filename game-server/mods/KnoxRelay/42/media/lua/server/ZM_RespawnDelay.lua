@@ -70,7 +70,7 @@ local function processResets()
 
     if count > 0 then
         markDeathRecordsDirty()
-        print("[ZomboidManager] RespawnDelay: reset " .. count .. " player timer(s)")
+        print("[KnoxRelay] RespawnDelay: reset " .. count .. " player timer(s)")
     end
 
     -- Clear the resets file after processing
@@ -115,7 +115,7 @@ local function requestKick(username, remainingMinutes)
     })
 
     ZM_Utils.writeJsonFile(KICKS_FILE, { kicks = kicks })
-    print("[ZomboidManager] RespawnDelay: queued kick for " .. username .. " (" .. remainingMinutes .. " min remaining)")
+    print("[KnoxRelay] RespawnDelay: queued kick for " .. username .. " (" .. remainingMinutes .. " min remaining)")
 end
 
 --- Scan all online players for deaths and respawns.
@@ -144,7 +144,7 @@ local function scanPlayers()
                         deadPlayers[username] = true
                         deathRecords[username] = now
                         markDeathRecordsDirty()
-                        print("[ZomboidManager] RespawnDelay: recorded death for " .. username)
+                        print("[KnoxRelay] RespawnDelay: recorded death for " .. username)
                     end
                 else
                     -- Player is alive — clear dead flag
@@ -166,7 +166,7 @@ local function scanPlayers()
                 end
             end)
             if not ok then
-                print("[ZomboidManager] RespawnDelay: scan error: " .. tostring(err))
+                print("[KnoxRelay] RespawnDelay: scan error: " .. tostring(err))
             end
         end
     end
@@ -202,10 +202,10 @@ function ZM_RespawnDelay.init()
         for _ in pairs(deathRecords) do
             count = count + 1
         end
-        print("[ZomboidManager] RespawnDelay: loaded " .. count .. " death record(s)")
+        print("[KnoxRelay] RespawnDelay: loaded " .. count .. " death record(s)")
     end
 
-    print("[ZomboidManager] RespawnDelay: initialized (enabled=" .. tostring(config.enabled) .. ", delay=" .. config.delay_minutes .. "min)")
+    print("[KnoxRelay] RespawnDelay: initialized (enabled=" .. tostring(config.enabled) .. ", delay=" .. config.delay_minutes .. "min)")
 end
 
 return ZM_RespawnDelay

@@ -8,8 +8,8 @@ namespace App\Support;
  * The game server (steam/root) and Laravel (www-data) both read/write the same
  * bind-mounted files. PHP's default umask creates 0644 files owned by www-data,
  * which Project Zomboid getFileWriter() cannot open — producing:
- *   [ZomboidManager] ERROR: cannot open file writer for <player>
- *   [ZomboidManager] ERROR: cannot write export_requests.json
+ *   [KnoxRelay] ERROR: cannot open file writer for <player>
+ *   [KnoxRelay] ERROR: cannot write export_requests.json
  *
  * Always create dirs as 0777 (no sticky bit) and files as 0666 so either UID can
  * truncate/replace them. Sticky 1777 is intentionally avoided: it blocks rename

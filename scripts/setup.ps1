@@ -302,12 +302,12 @@ $PZ_MAX_PLAYERS = Read-Prompt "Max players" "16"
 $PZ_MAX_RAM = Read-Prompt "Max RAM" "4096m"
 
 Write-Host "  Steam branch:"
-Write-Host "  Note: the ZomboidManager mod (player map, inventory, delivery queue," -ForegroundColor DarkGray
+Write-Host "  Note: the KnoxRelay mod (player map, inventory, delivery queue," -ForegroundColor DarkGray
 Write-Host "  live stats) requires Build 42. B41 (legacy41) leaves those features offline." -ForegroundColor DarkGray
 do {
     Write-Host "    1) public    - Build 42 Stable (default Steam, recommended)"
     Write-Host "    2) unstable  - Build 42 Unstable (bleeding edge MP)"
-    Write-Host "    3) legacy41  - Build 41.78.x (legacy; ZomboidManager mod will NOT work)"
+    Write-Host "    3) legacy41  - Build 41.78.x (legacy; KnoxRelay mod will NOT work)"
     Write-Host "    4) Custom    - Enter a branch name manually"
     $branchChoice = Read-Host "  [1]"
     if ([string]::IsNullOrEmpty($branchChoice)) { $branchChoice = "1" }

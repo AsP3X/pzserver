@@ -603,7 +603,7 @@ Replace flat text inputs with smart, grouped, collapsible config sections.
 
 Custom server-side Lua mod that bridges game data to the Laravel app via shared Docker volume.
 
-**Mod structure (`game-server/mods/ZomboidManager/`):**
+**Mod structure (`game-server/mods/KnoxRelay/`):**
 - `mod.info` — mod metadata (name, id, description)
 - `media/lua/server/ZM_Main.lua` — entry point, event hooks
 - `media/lua/server/ZM_InventoryExporter.lua` — inventory snapshot logic
@@ -702,7 +702,7 @@ View and manage player inventories with item icons via the Lua bridge.
 - **In-game time & weather widget** — display current PZ game time and weather conditions (temperature, rain, fog) on the dashboard via Lua bridge export (`getGameTime()`, `getClimateManager()`)
 - **Player leaderboards / top charts** — time survived, zombie kills, deaths, hours played sourced from `players.db` → `networkPlayers` table (no mod needed, direct SQLite read)
 - **Player stats cards** — individual player stats displayed on the players page (kills, hours, profession, skills)
-- **Log Extender integration** — optional companion mod ([Workshop #1844524972](https://steamcommunity.com/sharedfiles/filedetails/?id=1844524972)) for event-driven stats. Laravel scheduler job parses `_player.txt`, `_pvp.txt`, `_craft.txt` logs into DB tables. Powers kill feed, recent deaths, crafting activity, PvP history. Auto-registered in `configure-server.sh` alongside ZomboidManager.
+- **Log Extender integration** — optional companion mod ([Workshop #1844524972](https://steamcommunity.com/sharedfiles/filedetails/?id=1844524972)) for event-driven stats. Laravel scheduler job parses `_player.txt`, `_pvp.txt`, `_craft.txt` logs into DB tables. Powers kill feed, recent deaths, crafting activity, PvP history. Auto-registered in `configure-server.sh` alongside KnoxRelay.
 
 ### Phase 22+: Subscriptions (Stage 5 — Monetization)
 
@@ -839,6 +839,6 @@ php artisan scribe:generate
 | Phase 19 — Admin Player Map | DONE | Leaflet.js map with PZ tile rendering, player markers (online/offline/dead), action dialogs (kick/ban/access), usePoll 5s live updates, players.db SQLite connection; local tiles packed to single tiles.sqlite (MapTileStore) — docs/map-tiles.md |
 | Phase 20 — Admin Inventory Management | DONE | Inventory grid with item icons, give/remove dialogs, delivery queue integration, audit logged, 17 tests |
 | Phase 21 — Dashboard & UX Polish | DONE | Toast notifications (Sonner), error handling, deferred props with skeletons, game time/weather widget (Lua export), player stats/leaderboards (Lua export), Log Extender event ingestion, activity feed, mobile responsive polish, 23 new tests |
-| Phase 24 — Player Item Vault | DONE | vaults/vault_items/vault_transactions schema, items-first deposit via remove_verified, deliver-then-debit withdrawal via give_with_condition, coin-purchasable capacity, admin settings page, 54 tests. Requires ZomboidManager mod 1.1 |
+| Phase 24 — Player Item Vault | DONE | vaults/vault_items/vault_transactions schema, items-first deposit via remove_verified, deliver-then-debit withdrawal via give_with_condition, coin-purchasable capacity, admin settings page, 54 tests. Requires KnoxRelay mod 1.1 |
 | Phase 22+ — Subscriptions | TODO | Cashier/Stripe (deferred — monetization) |
 | Phase 23+ — Item Shop | TODO | Shop CRUD, payments, reuses Lua bridge delivery queue (deferred — monetization) |

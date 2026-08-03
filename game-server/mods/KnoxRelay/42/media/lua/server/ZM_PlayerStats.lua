@@ -101,7 +101,7 @@ function ZM_PlayerStats.exportAll()
             if ok and entry then
                 table.insert(playerStats, entry)
             elseif not ok then
-                print("[ZomboidManager] WARNING: failed to export stats for player index " .. i .. ": " .. tostring(entry))
+                print("[KnoxRelay] WARNING: failed to export stats for player index " .. i .. ": " .. tostring(entry))
             end
         end
     end
@@ -114,12 +114,12 @@ function ZM_PlayerStats.exportAll()
 
     local ok, jsonStr = pcall(JSON.encode, data)
     if not ok then
-        print("[ZomboidManager] ERROR encoding player stats: " .. tostring(jsonStr))
+        print("[KnoxRelay] ERROR encoding player stats: " .. tostring(jsonStr))
         return 0
     end
 
     if not ZM_Utils.writeRawFile(STATS_FILE, jsonStr) then
-        print("[ZomboidManager] ERROR: cannot write player stats")
+        print("[KnoxRelay] ERROR: cannot write player stats")
         return 0
     end
 

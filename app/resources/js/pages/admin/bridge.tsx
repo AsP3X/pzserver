@@ -356,7 +356,7 @@ export default function BridgePage({ health, checklist, deposits, rates, mod_upd
                 {health.recent_errors.length > 0 && (
                     <Card>
                         <CardHeader>
-                            <CardTitle className="text-base">Recent ZomboidManager log errors</CardTitle>
+                            <CardTitle className="text-base">Recent Knox Relay log errors</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <pre className="bg-muted/40 max-h-64 overflow-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">

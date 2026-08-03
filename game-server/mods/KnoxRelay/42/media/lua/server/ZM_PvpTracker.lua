@@ -93,7 +93,7 @@ local function scanForKills()
                                 victim_y = hit.victim_y,
                                 occurred_at = now,
                             })
-                            print("[ZomboidManager] PvpTracker: kill recorded — " .. hit.attacker .. " killed " .. username .. " with " .. hit.weapon)
+                            print("[KnoxRelay] PvpTracker: kill recorded — " .. hit.attacker .. " killed " .. username .. " with " .. hit.weapon)
                         end
 
                         -- Clear attacker record to prevent double-counting
@@ -105,7 +105,7 @@ local function scanForKills()
                 end
             end)
             if not ok then
-                print("[ZomboidManager] PvpTracker: scan error: " .. tostring(err))
+                print("[KnoxRelay] PvpTracker: scan error: " .. tostring(err))
             end
         end
     end
@@ -135,7 +135,7 @@ local function flushKills()
     end
 
     ZM_Utils.writeJsonFile(KILLS_FILE, { kills = list })
-    print("[ZomboidManager] PvpTracker: flushed " .. #pendingKills .. " kill(s) to disk")
+    print("[KnoxRelay] PvpTracker: flushed " .. #pendingKills .. " kill(s) to disk")
     pendingKills = {}
 end
 
@@ -150,7 +150,7 @@ function ZM_PvpTracker.init()
     lastAttacker = {}
     deadPlayers = {}
     pendingKills = {}
-    print("[ZomboidManager] PvpTracker: initialized")
+    print("[KnoxRelay] PvpTracker: initialized")
 end
 
 return ZM_PvpTracker

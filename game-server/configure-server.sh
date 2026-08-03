@@ -215,7 +215,7 @@ if [ -n "$CURRENT_WORKSHOP_LINE" ]; then
     for wid in "${WS_IDS[@]}"; do
         wid="$(echo "$wid" | tr -d '[:space:]')"
         if [ -z "$wid" ]; then continue; fi
-        # ZomboidManager is injected manually from the host volume below; skip.
+        # KnoxRelay is injected manually from the host volume below; skip.
         if [ "$wid" = "$ZM_WORKSHOP_ID_EARLY" ]; then continue; fi
         if [ ! -d "$WORKSHOP_CACHE_ROOT/$wid" ]; then
             MISSING_WORKSHOP_IDS+=("$wid")
@@ -247,7 +247,7 @@ fi
 # B42 manifest + poster up one level when it's missing.
 if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
     while IFS= read -r mod_dir; do
-        # Skip ZomboidManager — configure-server.sh handles it below.
+        # Skip KnoxRelay — configure-server.sh handles it below.
         if [ "$(basename "$(dirname "$mod_dir")")" = "$ZM_WORKSHOP_ID_EARLY" ]; then continue; fi
         if [ -f "$mod_dir/mod.info" ]; then continue; fi
         if [ ! -f "$mod_dir/42/mod.info" ]; then continue; fi
@@ -272,8 +272,8 @@ mkdir -p "$ZOMBOID_MODS_DIR"
 if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
     while IFS= read -r mod_dir; do
         mod_name="$(basename "$mod_dir")"
-        # Skip ZomboidManager — its source is bind-mounted from host already.
-        if [ "$mod_name" = "ZomboidManager" ]; then continue; fi
+        # Skip KnoxRelay — its source is bind-mounted from host already.
+        if [ "$mod_name" = "KnoxRelay" ]; then continue; fi
         target="$ZOMBOID_MODS_DIR/$mod_name"
         # Replace stale symlinks/dirs that may point to a removed mod.
         if [ -L "$target" ] || [ -e "$target" ]; then
@@ -289,19 +289,19 @@ if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
     done < <(find "$WORKSHOP_CACHE_ROOT" -maxdepth 3 -mindepth 3 -type d -path "*/mods/*")
 fi
 
-# Disable Lua checksum — required for ZomboidManager mod.
+# Disable Lua checksum — required for KnoxRelay mod.
 # Without this, PZ checksums mod Lua files and clients that don't have matching
 # checksums get errors. This does NOT disable anti-cheat (Steam VAC).
 apply_setting "DoLuaChecksum" "false" "$INI_FILE"
-echo "[configure-server] Set DoLuaChecksum=false (required for ZomboidManager mod)"
+echo "[configure-server] Set DoLuaChecksum=false (required for KnoxRelay mod)"
 
-# ZomboidManager Workshop integration.
+# KnoxRelay Workshop integration.
 # PZ B42 dedicated servers only load mods registered via Workshop (WorkshopItems= line).
 # Local mods in Zomboid/mods/ or ZomboidDedicatedServer/mods/ are NOT scanned.
 # We create a fake Workshop cache entry so PZ discovers our mod through its Workshop scanner.
 ZM_WORKSHOP_ID="3685323705"
-ZM_SOURCE="${PZ_CONFIG_DIR}/mods/ZomboidManager"
-WORKSHOP_MOD_DIR="${PZ_INSTALL_DIR}/steamapps/workshop/content/108600/${ZM_WORKSHOP_ID}/mods/ZomboidManager"
+ZM_SOURCE="${PZ_CONFIG_DIR}/mods/KnoxRelay"
+WORKSHOP_MOD_DIR="${PZ_INSTALL_DIR}/steamapps/workshop/content/108600/${ZM_WORKSHOP_ID}/mods/KnoxRelay"
 
 if [ -f "$ZM_SOURCE/42/mod.info" ]; then
     # Create Workshop cache with both root-level and 42/ mod.info.
@@ -314,26 +314,26 @@ if [ -f "$ZM_SOURCE/42/mod.info" ]; then
     cp "$ZM_SOURCE"/42/poster.png "$WORKSHOP_MOD_DIR/poster.png" 2>/dev/null
     # B42 subdir with all mod files (required for Lua loading)
     cp -r "$ZM_SOURCE"/42/* "$WORKSHOP_MOD_DIR/42/"
-    echo "[configure-server] Installed ZomboidManager into Workshop cache (ID: $ZM_WORKSHOP_ID)"
+    echo "[configure-server] Installed KnoxRelay into Workshop cache (ID: $ZM_WORKSHOP_ID)"
 else
-    echo "[configure-server] WARNING: ZomboidManager source not found at $ZM_SOURCE/42/mod.info"
+    echo "[configure-server] WARNING: KnoxRelay source not found at $ZM_SOURCE/42/mod.info"
 fi
 
-# Remove any stale ZomboidManager from install dir (shadows Workshop version)
-rm -rf "${PZ_INSTALL_DIR}/mods/ZomboidManager"
+# Remove any stale KnoxRelay from install dir (shadows Workshop version)
+rm -rf "${PZ_INSTALL_DIR}/mods/KnoxRelay"
 
-# Ensure ZomboidManager is in the Mods= list.
+# Ensure KnoxRelay is in the Mods= list.
 CURRENT_MODS=$(grep -m1 "^Mods=" "$INI_FILE" | sed 's/^Mods=//' || true)
-if ! echo "$CURRENT_MODS" | grep -q "ZomboidManager"; then
+if ! echo "$CURRENT_MODS" | grep -q "KnoxRelay"; then
     if [ -n "$CURRENT_MODS" ]; then
-        apply_setting "Mods" "${CURRENT_MODS};ZomboidManager" "$INI_FILE"
+        apply_setting "Mods" "${CURRENT_MODS};KnoxRelay" "$INI_FILE"
     else
-        apply_setting "Mods" "ZomboidManager" "$INI_FILE"
+        apply_setting "Mods" "KnoxRelay" "$INI_FILE"
     fi
-    echo "[configure-server] Added ZomboidManager to Mods list"
+    echo "[configure-server] Added KnoxRelay to Mods list"
 fi
 
-# Ensure ZomboidManager workshop ID is in WorkshopItems= list.
+# Ensure KnoxRelay workshop ID is in WorkshopItems= list.
 CURRENT_WORKSHOP=$(grep -m1 "^WorkshopItems=" "$INI_FILE" | sed 's/^WorkshopItems=//' || true)
 if ! echo "$CURRENT_WORKSHOP" | grep -q "$ZM_WORKSHOP_ID"; then
     if [ -n "$CURRENT_WORKSHOP" ]; then
@@ -341,12 +341,12 @@ if ! echo "$CURRENT_WORKSHOP" | grep -q "$ZM_WORKSHOP_ID"; then
     else
         apply_setting "WorkshopItems" "${ZM_WORKSHOP_ID}" "$INI_FILE"
     fi
-    echo "[configure-server] Added ZomboidManager workshop ID $ZM_WORKSHOP_ID"
+    echo "[configure-server] Added KnoxRelay workshop ID $ZM_WORKSHOP_ID"
 fi
 
 # Snapshot the post-restore INI mods to .mod_state on first boot. PZ rewrites
 # the .ini on shutdown and may prune mods it didn't load; without an initial
-# snapshot, ZomboidManager could disappear after the next restart cycle.
+# snapshot, KnoxRelay could disappear after the next restart cycle.
 if [ ! -f "$MOD_STATE_FILE" ]; then
     SNAPSHOT_MODS=$(grep -m1 "^Mods=" "$INI_FILE" | sed 's/^Mods=//' || true)
     SNAPSHOT_WORKSHOP=$(grep -m1 "^WorkshopItems=" "$INI_FILE" | sed 's/^WorkshopItems=//' || true)

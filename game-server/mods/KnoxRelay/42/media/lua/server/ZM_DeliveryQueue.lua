@@ -211,7 +211,7 @@ local function syncAddToClient(player, itemType, count)
     end
     -- Tell the client to add the item locally for instant UI update
     if isServer() then
-        sendServerCommand(player, "ZomboidManager", "addItem", {
+        sendServerCommand(player, "KnoxRelay", "addItem", {
             item_type = itemType,
             count = tostring(count),
         })
@@ -284,7 +284,7 @@ local function giveItemVerified(player, itemType, count)
     if not verified then
         -- Verification failed — try to rollback
         local actuallyAdded = countAfter - countBefore
-        print("[ZomboidManager] WARNING: give_verified failed verification for " .. itemType ..
+        print("[KnoxRelay] WARNING: give_verified failed verification for " .. itemType ..
               " — expected >=" .. (countBefore + count) .. " but got " .. countAfter)
         for j = 1, actuallyAdded do
             removeOneItem(player, itemType)
@@ -436,7 +436,7 @@ local function removeItemVerified(player, itemType, count)
     end
 
     if isServer() and #removed > 0 then
-        sendServerCommand(player, "ZomboidManager", "removeItem", {
+        sendServerCommand(player, "KnoxRelay", "removeItem", {
             item_type = itemType,
             count = tostring(#removed),
         })
@@ -521,7 +521,7 @@ local function removeItem(player, itemType, count)
 
     -- Tell the client to mirror the removal for instant UI update.
     if isServer() and removed > 0 then
-        sendServerCommand(player, "ZomboidManager", "removeItem", {
+        sendServerCommand(player, "KnoxRelay", "removeItem", {
             item_type = itemType,
             count = tostring(removed),
         })
@@ -591,7 +591,7 @@ function ZM_DeliveryQueue.process()
 
                 if success then
                     result.status = "delivered"
-                    print("[ZomboidManager] Delivered: " .. entry.action .. " " .. (entry.count or 1) .. "x " .. entry.item_type .. " for " .. entry.username)
+                    print("[KnoxRelay] Delivered: " .. entry.action .. " " .. (entry.count or 1) .. "x " .. entry.item_type .. " for " .. entry.username)
                     -- Include verification data if present
                     if verificationData then
                         result.verified = true
@@ -604,7 +604,7 @@ function ZM_DeliveryQueue.process()
                     ZM_InventoryExporter.exportPlayer(player)
                 else
                     result.message = errMsg
-                    print("[ZomboidManager] Failed delivery: " .. tostring(errMsg))
+                    print("[KnoxRelay] Failed delivery: " .. tostring(errMsg))
                 end
             end
 

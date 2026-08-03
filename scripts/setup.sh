@@ -137,12 +137,12 @@ prompt PZ_MAX_PLAYERS "Max players" "16"
 prompt PZ_MAX_RAM "Max RAM" "4096m"
 
 echo "  Steam branch:"
-echo -e "  ${DIM}Note: the ZomboidManager mod (player map, inventory, delivery queue,${NC}"
+echo -e "  ${DIM}Note: the KnoxRelay mod (player map, inventory, delivery queue,${NC}"
 echo -e "  ${DIM}live stats) requires Build 42. B41 (legacy41) leaves those features offline.${NC}"
 while true; do
     echo "    1) public    — Build 42 Stable (default Steam, recommended)"
     echo "    2) unstable  — Build 42 Unstable (bleeding edge MP)"
-    echo "    3) legacy41  — Build 41.78.x (legacy; ZomboidManager mod will NOT work)"
+    echo "    3) legacy41  — Build 41.78.x (legacy; KnoxRelay mod will NOT work)"
     echo "    4) Custom    — Enter a branch name manually"
     echo -ne "  ${DIM}[1]${NC}: "
     read -r branch_choice || true
