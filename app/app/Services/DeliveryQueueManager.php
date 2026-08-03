@@ -61,6 +61,29 @@ class DeliveryQueueManager
     }
 
     /**
+     * Remove items via Lua with a full report of what actually came out.
+     *
+     * Unlike removeItem(), a partial removal is not an error — Lua reports the
+     * exact items removed so the caller can credit precisely that much.
+     *
+     * @return array{id: string, action: string, username: string, item_type: string, count: int, status: string, created_at: string}
+     */
+    public function removeItemVerified(string $username, string $itemType, int $count = 1): array
+    {
+        return $this->addEntry('remove_verified', $username, $itemType, $count);
+    }
+
+    /**
+     * Give items and restore a specific condition fraction on each.
+     *
+     * @return array{id: string, action: string, username: string, item_type: string, count: int, condition: float, status: string, created_at: string}
+     */
+    public function giveItemWithCondition(string $username, string $itemType, int $count, float $condition): array
+    {
+        return $this->addEntry('give_with_condition', $username, $itemType, $count, ['condition' => $condition]);
+    }
+
+    /**
      * Read the current delivery queue.
      *
      * @return array{version: int, updated_at: string, entries: array<int, array{id: string, action: string, username: string, item_type: string, count: int, status: string, created_at: string}>}
@@ -160,7 +183,7 @@ class DeliveryQueueManager
         try {
             $this->rcon->connect();
             $safeCount = (int) $count;
-            $this->rcon->command("additem \"".RconSanitizer::playerName($username)."\" \"".RconSanitizer::itemId($itemType)."\" {$safeCount}");
+            $this->rcon->command('additem "'.RconSanitizer::playerName($username).'" "'.RconSanitizer::itemId($itemType)."\" {$safeCount}");
             Log::info("[DeliveryQueue] RCON additem: {$count}x {$itemType} to {$username}");
 
             // Request inventory re-export so web sees the change
@@ -192,8 +215,10 @@ class DeliveryQueueManager
 
     /**
      * Add an entry to the delivery queue with atomic write.
+     *
+     * @param  array<string, mixed>  $extra  Additional fields merged into the entry
      */
-    private function addEntry(string $action, string $username, string $itemType, int $count): array
+    private function addEntry(string $action, string $username, string $itemType, int $count, array $extra = []): array
     {
         $queue = $this->readQueue();
 
@@ -205,6 +230,7 @@ class DeliveryQueueManager
             'count' => $count,
             'status' => 'pending',
             'created_at' => date('c'),
+            ...$extra,
         ];
 
         $queue['entries'][] = $entry;
