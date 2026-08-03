@@ -143,13 +143,15 @@ class GenerateMapTiles extends Command
         ]);
 
         if ($force) {
-            $this->info('Clearing previous tiles...');
+            $this->info('Clearing previous tiles (instant rename; purge may continue in background)...');
             $this->progress->update([
                 'stage' => 'clear',
                 'step' => 0,
                 'message' => 'Clearing previous tiles…',
             ]);
-            $this->tileStore->clearAll();
+            $this->tileStore->clearAll(function (string $message): void {
+                $this->line('  '.$message);
+            });
         }
 
         // Generate pzmap2dzi config
@@ -245,15 +247,24 @@ class GenerateMapTiles extends Command
 
     private function clearOnly(): int
     {
-        $this->info('Clearing map tiles, progress, and stop/lock flags...');
-        $this->tileStore->clearAll();
+        $this->info('Clearing map tiles at: '.$this->tileStore->rootPath());
+        $this->info('Huge tile trees are renamed away instantly; real disk free-up may continue in the background.');
+
+        $this->tileStore->clearAll(function (string $message): void {
+            $this->line('  '.$message);
+        });
+
+        $this->line('  Clearing progress / stop / lock flags…');
         $this->progress->clear();
         $this->progress->clearStopRequest();
         $lock = $this->progress->lockPath();
         if (is_file($lock)) {
             @unlink($lock);
         }
-        $this->info('Cleared: '.$this->tileStore->rootPath());
+
+        $this->info('Done. Live paths are empty — safe to generate again now.');
+        $this->line('Background purge log (if any): storage/logs/map-tiles-purge.log');
+        $this->line('Check trash dirs still deleting: ls -la '.$this->tileStore->rootPath());
 
         return self::SUCCESS;
     }

@@ -405,56 +405,190 @@ class MapTileStore
 
     /**
      * Remove the multi-million-file loose DZI pyramid. Keeps map_info.json and the pack DB.
+     *
+     * Uses rename + background purge so callers do not block on millions of unlinks.
+     *
+     * @param  (callable(string $message): void)|null  $onLog
      */
-    public function removeLooseTiles(): void
+    public function removeLooseTiles(?callable $onLog = null): void
     {
         $layer0 = $this->looseLayerPath();
         if (! is_dir($layer0)) {
             return;
         }
 
-        // rm -rf is far faster than PHP recursion for huge trees
-        if (PHP_OS_FAMILY !== 'Windows') {
-            $cmd = 'rm -rf '.escapeshellarg($layer0);
-            exec($cmd, $output, $code);
-            if ($code === 0 && ! is_dir($layer0)) {
-                return;
-            }
-        }
-
-        $this->deleteDirectoryRecursive($layer0);
+        $this->trashPath($layer0, $onLog);
     }
 
     /**
-     * Delete packed DB (and optional loose leftovers) before a forced regenerate.
+     * Delete packed DB and tile trees. Returns immediately for huge pyramids by
+     * renaming them out of the way and purging in the background.
+     *
+     * @param  (callable(string $message): void)|null  $onLog
      */
-    public function clearAll(): void
+    public function clearAll(?callable $onLog = null): void
     {
+        $log = $onLog ?? static function (string $message): void {};
+
         $pack = $this->packPath();
         if (is_file($pack)) {
+            $log('Removing tiles.sqlite ('. $this->humanSize((int) filesize($pack)).')…');
             @unlink($pack);
+        } else {
+            $log('No tiles.sqlite present.');
         }
 
         $temp = $pack.'.packing';
         if (is_file($temp)) {
+            $log('Removing incomplete pack file…');
             @unlink($temp);
         }
 
-        // Wipe entire tiles root contents carefully (keeps the directory itself)
         $root = $this->rootPath();
-        if (is_dir($root)) {
-            $html = $root.'/html';
-            if (is_dir($html)) {
-                if (PHP_OS_FAMILY !== 'Windows') {
-                    exec('rm -rf '.escapeshellarg($html));
-                }
-                if (is_dir($html)) {
-                    $this->deleteDirectoryRecursive($html);
-                }
+        if (! is_dir($root)) {
+            $log('Tiles root does not exist yet.');
+
+            return;
+        }
+
+        // Instantly free the live paths so generate/resume can start; purge later.
+        $html = $root.'/html';
+        if (is_dir($html)) {
+            $log('Moving html/ tile tree aside (instant)…');
+            $this->trashPath($html, $log);
+        } else {
+            $log('No html/ tile tree present.');
+        }
+
+        // Clean any leftover loose path if it exists outside html (should not)
+        $layer0 = $this->looseLayerPath();
+        if (is_dir($layer0)) {
+            $log('Moving remaining layer0_files aside…');
+            $this->trashPath($layer0, $log);
+        }
+
+        // Kick purge for any previous .trash-* dirs still sitting around
+        $this->purgeExistingTrashDirs($root, $log);
+
+        $log('Live tile paths are clear. Background purge of old files may still run for a while.');
+    }
+
+    /**
+     * Rename a directory to .trash-* under the tiles root and delete it in the background.
+     * Rename is O(1); deleting millions of files can take a long time.
+     *
+     * @param  (callable(string $message): void)|null  $onLog
+     */
+    private function trashPath(string $path, ?callable $onLog = null): void
+    {
+        $log = $onLog ?? static function (string $message): void {};
+
+        if (! file_exists($path)) {
+            return;
+        }
+
+        $root = $this->rootPath();
+        if (! is_dir($root)) {
+            mkdir($root, 0755, true);
+        }
+
+        $base = basename($path);
+        $trash = $root.'/.trash-'.$base.'-'.bin2hex(random_bytes(4));
+
+        // If rename fails (cross-device), fall back to a slow delete with a warning
+        if (@rename($path, $trash)) {
+            $log("Queued background delete: {$trash}");
+            $this->purgePathInBackground($trash);
+
+            return;
+        }
+
+        $log("Rename failed for {$path}; falling back to slow delete (may take a long time)…");
+        $this->purgePathSync($path);
+        $log("Finished slow delete: {$path}");
+    }
+
+    /**
+     * @param  (callable(string $message): void)|null  $onLog
+     */
+    private function purgeExistingTrashDirs(string $root, ?callable $onLog = null): void
+    {
+        $log = $onLog ?? static function (string $message): void {};
+        $entries = @scandir($root);
+        if ($entries === false) {
+            return;
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            if (! str_starts_with($entry, '.trash-')) {
+                continue;
+            }
+            $full = $root.'/'.$entry;
+            if (is_dir($full) || is_file($full)) {
+                $log("Re-queueing leftover trash: {$entry}");
+                $this->purgePathInBackground($full);
+            }
+        }
+    }
+
+    private function purgePathInBackground(string $path): void
+    {
+        if (! file_exists($path)) {
+            return;
+        }
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->purgePathSync($path);
+
+            return;
+        }
+
+        // Detach so artisan returns immediately; log to storage if possible
+        $logFile = storage_path('logs/map-tiles-purge.log');
+        $cmd = sprintf(
+            'nohup sh -c %s >> %s 2>&1 &',
+            escapeshellarg('echo "[$(date -Iseconds)] purging '.$path.'"; rm -rf '.escapeshellarg($path).'; echo "[$(date -Iseconds)] done '.$path.'"'),
+            escapeshellarg($logFile),
+        );
+        exec($cmd);
+    }
+
+    private function purgePathSync(string $path): void
+    {
+        if (! file_exists($path)) {
+            return;
+        }
+
+        if (is_file($path) || is_link($path)) {
+            @unlink($path);
+
+            return;
+        }
+
+        if (PHP_OS_FAMILY !== 'Windows') {
+            exec('rm -rf '.escapeshellarg($path), $output, $code);
+            if ($code === 0 && ! file_exists($path)) {
+                return;
             }
         }
 
-        $this->removeLooseTiles();
+        $this->deleteDirectoryRecursive($path);
+    }
+
+    private function humanSize(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $i = 0;
+        $size = (float) $bytes;
+        while ($size >= 1024 && $i < count($units) - 1) {
+            $size /= 1024;
+            $i++;
+        }
+
+        return round($size, 1).' '.$units[$i];
     }
 
     private function openReadOnly(string $path): PDO

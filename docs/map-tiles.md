@@ -142,6 +142,8 @@ You can interrupt generation without losing the multi-file pyramid, then continu
 | **Stop** (keep partial tiles) | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop` | **Stop generation** |
 | **Resume** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume` | **Resume generation** |
 | **Clear everything** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear` | **Start over** (confirm) |
+
+`--clear` renames large tile trees to `.trash-*` and deletes them **in the background** so the command returns quickly. Live paths are empty immediately; disk space free-up may continue for a while (`storage/logs/map-tiles-purge.log`, `ls data/map-tiles/.trash-*`).
 | **Full regenerate** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --force` | **Start over** / regenerate |
 
 Notes:
