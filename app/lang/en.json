@@ -1447,5 +1447,19 @@
     "world_events.passed": "Passed",
     "world_events.title": "World Events",
     "world_events.unknown": "Unknown",
-    "world_events.water": "Running water"
+    "world_events.water": "Running water",
+    "badges.generalist.description": "Five or more skills at level 5.",
+    "badges.generalist.label": "Jack of All Trades",
+    "badges.master.description": "A skill trained to level 10.",
+    "badges.master.label": "Master",
+    "badges.professional.description": "Started with an occupation.",
+    "badges.professional.label": "Professional",
+    "badges.slayer.bronze": "Slayer",
+    "badges.slayer.description": "Awarded for zombie kills.",
+    "badges.slayer.gold": "Knox Reaper",
+    "badges.slayer.silver": "Exterminator",
+    "badges.survivor.bronze": "Survivor",
+    "badges.survivor.description": "Awarded for hours survived.",
+    "badges.survivor.gold": "Long Hauler",
+    "badges.survivor.silver": "Week One"
 }

@@ -1435,5 +1435,19 @@
     "world_events.passed": "გასულია",
     "world_events.title": "მსოფლიო მოვლენები",
     "world_events.unknown": "უცნობია",
-    "world_events.water": "წყალმომარაგება"
+    "world_events.water": "წყალმომარაგება",
+    "badges.generalist.description": "ხუთი ან მეტი უნარი მე-5 დონეზე.",
+    "badges.generalist.label": "ყველაფრის ოსტატი",
+    "badges.master.description": "უნარი გაწვრთნილია მე-10 დონემდე.",
+    "badges.master.label": "ოსტატი",
+    "badges.professional.description": "დაიწყო პროფესიით.",
+    "badges.professional.label": "პროფესიონალი",
+    "badges.slayer.bronze": "მებრძოლი",
+    "badges.slayer.description": "მინიჭებულია ზომბების განადგურებისთვის.",
+    "badges.slayer.gold": "ნოქსის მკელი",
+    "badges.slayer.silver": "გამანადგურებელი",
+    "badges.survivor.bronze": "გადარჩენილი",
+    "badges.survivor.description": "მინიჭებულია გადარჩენილი საათებისთვის.",
+    "badges.survivor.gold": "ხანგრძლივი გზა",
+    "badges.survivor.silver": "პირველი კვირა"
 }

@@ -2,6 +2,8 @@ import { Deferred, Head, Link } from '@inertiajs/react';
 import { Clock, Hammer, LogIn, Medal, Shield, Skull, Swords, Trophy } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ActivityFeed } from '@/components/activity-feed';
+import { PlayerBadges } from '@/components/player-badges';
+import type { PlayerBadge } from '@/components/player-badges';
 import { categoriseSkills, SkillBar } from '@/components/skill-list';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +13,13 @@ import PublicLayout from '@/layouts/public-layout';
 import { formatHours, type HoursMode, loadHoursMode, saveHoursMode } from '@/lib/hours-format';
 import type { PlayerProfilePageData } from '@/types';
 
-export default function PlayerProfile({ player, recent_events, is_admin, day_length_minutes }: PlayerProfilePageData) {
+export default function PlayerProfile({
+    player,
+    recent_events,
+    is_admin,
+    day_length_minutes,
+    badges = [],
+}: PlayerProfilePageData & { badges?: PlayerBadge[] }) {
     const { t } = useTranslation();
     const [hoursMode, setHoursMode] = useState<HoursMode>('ingame');
 
@@ -67,6 +75,10 @@ export default function PlayerProfile({ player, recent_events, is_admin, day_len
                                 </button>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="mb-6">
+                        <PlayerBadges badges={badges} />
                     </div>
 
                     <div className="flex flex-col gap-6">

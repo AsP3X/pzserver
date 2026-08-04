@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
 use App\Models\GameEvent;
+use App\Models\PlayerStat;
+use App\Services\AchievementService;
 use App\Services\GameTimeService;
 use App\Services\PlayerStatsService;
 use Inertia\Inertia;
@@ -15,6 +17,7 @@ class PlayerProfileController extends Controller
     public function __construct(
         private readonly PlayerStatsService $playerStatsService,
         private readonly GameTimeService $gameTime,
+        private readonly AchievementService $achievements,
     ) {}
 
     public function __invoke(string $username): Response
@@ -27,8 +30,11 @@ class PlayerProfileController extends Controller
 
         $isAdmin = in_array(auth()->user()?->role, [UserRole::SuperAdmin, UserRole::Admin, UserRole::Moderator]);
 
+        $stats = PlayerStat::query()->find($username);
+
         $props = [
             'player' => $profile,
+            'badges' => $stats === null ? [] : $this->achievements->forPlayer($stats),
             'is_admin' => $isAdmin,
             'day_length_minutes' => $this->gameTime->realMinutesPerInGameDay(),
         ];
