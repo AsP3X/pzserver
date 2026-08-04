@@ -4,6 +4,8 @@ use App\Services\MapConfigBuilder;
 use App\Services\MapTileProgress;
 use App\Services\MapTileStore;
 
+uses(Tests\TestCase::class);
+
 beforeEach(function () {
     $this->tempDir = sys_get_temp_dir().'/pz_map_cfg_'.getmypid().'_'.bin2hex(random_bytes(4));
     mkdir($this->tempDir, 0755, true);

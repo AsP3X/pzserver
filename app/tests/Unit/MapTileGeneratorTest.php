@@ -2,7 +2,8 @@
 
 use App\Services\MapTileGenerator;
 use App\Services\MapTileProgress;
-use App\Services\MapTileStore;
+
+uses(Tests\TestCase::class);
 
 it('uses a CLI php binary, not php-fpm', function () {
     $gen = app(MapTileGenerator::class);

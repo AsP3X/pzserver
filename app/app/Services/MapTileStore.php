@@ -560,7 +560,7 @@ class MapTileStore
 
         $pack = $this->packPath();
         if (is_file($pack)) {
-            $log('Removing tiles.sqlite ('. $this->humanSize((int) filesize($pack)).')…');
+            $log('Removing tiles.sqlite ('.$this->humanSize((int) filesize($pack)).')…');
             @unlink($pack);
         } else {
             $log('No tiles.sqlite present.');

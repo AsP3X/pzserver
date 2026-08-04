@@ -2,6 +2,8 @@
 
 use App\Services\MapTileProgress;
 
+uses(Tests\TestCase::class);
+
 beforeEach(function () {
     $this->progress = new MapTileProgress;
     $this->progress->clear();
