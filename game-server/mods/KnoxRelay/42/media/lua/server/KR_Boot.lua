@@ -29,6 +29,7 @@ local Sanctuary = require("KR_Sanctuary")
 local Feud = require("KR_Feud")
 local Obituary = require("KR_Obituary")
 local Holdings = require("KR_Holdings")
+local Conductor = require("KR_Conductor")
 
 local LOG = "[KnoxRelay] "
 
@@ -71,6 +72,8 @@ local function onEveryOneMinute()
         if delivered > 0 then
             print(LOG .. "Processed " .. delivered .. " delivery entries")
         end
+
+        Conductor.drain()
     end
 
     sinceDeposit = sinceDeposit + 1

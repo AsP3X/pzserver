@@ -150,6 +150,8 @@ return [
         'deposit_results' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/deposit_results.json',
         'export_requests' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/export_requests.json',
         'holdings' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/holdings.json',
+        'world_actions' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/world_actions.json',
+        'world_results' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/world_results.json',
     ],
 
     /*

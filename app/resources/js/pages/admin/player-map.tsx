@@ -1,13 +1,15 @@
 import { Head, router, usePoll } from '@inertiajs/react';
-import { AlertTriangle, Circle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Circle, CloudLightning, Loader2, Sun } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import PlayerActionDialogs from '@/components/player-action-dialogs';
 import PzMap from '@/components/pz-map';
 import { useTranslation } from '@/hooks/use-translation';
 import type { ZoneOverlay } from '@/components/pz-map';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
+import { fetchAction } from '@/lib/fetch-action';
 import type { BreadcrumbItem } from '@/types';
 import type { MapConfig, PlayerMarker } from '@/types/server';
 
@@ -189,6 +191,17 @@ export default function PlayerMap({
         ],
         [safeZones, safehouses],
     );
+
+    const [stormHours, setStormHours] = useState(3);
+    const [worldBusy, setWorldBusy] = useState(false);
+
+    async function triggerWorldAction(action: 'storm' | 'clear_weather') {
+        setWorldBusy(true);
+        await fetchAction('/admin/world/actions', {
+            data: action === 'storm' ? { action, duration_hours: stormHours } : { action },
+        });
+        setWorldBusy(false);
+    }
 
     const [kickTarget, setKickTarget] = useState<string | null>(null);
     const [banTarget, setBanTarget] = useState<string | null>(null);
@@ -394,6 +407,51 @@ export default function PlayerMap({
                             zones={zoneOverlays}
                             className="h-full w-full rounded-xl"
                         />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t('admin.player_map.world_control')}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex flex-wrap items-end gap-3">
+                            <div className="space-y-1.5">
+                                <label htmlFor="storm-hours" className="text-sm">
+                                    {t('admin.player_map.storm_hours')}
+                                </label>
+                                <input
+                                    id="storm-hours"
+                                    type="number"
+                                    min={1}
+                                    max={24}
+                                    value={stormHours}
+                                    onChange={(e) =>
+                                        setStormHours(Math.max(1, Math.min(24, parseInt(e.target.value) || 3)))
+                                    }
+                                    className="border-input bg-background h-9 w-24 rounded-md border px-3 text-sm"
+                                />
+                            </div>
+                            <Button
+                                variant="outline"
+                                disabled={worldBusy}
+                                onClick={() => triggerWorldAction('storm')}
+                            >
+                                <CloudLightning className="mr-1.5 size-4" />
+                                {t('admin.player_map.trigger_storm')}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                disabled={worldBusy}
+                                onClick={() => triggerWorldAction('clear_weather')}
+                            >
+                                <Sun className="mr-1.5 size-4" />
+                                {t('admin.player_map.clear_weather')}
+                            </Button>
+                        </div>
+                        <p className="text-muted-foreground mt-3 text-xs">
+                            {t('admin.player_map.world_control_hint')}
+                        </p>
                     </CardContent>
                 </Card>
 

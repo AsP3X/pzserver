@@ -79,6 +79,9 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         // Map Tiles. The canonical route is /map-tiles (auth only); this alias
         // keeps admin browsers that cached the old URL from 404ing for a day.
         Route::get('map-tiles/{level}/{tile}', MapTileController::class)->name('map.tile')->where('tile', '.*');
+        // World actions (weather). Sensitive: these change the world for everyone.
+        Route::post('world/actions', [Admin\WorldActionController::class, 'store'])->name('world.actions')->middleware('throttle:admin-sensitive');
+
         Route::post('players/map/generate-tiles', [Admin\PlayerMapController::class, 'generateTiles'])->name('players.map.generate-tiles')->middleware('throttle:admin-sensitive');
         Route::post('players/map/stop-tiles', [Admin\PlayerMapController::class, 'stopTiles'])->name('players.map.stop-tiles')->middleware('throttle:admin-sensitive');
 
