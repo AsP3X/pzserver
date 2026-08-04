@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { UptimeHistory, UptimeHistorySkeleton } from '@/components/uptime-history';
 import type { ServerHistory } from '@/components/uptime-history';
+import { WorldEvents } from '@/components/world-events';
 import { usePing } from '@/hooks/use-ping';
 import { useTranslation } from '@/hooks/use-translation';
 import PublicLayout from '@/layouts/public-layout';
@@ -71,8 +72,9 @@ export default function Status({
 
                     {/* Game State */}
                     {server.status !== 'offline' && (
-                        <div className="mb-8">
+                        <div className="mb-8 grid gap-4 lg:grid-cols-2">
                             <GameStateWidget gameState={game_state} />
+                            {game_state?.events && <WorldEvents events={game_state.events} />}
                         </div>
                     )}
 

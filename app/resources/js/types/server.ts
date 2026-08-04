@@ -96,7 +96,27 @@ export type GameState = {
         is_snowing: boolean;
         condition: 'clear' | 'rain' | 'heavy_rain' | 'fog' | 'snow' | 'night';
     } | null;
+    /** Absent on servers running a KnoxRelay older than 1.3. */
+    events?: WorldEvents | null;
     exported_at: string;
+};
+
+export type UtilityState = {
+    status: 'on' | 'off' | 'unknown';
+    days_remaining: number | null;
+    shutoff_day: number | null;
+};
+
+export type WorldEvents = {
+    /** Days since the apocalypse began, counting the sandbox head start. */
+    day: number | null;
+    electricity: UtilityState;
+    water: UtilityState;
+    helicopter?: {
+        day: number;
+        days_away: number;
+        today: boolean;
+    };
 };
 
 export type PlayerStatEntry = {

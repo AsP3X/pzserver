@@ -107,3 +107,38 @@ test('isStale returns true for old data', function () {
 
     expect($reader->isStale(120))->toBeTrue();
 });
+
+it('passes world events through to the dashboard', function () {
+    file_put_contents($this->filePath, json_encode([
+        'time' => ['year' => 1993, 'month' => 7, 'day' => 9, 'hour' => 12, 'minute' => 0,
+            'day_of_year' => 190, 'is_night' => false, 'formatted' => '12:00', 'date' => '1993-07-09'],
+        'season' => 'summer',
+        'events' => [
+            'day' => 12.5,
+            'electricity' => ['status' => 'on', 'days_remaining' => 17.5, 'shutoff_day' => 30],
+            'water' => ['status' => 'off', 'days_remaining' => 0, 'shutoff_day' => 10],
+            'helicopter' => ['day' => 14, 'days_away' => 2, 'today' => false],
+        ],
+        'exported_at' => gmdate('Y-m-d\TH:i:s\Z'),
+    ]));
+
+    $state = (new GameStateReader($this->filePath))->getGameState();
+
+    expect($state['events']['electricity']['status'])->toBe('on')
+        ->and($state['events']['water']['status'])->toBe('off')
+        ->and($state['events']['helicopter']['days_away'])->toBe(2);
+});
+
+it('reads a state export from a mod too old to carry events', function () {
+    file_put_contents($this->filePath, json_encode([
+        'time' => ['year' => 1993, 'month' => 7, 'day' => 9, 'hour' => 12, 'minute' => 0,
+            'day_of_year' => 190, 'is_night' => false, 'formatted' => '12:00', 'date' => '1993-07-09'],
+        'season' => 'summer',
+        'exported_at' => gmdate('Y-m-d\TH:i:s\Z'),
+    ]));
+
+    $state = (new GameStateReader($this->filePath))->getGameState();
+
+    expect($state)->not->toBeNull()
+        ->and($state['events'] ?? null)->toBeNull();
+});

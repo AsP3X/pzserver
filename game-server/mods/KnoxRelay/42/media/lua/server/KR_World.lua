@@ -1,9 +1,10 @@
 --
--- KR_World.lua — in-game clock, season and weather.
+-- KR_World.lua — in-game clock, season, weather and scheduled world events.
 --
 -- Written to Lua/game_state.json so the dashboard can show the server's date,
--- time and sky without needing a player online. Exported once at boot too,
--- because a paused server never reaches the periodic tick.
+-- time, sky and what the world is about to do to everyone, without needing a
+-- player online. Exported once at boot too, because a paused server never
+-- reaches the periodic tick.
 --
 -- Every engine call goes through pcall: the climate manager in particular is
 -- not wired up during early startup, and a nil dereference here would take
@@ -71,6 +72,82 @@ local function skyCondition(rain, fog, snow, night)
     return "clear"
 end
 
+--- The apocalypse's own calendar, in days. Copied from the vanilla weather
+--- channel (ISWeatherChannel.AddPowerNotice): world age plus the head start
+--- the sandbox began with, which is what the shutoff days are measured against.
+local function apocalypseDay()
+    local clock = getGameTime()
+    local sandbox = getSandboxOptions()
+
+    if not clock or not sandbox then
+        return nil
+    end
+
+    local age = ask(function() return clock:getWorldAgeHours() end, nil)
+    local sinceApo = ask(function() return sandbox:getTimeSinceApo() end, nil)
+
+    if not age or not sinceApo then
+        return nil
+    end
+
+    return age / 24 + (sinceApo - 1) * 30
+end
+
+--- Utilities the world is about to lose, and when.
+---
+--- A shutoff day of zero means the sandbox never had that utility running, so
+--- there is nothing to count down to; a day already past reports as cut.
+local function utility(day, shutoffDay)
+    if not shutoffDay or shutoffDay <= 0 then
+        return { status = "off", days_remaining = nil, shutoff_day = nil }
+    end
+
+    if day == nil then
+        return { status = "unknown", days_remaining = nil, shutoff_day = shutoffDay }
+    end
+
+    if day >= shutoffDay then
+        return { status = "off", days_remaining = 0, shutoff_day = shutoffDay }
+    end
+
+    return {
+        status = "on",
+        days_remaining = round(shutoffDay - day, 10),
+        shutoff_day = shutoffDay,
+    }
+end
+
+--- Events players would want warning of: the power and water going out, and
+--- the helicopter that drags every zombie in the county across the map.
+local function events()
+    local clock = getGameTime()
+    local sandbox = getSandboxOptions()
+
+    if not clock or not sandbox then
+        return nil
+    end
+
+    local day = apocalypseDay()
+    local feed = {
+        day = day and round(day, 10) or nil,
+        electricity = utility(day, ask(function() return sandbox:getElecShutModifier() end, nil)),
+        water = utility(day, ask(function() return sandbox:getWaterShutModifier() end, nil)),
+    }
+
+    local nights = ask(function() return clock:getNightsSurvived() end, nil)
+    local firstFlight = ask(function() return clock:getHelicopterDay1() end, nil)
+
+    if nights ~= nil and firstFlight ~= nil and firstFlight > 0 then
+        feed.helicopter = {
+            day = firstFlight,
+            days_away = firstFlight - nights,
+            today = firstFlight == nights,
+        }
+    end
+
+    return feed
+end
+
 --- Write the current world state. Returns true when the file was written.
 function KR_World.export()
     local clock = getGameTime()
@@ -136,6 +213,8 @@ function KR_World.export()
             condition = skyCondition(rain, fog, snow, night),
         }
     end
+
+    state.events = events()
 
     local gotVersion, version = pcall(function() return getCore():getVersion() end)
     if gotVersion and version then

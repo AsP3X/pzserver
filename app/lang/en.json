@@ -1406,5 +1406,17 @@
     "news.description": "Announcements and updates from :server.",
     "news.empty": "No news yet",
     "news.empty_desc": "Announcements from the server team will appear here.",
-    "news.title": "Server News"
+    "news.title": "Server News",
+    "world_events.cut": "Cut off",
+    "world_events.day": "Day :day since the outbreak.",
+    "world_events.days_left": ":days days left",
+    "world_events.description": "What the world is about to do to everyone.",
+    "world_events.electricity": "Electricity",
+    "world_events.helicopter": "Helicopter event",
+    "world_events.helicopter_today": "Today",
+    "world_events.on": "Still running",
+    "world_events.passed": "Passed",
+    "world_events.title": "World Events",
+    "world_events.unknown": "Unknown",
+    "world_events.water": "Running water"
 }

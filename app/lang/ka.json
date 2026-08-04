@@ -1394,5 +1394,17 @@
     "news.description": "განცხადებები და განახლებები :server-იდან.",
     "news.empty": "სიახლეები ჯერ არ არის",
     "news.empty_desc": "სერვერის გუნდის განცხადებები აქ გამოჩნდება.",
-    "news.title": "სერვერის სიახლეები"
+    "news.title": "სერვერის სიახლეები",
+    "world_events.cut": "გათიშულია",
+    "world_events.day": "ეპიდემიიდან :day დღე.",
+    "world_events.days_left": "დარჩა :days დღე",
+    "world_events.description": "რა ელოდება ყველას უახლოეს მომავალში.",
+    "world_events.electricity": "ელექტროენერგია",
+    "world_events.helicopter": "ვერტმფრენის მოვლენა",
+    "world_events.helicopter_today": "დღეს",
+    "world_events.on": "ჯერ მუშაობს",
+    "world_events.passed": "გასულია",
+    "world_events.title": "მსოფლიო მოვლენები",
+    "world_events.unknown": "უცნობია",
+    "world_events.water": "წყალმომარაგება"
 }
