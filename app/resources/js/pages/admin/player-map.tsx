@@ -32,6 +32,23 @@ type SafeZone = {
     y2: number;
 };
 
+type Safehouse = {
+    title: string;
+    owner: string | null;
+    members: string[];
+    x: number;
+    y: number;
+    x2: number;
+    y2: number;
+};
+
+type Faction = {
+    name: string;
+    tag: string | null;
+    owner: string | null;
+    members: string[];
+};
+
 type Props = {
     markers: PlayerMarker[];
     onlineCount: number;
@@ -44,6 +61,8 @@ type Props = {
     tileProgress: TileProgress | null;
     tilesGenerating?: boolean;
     safeZones: SafeZone[];
+    safehouses: Safehouse[];
+    factions: Faction[];
 };
 
 const statusDotColor: Record<PlayerMarker['status'], string> = {
@@ -53,6 +72,9 @@ const statusDotColor: Record<PlayerMarker['status'], string> = {
 };
 
 const ZONE_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+/** One colour for every player claim, distinct from the admin zone palette. */
+const CLAIM_COLOR = '#a855f7';
 
 export default function PlayerMap({
     markers,
@@ -66,6 +88,8 @@ export default function PlayerMap({
     tileProgress,
     tilesGenerating = false,
     safeZones,
+    safehouses,
+    factions,
 }: Props) {
     const { t } = useTranslation();
     const [genLoading, setGenLoading] = useState(false);
@@ -82,6 +106,8 @@ export default function PlayerMap({
             'hasTiles',
             'tileProgress',
             'safeZones',
+            'safehouses',
+            'factions',
             'tileSource',
             'localTilesReady',
             'tilesGenerating',
@@ -143,9 +169,25 @@ export default function PlayerMap({
         setStopLoading(false);
     }
 
+    /**
+     * Safe zones and safehouse claims share the overlay layer. Claims are drawn
+     * in one colour throughout so a wall of player bases cannot be mistaken for
+     * a set of distinct admin zones.
+     */
     const zoneOverlays: ZoneOverlay[] = useMemo(
-        () => safeZones.map((zone, i) => ({ ...zone, color: ZONE_COLORS[i % ZONE_COLORS.length] })),
-        [safeZones],
+        () => [
+            ...safeZones.map((zone, i) => ({ ...zone, color: ZONE_COLORS[i % ZONE_COLORS.length] })),
+            ...safehouses.map((house, i) => ({
+                id: `safehouse-${i}`,
+                name: house.owner ? `${house.title} (${house.owner})` : house.title,
+                x1: house.x,
+                y1: house.y,
+                x2: house.x2,
+                y2: house.y2,
+                color: CLAIM_COLOR,
+            })),
+        ],
+        [safeZones, safehouses],
     );
 
     const [kickTarget, setKickTarget] = useState<string | null>(null);
@@ -354,6 +396,71 @@ export default function PlayerMap({
                         />
                     </CardContent>
                 </Card>
+
+                {(safehouses.length > 0 || factions.length > 0) && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>{t('admin.player_map.claims')}</CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-6 lg:grid-cols-2">
+                            <div>
+                                <p className="mb-2 text-sm font-semibold">
+                                    {t('admin.player_map.safehouses', { count: String(safehouses.length) })}
+                                </p>
+                                {safehouses.length === 0 ? (
+                                    <p className="text-muted-foreground text-sm">
+                                        {t('admin.player_map.no_safehouses')}
+                                    </p>
+                                ) : (
+                                    <div className="divide-y rounded-md border">
+                                        {safehouses.map((house, i) => (
+                                            <div key={`${house.title}-${i}`} className="px-3 py-2">
+                                                <p className="text-sm font-medium">{house.title}</p>
+                                                <p className="text-muted-foreground text-xs">
+                                                    {house.owner ?? t('admin.player_map.no_owner')}
+                                                    {house.members.length > 0 &&
+                                                        ` · ${t('admin.player_map.members', {
+                                                            count: String(house.members.length),
+                                                        })}`}
+                                                    {` · ${house.x}, ${house.y}`}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <p className="mb-2 text-sm font-semibold">
+                                    {t('admin.player_map.factions', { count: String(factions.length) })}
+                                </p>
+                                {factions.length === 0 ? (
+                                    <p className="text-muted-foreground text-sm">
+                                        {t('admin.player_map.no_factions')}
+                                    </p>
+                                ) : (
+                                    <div className="divide-y rounded-md border">
+                                        {factions.map((faction) => (
+                                            <div key={faction.name} className="px-3 py-2">
+                                                <p className="text-sm font-medium">
+                                                    {faction.name}
+                                                    {faction.tag && (
+                                                        <span className="text-muted-foreground"> [{faction.tag}]</span>
+                                                    )}
+                                                </p>
+                                                <p className="text-muted-foreground text-xs">
+                                                    {faction.owner ?? t('admin.player_map.no_owner')}
+                                                    {` · ${t('admin.player_map.members', {
+                                                        count: String(faction.members.length),
+                                                    })}`}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {markers.length > 0 && (
                     <Card>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Services\HoldingsReader;
 use App\Services\MapConfigBuilder;
 use App\Services\MapTileGenerator;
 use App\Services\MapTileProgress;
@@ -29,6 +30,7 @@ class PlayerMapController extends Controller
         private readonly MapTileStore $tileStore,
         private readonly MapTileProgress $tileProgress,
         private readonly MapTileGenerator $tileGenerator,
+        private readonly HoldingsReader $holdingsReader,
     ) {}
 
     public function __invoke(): InertiaResponse
@@ -110,6 +112,7 @@ class PlayerMapController extends Controller
 
         $mapConfig = $this->mapConfigBuilder->build();
         $safeZoneConfig = $this->safeZoneManager->getConfig();
+        $holdings = $this->holdingsReader->read();
         $hasBasemap = $mapConfig['tileUrl'] !== null && $mapConfig['dzi'] !== null;
         $canResume = $this->tileStore->hasLooseTiles() && ! $this->tileGenerator->isRunning();
 
@@ -125,6 +128,8 @@ class PlayerMapController extends Controller
             'tileProgress' => $this->readTileProgress(),
             'tilesGenerating' => $this->tileGenerator->isRunning(),
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
+            'safehouses' => $holdings['safehouses'],
+            'factions' => $holdings['factions'],
         ]);
     }
 

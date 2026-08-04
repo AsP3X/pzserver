@@ -10,6 +10,7 @@
 --   6 ticks      deliveries and money deposits    (~15 real seconds)
 --   12 ticks     player positions                 (~30 real seconds)
 --   24 ticks     world state                      (~1 real minute)
+--   48 ticks     safehouse and faction claims      (~2 real minutes)
 --
 -- Respawn cooldown, safe zones and PvP tracking run every tick; they do their
 -- own internal rate limiting for anything expensive.
@@ -27,6 +28,7 @@ local Cooldown = require("KR_Cooldown")
 local Sanctuary = require("KR_Sanctuary")
 local Feud = require("KR_Feud")
 local Obituary = require("KR_Obituary")
+local Holdings = require("KR_Holdings")
 
 local LOG = "[KnoxRelay] "
 
@@ -36,11 +38,13 @@ local DELIVERY_TICKS = 6
 local DEPOSIT_TICKS = 6
 local POSITION_TICKS = 12
 local WORLD_TICKS = 24
+local HOLDINGS_TICKS = 48
 
 local sinceDelivery = 0
 local sinceDeposit = 0
 local sincePosition = 0
 local sinceWorld = 0
+local sinceHoldings = 0
 
 --- A player joined or spawned.
 --- Unreliable on dedicated servers, so nothing critical hangs off it; death
@@ -90,6 +94,12 @@ local function onEveryOneMinute()
         World.export()
     end
 
+    sinceHoldings = sinceHoldings + 1
+    if sinceHoldings >= HOLDINGS_TICKS then
+        sinceHoldings = 0
+        Holdings.export()
+    end
+
     Cooldown.tick()
     Sanctuary.tick()
 
@@ -121,6 +131,8 @@ local function onServerStarted()
     if World.export() then
         print(LOG .. "Exported initial game state")
     end
+
+    Holdings.export()
 
     local ok, count = pcall(Catalog.export)
     if ok and count and count > 0 then
