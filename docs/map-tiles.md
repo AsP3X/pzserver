@@ -102,6 +102,7 @@ Generation is **not** scheduled and **not** run automatically on container start
 |--------|-------------|
 | `--force` | Delete existing pack and loose tiles, then re-render and pack |
 | `--pack-only` | Pack an existing loose pyramid into `tiles.sqlite` without re-rendering |
+| `--status` | Report what is on disk (per-level tile counts, pack size, progress state) |
 | `--keep-loose` | Keep the multi-file pyramid after packing (not recommended) |
 | `--workers=N` | Render worker processes (default: detected CPU cores) |
 | `--map=` | Specific map name passed to pzmap2dzi (default: vanilla / all) |
@@ -160,15 +161,30 @@ docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --workers=
 
 While generation runs, progress is written to `app/storage/app/map-tiles.progress.json` and shown:
 
-- **CLI** — live status line (`job: done/total`, files on disk, elapsed time) when using `docker exec -it`
+- **CLI** — live status line (`job: done/total`, saved tiles, elapsed time) when using `docker exec -it`
 - **Admin UI** — progress bar on the Player map page (polls every 5s)
 
 Inspect progress manually:
 
 ```bash
-docker exec pz-app cat /var/www/html/storage/app/map-tiles.progress.json
+docker exec pz-app php artisan zomboid:generate-map-tiles --status
+```
+
+```bash
 docker exec pz-app tail -f /var/www/html/storage/logs/pzmap2dzi.log
 ```
+
+**`saved tiles` staying at 0 early in a render is normal.** pzmap2dzi walks tiles in
+Z-order starting at the top-left of the DZI bounding box, which in isometric projection
+is outside the map diamond — void area. Void tiles are written as zero-byte `.empty`
+sentinels, not images, so the image counter stays at 0 until the walk reaches actual map
+data. `--status` shows both columns, so a level with a large `empty` count and zero
+images is proof the renderer is working, not stalled.
+
+The basemap keeps using proxy tiles for the whole render. pzmap2dzi builds the pyramid
+bottom-up, so the zoom levels Leaflet requests are the last ones written; the map only
+switches to local tiles once `tiles.sqlite` exists (step 3), or once a loose pyramid is
+present with no render running.
 
 ### Stop & resume
 

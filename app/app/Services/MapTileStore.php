@@ -19,6 +19,17 @@ class MapTileStore
 {
     public const PACK_FILENAME = 'tiles.sqlite';
 
+    /**
+     * Max directory entries scanned per level when probing for loose tiles.
+     *
+     * Bottom level directories can hold millions of entries; hasLooseTiles()
+     * runs on every dashboard poll, so the probe must stay bounded.
+     */
+    private const LOOSE_PROBE_LIMIT = 20000;
+
+    /** @var list<string> */
+    private const TILE_EXTENSIONS = ['webp', 'jpg', 'jpeg'];
+
     public function __construct(
         private readonly ?string $tilesPath = null,
     ) {}
@@ -73,27 +84,137 @@ class MapTileStore
         }
     }
 
+    /**
+     * Whether the loose pyramid holds at least one tile image.
+     *
+     * pzmap2dzi builds the pyramid bottom-up, so the top levels (0-3) are only
+     * written at the very end of a render. Probing every level lets a partial
+     * render show up in the UI and stay resumable/packable.
+     */
     public function hasLooseTiles(): bool
     {
-        $layer0 = $this->looseLayerPath();
+        return $this->findLooseTile() !== null;
+    }
 
-        foreach (['0', '1', '2', '3'] as $level) {
-            $dir = $layer0.'/'.$level;
-            if (! is_dir($dir)) {
+    /**
+     * Path of the first tile image found in the loose pyramid, or null.
+     *
+     * Levels are probed shallow-first: those directories are small, and a
+     * finished render always has them populated.
+     */
+    private function findLooseTile(): ?string
+    {
+        foreach ($this->looseLevels() as $dir) {
+            $handle = @opendir($dir);
+            if ($handle === false) {
                 continue;
             }
 
-            $files = array_merge(
-                glob($dir.'/*.webp') ?: [],
-                glob($dir.'/*.jpg') ?: [],
-            );
+            $scanned = 0;
+            while (($entry = readdir($handle)) !== false) {
+                if (++$scanned > self::LOOSE_PROBE_LIMIT) {
+                    break;
+                }
 
-            if ($files !== []) {
-                return true;
+                if (in_array(strtolower(pathinfo($entry, PATHINFO_EXTENSION)), self::TILE_EXTENSIONS, true)) {
+                    closedir($handle);
+
+                    return $dir.'/'.$entry;
+                }
+            }
+
+            closedir($handle);
+        }
+
+        return null;
+    }
+
+    /**
+     * Numeric level directories of the loose pyramid, ascending.
+     *
+     * @return array<int, string> level => absolute directory path
+     */
+    public function looseLevels(): array
+    {
+        $layer0 = $this->looseLayerPath();
+        $entries = @scandir($layer0);
+        if ($entries === false) {
+            return [];
+        }
+
+        $levels = [];
+        foreach ($entries as $entry) {
+            if (preg_match('/^\d+$/', $entry) !== 1) {
+                continue;
+            }
+
+            $dir = $layer0.'/'.$entry;
+            if (is_dir($dir)) {
+                $levels[(int) $entry] = $dir;
             }
         }
 
-        return false;
+        ksort($levels);
+
+        return $levels;
+    }
+
+    /**
+     * Per-level file counts for the loose pyramid.
+     *
+     * `empty` counts pzmap2dzi's zero-byte `.empty` sentinels — tiles that
+     * rendered to nothing because that part of the map is void. A level with
+     * only sentinels means the renderer worked there and found no map data.
+     *
+     * Walks whole directories, so this is for on-demand diagnostics only.
+     *
+     * @return array<int, array{images: int, empty: int}>
+     */
+    public function looseLevelStats(): array
+    {
+        $stats = [];
+
+        foreach ($this->looseLevels() as $level => $dir) {
+            $counts = ['images' => 0, 'empty' => 0];
+            $handle = @opendir($dir);
+            if ($handle === false) {
+                $stats[$level] = $counts;
+
+                continue;
+            }
+
+            while (($entry = readdir($handle)) !== false) {
+                $ext = strtolower(pathinfo($entry, PATHINFO_EXTENSION));
+                if (in_array($ext, self::TILE_EXTENSIONS, true)) {
+                    $counts['images']++;
+                } elseif ($ext === 'empty') {
+                    $counts['empty']++;
+                }
+            }
+
+            closedir($handle);
+            $stats[$level] = $counts;
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Number of tiles in the packed database (null when there is no usable pack).
+     */
+    public function packedTileCount(): ?int
+    {
+        if (! $this->hasPackedTiles()) {
+            return null;
+        }
+
+        try {
+            $pdo = $this->openReadOnly($this->packPath());
+
+            return (int) $pdo->query('SELECT COUNT(*) FROM tiles')->fetchColumn();
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

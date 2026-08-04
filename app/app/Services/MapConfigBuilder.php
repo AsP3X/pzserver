@@ -6,6 +6,7 @@ class MapConfigBuilder
 {
     public function __construct(
         private readonly MapTileStore $tileStore = new MapTileStore,
+        private readonly MapTileProgress $progress = new MapTileProgress,
     ) {}
 
     /**
@@ -28,9 +29,8 @@ class MapConfigBuilder
     {
         $tilesPath = $this->tileStore->rootPath();
         $localDzi = $this->tileStore->getDziConfig();
-        $localReady = $this->tileStore->hasTiles();
 
-        if ($localReady && $localDzi !== null) {
+        if ($this->localTilesUsable() && $localDzi !== null) {
             // Relative URL so tiles work behind NPM/Caddy regardless of APP_URL.
             return [
                 'tileUrl' => '/admin/map-tiles/{z}/{x}_{y}',
@@ -86,6 +86,23 @@ class MapConfigBuilder
      */
     public function hasLocalTiles(): bool
     {
-        return $this->tileStore->hasTiles();
+        return $this->localTilesUsable();
+    }
+
+    /**
+     * Whether local tiles are complete enough to serve as the basemap.
+     *
+     * A packed tiles.sqlite always is. A loose pyramid only counts when no
+     * render is in flight: pzmap2dzi builds bottom-up, so mid-render the zoom
+     * levels the map actually requests are still empty and switching away from
+     * the proxy would blank the map for hours.
+     */
+    private function localTilesUsable(): bool
+    {
+        if ($this->tileStore->hasPackedTiles()) {
+            return true;
+        }
+
+        return $this->tileStore->hasLooseTiles() && ! $this->progress->isRunning();
     }
 }

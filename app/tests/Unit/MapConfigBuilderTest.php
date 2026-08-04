@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\MapConfigBuilder;
+use App\Services\MapTileProgress;
 use App\Services\MapTileStore;
 
 beforeEach(function () {
@@ -58,6 +59,32 @@ it('falls back to proxy when no local tiles exist', function () {
         ->and($config['local_ready'])->toBeFalse()
         ->and($config['tileUrl'])->toBe('https://example.test/{z}/{x}_{y}.jpg')
         ->and($this->builder->hasLocalTiles())->toBeFalse();
+});
+
+it('keeps the proxy basemap while a render is still writing loose tiles', function () {
+    $layer = $this->tempDir.'/html/map_data/base/layer0_files/14';
+    mkdir($layer, 0755, true);
+    file_put_contents($layer.'/900_900.jpg', 'PARTIAL');
+    file_put_contents($this->tempDir.'/html/map_data/base/map_info.json', json_encode([
+        'w' => 4096,
+        'h' => 4096,
+        'x0' => 0,
+        'y0' => 0,
+        'sqr' => 1,
+    ]));
+
+    $progress = new MapTileProgress;
+    $progress->start(['stage' => 'render', 'message' => 'Rendering tiles…']);
+
+    try {
+        expect($this->builder->build()['source'])->toBe('proxy');
+
+        $progress->finish(true, 'done');
+
+        expect($this->builder->build()['source'])->toBe('local');
+    } finally {
+        $progress->clear();
+    }
 });
 
 it('prefers packed local tiles over proxy', function () {

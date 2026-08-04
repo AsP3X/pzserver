@@ -15,6 +15,7 @@ class GenerateMapTiles extends Command
         {--resume : Continue an interrupted render (never deletes existing loose tiles)}
         {--clear : Only delete packed/loose tiles and progress state, then exit}
         {--stop : Request stop of a running generation job, then exit}
+        {--status : Report what is on disk (levels, tiles, pack, progress), then exit}
         {--map= : Specific map name to generate (default: all)}
         {--workers= : Number of render workers (default: auto-detect CPU cores)}
         {--keep-loose : Keep multi-file tile pyramid after packing (not recommended)}
@@ -45,6 +46,10 @@ class GenerateMapTiles extends Command
         $this->startedAt = microtime(true);
         $tilesPath = $this->tileStore->rootPath();
         $serverPath = config('zomboid.game_server_path');
+
+        if ($this->option('status')) {
+            return $this->reportStatus();
+        }
 
         if ($this->option('stop')) {
             return $this->requestStopOnly();
@@ -263,6 +268,78 @@ class GenerateMapTiles extends Command
         if (is_file($lock)) {
             @unlink($lock);
         }
+    }
+
+    /**
+     * Print everything needed to tell whether a render is actually producing tiles.
+     */
+    private function reportStatus(): int
+    {
+        $root = $this->tileStore->rootPath();
+        $this->info('Tiles root: '.$root.(is_dir($root) ? '' : '  (MISSING)'));
+        $this->line('Loose pyramid: '.$this->tileStore->looseLayerPath());
+
+        $pack = $this->tileStore->packPath();
+        if (is_file($pack)) {
+            $count = $this->tileStore->packedTileCount();
+            $this->info(sprintf(
+                'Pack: %s (%s, %s tiles)',
+                $pack,
+                $this->humanFilesize((int) filesize($pack)),
+                $count === null ? 'unreadable' : number_format($count),
+            ));
+        } else {
+            $this->warn('Pack: not created yet (step 3 has not run)');
+        }
+
+        $info = $this->tileStore->getMapInfo();
+        $this->line('map_info.json: '.($info === null ? 'missing' : json_encode($info)));
+
+        $stats = $this->tileStore->looseLevelStats();
+        if ($stats === []) {
+            $this->warn('No level directories under the loose pyramid — render has not started writing yet.');
+        } else {
+            $this->newLine();
+            $this->line('Level   images        empty (void map area)');
+            $images = 0;
+            $empty = 0;
+            foreach ($stats as $level => $counts) {
+                $images += $counts['images'];
+                $empty += $counts['empty'];
+                $this->line(sprintf(
+                    '%5d   %-12s  %s',
+                    $level,
+                    number_format($counts['images']),
+                    number_format($counts['empty']),
+                ));
+            }
+            $this->newLine();
+            $this->info(sprintf('Total: %s images, %s empty sentinels', number_format($images), number_format($empty)));
+            if ($images === 0 && $empty > 0) {
+                $this->warn('Only empty sentinels so far — the renderer is working through void map area.');
+                $this->line('pzmap2dzi walks tiles in Z-order from the top-left of the bounding box, which is');
+                $this->line('outside the map diamond in isometric projection. Images appear once it reaches it.');
+            }
+        }
+
+        $progress = $this->progress->read();
+        $this->newLine();
+        if ($progress === null) {
+            $this->line('Progress state: none recorded.');
+        } else {
+            $this->line(sprintf(
+                'Progress: stage=%s step=%d/%d %d%% generating=%s',
+                $progress['stage'],
+                $progress['step'],
+                $progress['steps'],
+                $progress['percent'],
+                $progress['generating'] ? 'yes' : 'no',
+            ));
+            $this->line('  '.$progress['message']);
+            $this->line('  updated_at: '.($progress['updated_at'] ?? 'never'));
+        }
+
+        return self::SUCCESS;
     }
 
     private function requestStopOnly(): int
@@ -583,8 +660,11 @@ class GenerateMapTiles extends Command
         ]);
 
         if ($total > 0) {
+            // "saved" excludes void tiles: pzmap2dzi writes a zero-byte .empty
+            // sentinel instead of an image, so this stays 0 while it works
+            // through map area with nothing in it.
             $this->writeCliStatus(sprintf(
-                '[render] job %s / %s (%d%%)  files on disk ~%s  elapsed %s',
+                '[render] job %s / %s (%d%%)  saved tiles ~%s  elapsed %s',
                 number_format($completed),
                 number_format($total),
                 $percent,
@@ -593,7 +673,7 @@ class GenerateMapTiles extends Command
             ));
         } else {
             $this->writeCliStatus(sprintf(
-                '[render] %s  files ~%s  elapsed %s',
+                '[render] %s  saved tiles ~%s  elapsed %s',
                 $phase ?? 'preparing (scan/plan — 0 tiles until workers start)',
                 number_format($this->lastTilesOnDisk),
                 $this->formatElapsed(microtime(true) - $this->startedAt),

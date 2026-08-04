@@ -63,6 +63,46 @@ it('detects and serves legacy loose tiles', function () {
         ->and($tile['content_type'])->toBe('image/webp');
 });
 
+it('detects loose tiles at deep pyramid levels', function () {
+    // pzmap2dzi builds bottom-up: mid-render only the deep levels hold images
+    writeFakeTile($this->tempDir, 14, 1234, 5678, 'jpg', 'DEEP');
+
+    expect($this->store->hasLooseTiles())->toBeTrue()
+        ->and($this->store->hasTiles())->toBeTrue();
+});
+
+it('does not count empty sentinels as loose tiles', function () {
+    $dir = $this->tempDir.'/html/map_data/base/layer0_files/12';
+    mkdir($dir, 0755, true);
+    file_put_contents($dir.'/1_1.empty', '');
+    file_put_contents($dir.'/1_2.empty', '');
+
+    expect($this->store->hasLooseTiles())->toBeFalse();
+});
+
+it('reports per-level image and sentinel counts', function () {
+    writeFakeTile($this->tempDir, 10, 1, 1, 'jpg', 'A');
+    writeFakeTile($this->tempDir, 10, 1, 2, 'webp', 'B');
+    writeFakeTile($this->tempDir, 11, 4, 4, 'jpg', 'C');
+    file_put_contents($this->tempDir.'/html/map_data/base/layer0_files/11/5_5.empty', '');
+
+    $stats = $this->store->looseLevelStats();
+
+    expect(array_keys($stats))->toBe([10, 11])
+        ->and($stats[10])->toBe(['images' => 2, 'empty' => 0])
+        ->and($stats[11])->toBe(['images' => 1, 'empty' => 1]);
+});
+
+it('counts tiles in the pack', function () {
+    expect($this->store->packedTileCount())->toBeNull();
+
+    writeFakeTile($this->tempDir, 0, 0, 0, 'jpg', 'A');
+    writeFakeTile($this->tempDir, 1, 1, 1, 'webp', 'B');
+    $this->store->packLooseTiles();
+
+    expect($this->store->packedTileCount())->toBe(2);
+});
+
 it('packs loose tiles into a single sqlite file and removes the pyramid', function () {
     writeFakeTile($this->tempDir, 0, 0, 0, 'jpg', 'JPEG0');
     writeFakeTile($this->tempDir, 1, 3, 4, 'webp', 'WEBP1');
