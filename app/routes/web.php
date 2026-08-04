@@ -182,6 +182,9 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         Route::delete('shop/bundles/{bundle}', [Admin\ShopBundleController::class, 'destroy'])->name('shop.bundles.destroy');
 
         // Shop Promotions
+        // Vehicles
+        Route::get('vehicles', [Admin\VehicleController::class, 'index'])->name('vehicles');
+
         // News
         Route::get('news', [Admin\NewsController::class, 'index'])->name('news');
         Route::post('news', [Admin\NewsController::class, 'store'])->name('news.store');

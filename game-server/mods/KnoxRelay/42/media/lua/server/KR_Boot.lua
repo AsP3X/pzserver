@@ -30,6 +30,7 @@ local Feud = require("KR_Feud")
 local Obituary = require("KR_Obituary")
 local Holdings = require("KR_Holdings")
 local Conductor = require("KR_Conductor")
+local Garage = require("KR_Garage")
 
 local LOG = "[KnoxRelay] "
 
@@ -111,11 +112,17 @@ local function onEveryOneMinute()
     Obituary.flush()
 end
 
---- Progression is the heaviest export, so it gets the slow hook.
+--- Progression and the vehicle fleet are the heaviest exports, so they share
+--- the slow hook.
 local function onEveryTenMinutes()
     local exported = Progress.export()
     if exported > 0 then
         print(LOG .. "Exported stats for " .. exported .. " players")
+    end
+
+    local vehicles = Garage.export()
+    if vehicles > 0 then
+        print(LOG .. "Exported " .. vehicles .. " vehicles")
     end
 end
 
