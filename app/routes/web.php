@@ -2,7 +2,10 @@
 
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\MapTileController;
+use App\Http\Controllers\ObituaryController;
 use App\Http\Controllers\PlayerInventoryController;
+use App\Http\Controllers\PlayerMapController;
 use App\Http\Controllers\PlayerProfileController;
 use App\Http\Controllers\PlayerVaultController;
 use App\Http\Controllers\PortalController;
@@ -16,6 +19,7 @@ Route::get('/', WelcomeController::class)->name('home');
 
 Route::get('status', StatusController::class)->name('status');
 Route::get('rankings', RankingsController::class)->name('rankings');
+Route::get('obituary', ObituaryController::class)->name('obituary');
 Route::get('rankings/{username}', PlayerProfileController::class)->name('rankings.player');
 
 // Public shop browse (no auth required)
@@ -28,6 +32,10 @@ Route::prefix('shop')->name('shop.')->group(function () {
 Route::middleware(['auth'])->group(function () {
     Route::get('portal', PortalController::class)->name('portal');
     Route::get('portal/inventory', PlayerInventoryController::class)->name('portal.inventory');
+    Route::get('portal/map', PlayerMapController::class)->name('portal.map');
+
+    // Basemap tiles. Every signed-in user needs these, not just admins.
+    Route::get('map-tiles/{level}/{tile}', MapTileController::class)->name('map.tile')->where('tile', '.*');
 
     // Item vault
     Route::get('portal/vault', [PlayerVaultController::class, 'show'])->name('portal.vault');
@@ -63,8 +71,9 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         Route::post('players/{username}/inventory/remove', [Admin\InventoryController::class, 'removeItem'])->name('players.inventory.remove');
         Route::get('players/{username}/inventory/status', [Admin\InventoryController::class, 'deliveryStatus'])->name('players.inventory.status');
 
-        // Map Tiles
-        Route::get('map-tiles/{level}/{tile}', [Admin\PlayerMapController::class, 'tile'])->name('map.tile')->where('tile', '.*');
+        // Map Tiles. The canonical route is /map-tiles (auth only); this alias
+        // keeps admin browsers that cached the old URL from 404ing for a day.
+        Route::get('map-tiles/{level}/{tile}', MapTileController::class)->name('map.tile')->where('tile', '.*');
         Route::post('players/map/generate-tiles', [Admin\PlayerMapController::class, 'generateTiles'])->name('players.map.generate-tiles')->middleware('throttle:admin-sensitive');
         Route::post('players/map/stop-tiles', [Admin\PlayerMapController::class, 'stopTiles'])->name('players.map.stop-tiles')->middleware('throttle:admin-sensitive');
 

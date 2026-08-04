@@ -32,8 +32,9 @@ class MapConfigBuilder
 
         if ($this->localTilesUsable() && $localDzi !== null) {
             // Relative URL so tiles work behind NPM/Caddy regardless of APP_URL.
+            // Not the /admin/ route: players see maps too.
             return [
-                'tileUrl' => '/admin/map-tiles/{z}/{x}_{y}',
+                'tileUrl' => '/map-tiles/{z}/{x}_{y}',
                 'tileSize' => (int) config('zomboid.map.tile_size'),
                 'minZoom' => (int) config('zomboid.map.min_zoom'),
                 'maxZoom' => (int) config('zomboid.map.max_zoom'),

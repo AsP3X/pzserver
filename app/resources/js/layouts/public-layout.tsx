@@ -46,6 +46,9 @@ function NavLinks({ className, onClick }: { className?: string; onClick?: () => 
             <NavLink href="/rankings" onClick={onClick}>
                 {t('nav.rankings')}
             </NavLink>
+            <NavLink href="/obituary" onClick={onClick}>
+                {t('nav.obituary')}
+            </NavLink>
             <NavLink href="/shop" onClick={onClick}>
                 {t('nav.shop')}
             </NavLink>

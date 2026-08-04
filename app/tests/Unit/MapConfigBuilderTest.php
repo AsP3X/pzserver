@@ -107,7 +107,7 @@ it('prefers packed local tiles over proxy', function () {
 
     expect($config['source'])->toBe('local')
         ->and($config['local_ready'])->toBeTrue()
-        ->and($config['tileUrl'])->toBe('/admin/map-tiles/{z}/{x}_{y}')
+        ->and($config['tileUrl'])->toBe('/map-tiles/{z}/{x}_{y}')
         ->and($config['dzi']['width'])->toBe(4096)
         ->and($this->builder->hasLocalTiles())->toBeTrue();
 });

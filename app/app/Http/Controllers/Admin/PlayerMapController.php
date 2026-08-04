@@ -14,7 +14,6 @@ use App\Services\SafeZoneManager;
 use App\Services\ServerStatusResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
 
@@ -152,27 +151,6 @@ class PlayerMapController extends Controller
         $result = $this->tileGenerator->requestStop();
 
         return response()->json($result, $result['ok'] ? 200 : 409);
-    }
-
-    /**
-     * Serve a map tile from the packed SQLite store (or legacy loose files).
-     */
-    public function tile(string $level, string $tile): Response
-    {
-        $result = $this->tileStore->getTile($level, $tile);
-
-        if ($result === null) {
-            // Return transparent 1x1 PNG for missing tiles (avoids broken-image placeholders in Leaflet)
-            return response(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), 200, [
-                'Content-Type' => 'image/png',
-                'Cache-Control' => 'public, max-age=86400',
-            ]);
-        }
-
-        return response($result['data'], 200, [
-            'Cache-Control' => 'public, max-age=86400',
-            'Content-Type' => $result['content_type'],
-        ]);
     }
 
     /**

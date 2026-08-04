@@ -13,6 +13,7 @@
 
 local Bridge = require("KR_Bridge")
 local Roster = require("KR_Roster")
+local Obituary = require("KR_Obituary")
 
 KR_Feud = {}
 
@@ -94,7 +95,12 @@ local function detect()
             counted[username] = true
 
             local wound = lastWound[username]
-            if wound and (now - wound.timestamp) <= ATTRIBUTION_WINDOW then
+            local attributed = wound and (now - wound.timestamp) <= ATTRIBUTION_WINDOW
+
+            --- Every corpse gets an obituary; only some of them get a killer.
+            Obituary.record(player, attributed and wound or nil)
+
+            if attributed then
                 queued[#queued + 1] = {
                     killer = wound.attacker,
                     victim = username,

@@ -28,6 +28,11 @@ Schedule::command('zomboid:process-respawn-kicks')->everyFiveMinutes();
 
 Schedule::command('zomboid:parse-game-events')->everyFiveMinutes();
 
+// Deliberately after the log parser: the log records that someone died, this
+// records why. Whichever lands first, the other enriches it instead of
+// inserting a second row for the same death.
+Schedule::command('zomboid:import-deaths')->everyFiveMinutes();
+
 Schedule::command('zomboid:process-shop-deliveries')->everyMinute();
 
 Schedule::command('zomboid:process-money-deposits')->everyMinute();

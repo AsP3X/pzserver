@@ -26,6 +26,7 @@ local Catalog = require("KR_Catalog")
 local Cooldown = require("KR_Cooldown")
 local Sanctuary = require("KR_Sanctuary")
 local Feud = require("KR_Feud")
+local Obituary = require("KR_Obituary")
 
 local LOG = "[KnoxRelay] "
 
@@ -91,7 +92,10 @@ local function onEveryOneMinute()
 
     Cooldown.tick()
     Sanctuary.tick()
+
+    --- Feud's scan is what spots the corpses, so obituaries flush after it.
     Feud.tick()
+    Obituary.flush()
 end
 
 --- Progression is the heaviest export, so it gets the slow hook.
@@ -108,6 +112,7 @@ local function onServerStarted()
     Cooldown.init()
     Sanctuary.init()
     Feud.init()
+    Obituary.init()
     Vault.init()
 
     -- Prove writes reach the bind mount before anything depends on them.

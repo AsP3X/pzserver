@@ -319,6 +319,7 @@ Admin  ──TCP 8000 / 443────► app (panel) ──RCON──► game-
 - Upstream feature list & screenshots: original [README history](https://github.com/trongio/Zomboid_Server_Manager_Docker)
 - Install deep-dives: `docs/installation-windows.md`, `docs/installation-linux.md`
 - Map tiles (local generation + SQLite pack): `docs/map-tiles.md`
+- Publishing Knox Relay mod updates to the Steam Workshop: `docs/workshop-updates.md`
 - Command reference: `docs/commands.md`
 - Troubleshooting: `docs/troubleshooting.md`
 

@@ -2,11 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
-use App\Models\WhitelistEntry;
 use App\Services\InventoryReader;
 use App\Services\ItemIconResolver;
 use App\Services\OnlinePlayersReader;
+use App\Services\PzIdentityResolver;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -23,12 +22,12 @@ class PlayerInventoryController extends Controller
         private readonly InventoryReader $inventoryReader,
         private readonly ItemIconResolver $iconResolver,
         private readonly OnlinePlayersReader $onlinePlayersReader,
+        private readonly PzIdentityResolver $identity,
     ) {}
 
     public function __invoke(Request $request): Response
     {
-        $user = $request->user();
-        $pzUsername = $this->resolvePzUsername($user);
+        $pzUsername = $this->identity->resolve($request->user());
 
         if ($pzUsername === null) {
             return Inertia::render('portal/inventory', [
@@ -56,31 +55,6 @@ class PlayerInventoryController extends Controller
             'isOnline' => in_array($pzUsername, $this->onlinePlayersReader->getOnlineUsernames(), true),
             'hasPzAccount' => true,
         ]);
-    }
-
-    /**
-     * Resolve the caller's PZ character name.
-     *
-     * Prefers the linked whitelist entry, falling back to the account username
-     * for players registered before the link was established.
-     */
-    private function resolvePzUsername(User $user): ?string
-    {
-        $entry = WhitelistEntry::query()
-            ->where('user_id', $user->id)
-            ->where('active', true)
-            ->first();
-
-        if ($entry !== null) {
-            return $entry->pz_username;
-        }
-
-        $selfEntry = WhitelistEntry::query()
-            ->where('pz_username', $user->username)
-            ->where('active', true)
-            ->first();
-
-        return $selfEntry?->pz_username;
     }
 
     /**

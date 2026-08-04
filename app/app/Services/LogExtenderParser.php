@@ -3,10 +3,15 @@
 namespace App\Services;
 
 use App\Models\GameEvent;
+use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Support\Facades\Cache;
 
 class LogExtenderParser
 {
+    /** How far apart the mod's clock and the log's may be for one death. */
+    private const DEATH_MATCH_WINDOW_SECONDS = 120;
+
     private string $logsDir;
 
     public function __construct(?string $logsDir = null)
@@ -81,6 +86,13 @@ class LogExtenderParser
             // Death: Log Extender "Name" died at X,Y,Z  or  vanilla: user Name died at (X,Y,Z)
             if (preg_match('/(?:"([^"]+)"|user\s+(.+?))\s+died(?:\s+at\s+\(?(\d+),(\d+),\d+\)?)?/', $rest, $matches)) {
                 $player = $matches[1] !== '' ? $matches[1] : $matches[2];
+
+                // The mod may already have recorded this death, with the cause
+                // attached. Two rows for one death would double the feed.
+                if ($this->alreadyRecorded($player, $timestamp)) {
+                    continue;
+                }
+
                 GameEvent::query()->create([
                     'event_type' => 'death',
                     'player' => $player,
@@ -311,6 +323,27 @@ class LogExtenderParser
     }
 
     private int $lastReadPosition = 0;
+
+    /**
+     * Has the Lua mod already logged this death, cause and all?
+     *
+     * The mod and the log both see every death, and their clocks are minutes
+     * apart at worst, so a match within the window is the same death.
+     */
+    private function alreadyRecorded(string $player, DateTimeInterface $timestamp): bool
+    {
+        $at = Carbon::instance($timestamp);
+
+        return GameEvent::query()
+            ->where('event_type', 'death')
+            ->where('player', $player)
+            ->where('details->source', 'mod')
+            ->whereBetween('game_time', [
+                $at->copy()->subSeconds(self::DEATH_MATCH_WINDOW_SECONDS),
+                $at->copy()->addSeconds(self::DEATH_MATCH_WINDOW_SECONDS),
+            ])
+            ->exists();
+    }
 
     /**
      * Get the stored offset for a file.
