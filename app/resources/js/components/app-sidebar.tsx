@@ -12,6 +12,7 @@ import {
     Gamepad2,
     LayoutGrid,
     MapPin,
+    Newspaper,
     Package,
     Palette,
     ScrollText,
@@ -122,6 +123,7 @@ export function AppSidebar() {
     const communityGroup: NavGroup = {
         label: t('nav.group.community'),
         items: [
+            { title: t('nav.news'), href: '/admin/news', icon: Newspaper },
             { title: t('nav.discord'), href: '/admin/discord', icon: Bell },
             { title: t('nav.audit_log'), href: '/admin/audit', icon: ScrollText },
             { title: t('nav.site_settings'), href: '/admin/site-settings', icon: Palette },

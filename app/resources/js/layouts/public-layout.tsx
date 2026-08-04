@@ -40,6 +40,9 @@ function NavLinks({ className, onClick }: { className?: string; onClick?: () => 
 
     return (
         <nav className={className}>
+            <NavLink href="/news" onClick={onClick}>
+                {t('nav.news')}
+            </NavLink>
             <NavLink href="/status" onClick={onClick}>
                 {t('nav.server_status')}
             </NavLink>

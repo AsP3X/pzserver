@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapTileController;
+use App\Http\Controllers\NewsController;
 use App\Http\Controllers\PlayerCharacterController;
 use App\Http\Controllers\ObituaryController;
 use App\Http\Controllers\PlayerInventoryController;
@@ -21,6 +22,8 @@ Route::get('/', WelcomeController::class)->name('home');
 Route::get('status', StatusController::class)->name('status');
 Route::get('rankings', RankingsController::class)->name('rankings');
 Route::get('obituary', ObituaryController::class)->name('obituary');
+Route::get('news', [NewsController::class, 'index'])->name('news');
+Route::get('news/{slug}', [NewsController::class, 'show'])->name('news.show');
 Route::get('rankings/{username}', PlayerProfileController::class)->name('rankings.player');
 
 // Public shop browse (no auth required)
@@ -176,6 +179,12 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         Route::delete('shop/bundles/{bundle}', [Admin\ShopBundleController::class, 'destroy'])->name('shop.bundles.destroy');
 
         // Shop Promotions
+        // News
+        Route::get('news', [Admin\NewsController::class, 'index'])->name('news');
+        Route::post('news', [Admin\NewsController::class, 'store'])->name('news.store');
+        Route::patch('news/{newsPost}', [Admin\NewsController::class, 'update'])->name('news.update');
+        Route::delete('news/{newsPost}', [Admin\NewsController::class, 'destroy'])->name('news.destroy');
+
         Route::get('shop/promotions', [Admin\ShopPromotionController::class, 'index'])->name('shop.promotions');
         Route::post('shop/promotions', [Admin\ShopPromotionController::class, 'store'])->name('shop.promotions.store');
         Route::patch('shop/promotions/{promotion}', [Admin\ShopPromotionController::class, 'update'])->name('shop.promotions.update');
