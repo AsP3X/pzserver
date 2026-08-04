@@ -32,7 +32,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import AppLayout from '@/layouts/app-layout';
 import { formatRelativeTime } from '@/lib/dates';
 import { fetchAction } from '@/lib/fetch-action';
-import { stackItems } from '@/lib/inventory';
+import { groupItemsByContainer, stackItems } from '@/lib/inventory';
 import type { BreadcrumbItem } from '@/types';
 import type {
     DeliveryEntry,
@@ -74,6 +74,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
 
     const items = inventory?.items ?? [];
     const stackedItems = useMemo(() => stackItems(items), [items]);
+    const containerGroups = useMemo(() => groupItemsByContainer(items), [items]);
 
     const filteredCatalog = useMemo(() => {
         if (!giveSearch) return catalog.slice(0, 50);
@@ -186,6 +187,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
 
                         <InventoryTable
                             items={stackedItems}
+                            groups={containerGroups}
                             rowActions={(item) => (
                                 <Button
                                     variant="ghost"

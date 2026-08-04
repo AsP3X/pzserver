@@ -9,7 +9,7 @@ import { useTranslation } from '@/hooks/use-translation';
 import AppLayout from '@/layouts/app-layout';
 import { formatRelativeTime } from '@/lib/dates';
 import { fetchAction } from '@/lib/fetch-action';
-import { stackItems } from '@/lib/inventory';
+import { groupItemsByContainer, stackItems } from '@/lib/inventory';
 import type { BreadcrumbItem } from '@/types';
 import type { InventorySnapshot, StackedItem } from '@/types/server';
 
@@ -62,6 +62,10 @@ export default function PortalInventory({ username, inventory, isOnline, hasPzAc
     ];
 
     const stackedItems = useMemo(() => stackItems(inventory?.items ?? []), [inventory?.items]);
+    const containerGroups = useMemo(
+        () => groupItemsByContainer(inventory?.items ?? []),
+        [inventory?.items],
+    );
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -116,6 +120,7 @@ export default function PortalInventory({ username, inventory, isOnline, hasPzAc
 
                         <InventoryTable
                             items={stackedItems}
+                            groups={containerGroups}
                             rowActions={(item) => (
                                 <Button
                                     variant="outline"

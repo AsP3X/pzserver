@@ -332,6 +332,16 @@ export type StackedItem = {
     containers: string[];
 };
 
+/**
+ * Every stacked item held by one container, with `depth` describing how deep
+ * that container sits in the player's rig (0 = pockets or a worn bag).
+ */
+export type ContainerGroup = {
+    container: string;
+    depth: number;
+    items: StackedItem[];
+};
+
 export type VaultItemRow = {
     id: string;
     full_type: string;
