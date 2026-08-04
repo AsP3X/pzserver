@@ -1,11 +1,15 @@
 type Props = {
-    condition: number | null;
+    /** 0..1 wear fraction, or null/undefined for items that never wear out. */
+    condition: number | null | undefined;
 };
 
 export function ConditionBar({ condition }: Props) {
-    if (condition === null) return null;
+    /** Food, ammo and the like never wear out — say so rather than leave a gap. */
+    if (condition === null || condition === undefined || Number.isNaN(condition)) {
+        return <span className="text-muted-foreground text-xs">&mdash;</span>;
+    }
 
-    const percent = Math.round(condition * 100);
+    const percent = Math.max(0, Math.min(100, Math.round(condition * 100)));
     let colorClass = 'bg-green-500';
     if (percent < 30) colorClass = 'bg-red-500';
     else if (percent < 60) colorClass = 'bg-yellow-500';

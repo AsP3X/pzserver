@@ -19,7 +19,7 @@ class InventoryReader
     /**
      * Get a player's inventory from their JSON snapshot.
      *
-     * @return array{username: string, timestamp: string, items: array<int, array{full_type: string, name: string, category: string, count: int, condition: float, equipped: bool, container: string}>, weight: float, max_weight: float}|null
+     * @return array{username: string, timestamp: string, items: array<int, array{full_type: string, name: string, category: string, count: int, condition: float|null, equipped: bool, container: string}>, weight: float, max_weight: float}|null
      */
     public function getPlayerInventory(string $username): ?array
     {
@@ -44,10 +44,31 @@ class InventoryReader
                 continue;
             }
 
+            if (isset($data['items']) && is_array($data['items'])) {
+                $data['items'] = array_map($this->normalizeItem(...), $data['items']);
+            }
+
             return $data;
         }
 
         return null;
+    }
+
+    /**
+     * Items with no durability concept are written without a condition at all.
+     * Spell that as an explicit null so the dashboard can tell "no durability"
+     * apart from a pristine 100%.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    private function normalizeItem(array $item): array
+    {
+        $condition = $item['condition'] ?? null;
+
+        $item['condition'] = is_numeric($condition) ? (float) $condition : null;
+
+        return $item;
     }
 
     /**

@@ -209,8 +209,8 @@ local function actionGiveWithCondition(player, itemType, count, fraction)
             return false, "failed to add item " .. itemType .. " (attempt " .. attempt .. "/" .. count .. ")", nil
         end
 
-        if item.setCondition and item.getMaxCondition then
-            local ceiling = item:getMaxCondition()
+        if item.setCondition and item.getConditionMax then
+            local ceiling = item:getConditionMax()
             if ceiling and ceiling > 0 then
                 item:setCondition(math.max(1, math.floor(fraction * ceiling)))
             end

@@ -185,17 +185,47 @@ function KR_Stash.count(player, itemType)
     return total
 end
 
---- Wear/condition as a 0..1 fraction rounded to two decimals. Items with no
---- condition concept report 1.0.
-function KR_Stash.wear(item)
-    if item.getCondition and item.getMaxCondition then
-        local ceiling = item:getMaxCondition()
-        if ceiling > 0 then
-            return math.floor((item:getCondition() / ceiling) * 100) / 100
+--- The classes the game itself draws a condition bar for. Every other item
+--- keeps the InventoryItem default of 10/10 for life, so reporting a fraction
+--- for them would pin a meaningless 100% next to every can of beans.
+local WEARS_OUT = { "HandWeapon", "Clothing", "InventoryContainer" }
+
+--- Does this item track durability?
+local function tracksCondition(item)
+    for _, class in ipairs(WEARS_OUT) do
+        if instanceof(item, class) then
+            return true
         end
     end
 
-    return 1.0
+    return false
+end
+
+--- Wear as a 0..1 fraction rounded to two decimals, or nil when the item has
+--- no durability worth reporting.
+---
+--- The ceiling is getConditionMax(); InventoryItem has no getMaxCondition(),
+--- and asking for one used to fail the guard on every single item, which made
+--- the dashboard report the whole world as pristine.
+function KR_Stash.wear(item)
+    if not item or not item.getCondition or not item.getConditionMax then
+        return nil
+    end
+
+    local ceiling = item:getConditionMax()
+    if not ceiling or ceiling <= 0 then
+        return nil
+    end
+
+    local current = item:getCondition() or 0
+
+    --- Anything already damaged is reported whatever its class, so a worn item
+    --- never hides behind an unfamiliar type.
+    if current >= ceiling and not tracksCondition(item) then
+        return nil
+    end
+
+    return math.floor((current / ceiling) * 100) / 100
 end
 
 --- Drop an item out of the player's hands or clothing slots before it is

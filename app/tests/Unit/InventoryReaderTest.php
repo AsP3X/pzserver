@@ -91,3 +91,46 @@ it('skips corrupt files in getAllInventories', function () {
     expect($inventories)->toHaveCount(1)
         ->and($inventories)->toHaveKey('TestPlayer');
 });
+
+it('reports an absent condition as null rather than dropping the key', function () {
+    file_put_contents(
+        $this->tempDir.'/inventory/NoWear.json',
+        json_encode([
+            'username' => 'NoWear',
+            'timestamp' => '2026-01-15T14:30:00',
+            'items' => [
+                ['full_type' => 'Base.TinnedBeans', 'name' => 'Tinned Beans', 'category' => 'Food', 'count' => 1, 'equipped' => false, 'container' => 'inventory'],
+                ['full_type' => 'Base.Axe', 'name' => 'Axe', 'category' => 'Weapon', 'count' => 1, 'condition' => 0.6, 'equipped' => false, 'container' => 'inventory'],
+            ],
+            'weight' => 3.0,
+            'max_weight' => 15.0,
+        ])
+    );
+
+    $items = $this->reader->getPlayerInventory('NoWear')['items'];
+
+    expect($items[0])->toHaveKey('condition')
+        ->and($items[0]['condition'])->toBeNull()
+        ->and($items[1]['condition'])->toBe(0.6);
+});
+
+it('coerces a non-numeric condition to null and an integer one to a float', function () {
+    file_put_contents(
+        $this->tempDir.'/inventory/OddWear.json',
+        json_encode([
+            'username' => 'OddWear',
+            'timestamp' => '2026-01-15T14:30:00',
+            'items' => [
+                ['full_type' => 'Base.Axe', 'name' => 'Axe', 'category' => 'Weapon', 'count' => 1, 'condition' => null, 'equipped' => false, 'container' => 'inventory'],
+                ['full_type' => 'Base.Bag', 'name' => 'Bag', 'category' => 'Bag', 'count' => 1, 'condition' => 1, 'equipped' => false, 'container' => 'inventory'],
+            ],
+            'weight' => 3.0,
+            'max_weight' => 15.0,
+        ])
+    );
+
+    $items = $this->reader->getPlayerInventory('OddWear')['items'];
+
+    expect($items[0]['condition'])->toBeNull()
+        ->and($items[1]['condition'])->toBe(1.0);
+});
