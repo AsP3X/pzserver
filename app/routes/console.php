@@ -22,6 +22,10 @@ Schedule::command('zomboid:auto-restart-check')->everyMinute();
 
 Schedule::command('zomboid:send-broadcasts')->everyMinute();
 
+// Uptime history. Five minutes is fine enough for a trust signal and keeps the
+// samples table to roughly 105k rows a year.
+Schedule::command('zomboid:sample-status')->everyFiveMinutes();
+
 Schedule::command('zomboid:import-pvp-violations')->everyFiveMinutes();
 
 Schedule::command('zomboid:import-pvp-kills')->everyFiveMinutes();

@@ -1,8 +1,10 @@
-import { Head, usePoll } from '@inertiajs/react';
+import { Deferred, Head, usePoll } from '@inertiajs/react';
 import { Circle, Clock, Map, Package, Skull, Users } from 'lucide-react';
 import { GameStateWidget } from '@/components/game-state-widget';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { UptimeHistory, UptimeHistorySkeleton } from '@/components/uptime-history';
+import type { ServerHistory } from '@/components/uptime-history';
 import { usePing } from '@/hooks/use-ping';
 import { useTranslation } from '@/hooks/use-translation';
 import PublicLayout from '@/layouts/public-layout';
@@ -23,7 +25,8 @@ export default function Status({
     mods,
     server_name,
     kill_feed = [],
-}: StatusPageData & { kill_feed?: KillFeedEvent[] }) {
+    history,
+}: StatusPageData & { kill_feed?: KillFeedEvent[]; history?: ServerHistory }) {
     usePoll(5000, { only: ['server', 'game_state'] });
     const { t } = useTranslation();
     const ping = usePing('/ping', 15000);
@@ -236,6 +239,12 @@ export default function Status({
                             )}
                         </CardContent>
                     </Card>
+
+                    <div className="mt-6">
+                        <Deferred data="history" fallback={<UptimeHistorySkeleton />}>
+                            {history ? <UptimeHistory history={history} /> : <UptimeHistorySkeleton />}
+                        </Deferred>
+                    </div>
                 </main>
             </PublicLayout>
         </>

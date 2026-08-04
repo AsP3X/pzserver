@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\GameEvent;
 use App\Services\GameStateReader;
 use App\Services\ModManager;
+use App\Services\ServerHistoryService;
 use App\Services\ServerStatusResolver;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -15,6 +16,7 @@ class StatusController extends Controller
         private readonly ServerStatusResolver $statusResolver,
         private readonly ModManager $modManager,
         private readonly GameStateReader $gameStateReader,
+        private readonly ServerHistoryService $history,
     ) {}
 
     public function __invoke(): Response
@@ -79,6 +81,8 @@ class StatusController extends Controller
             'mods' => $mods,
             'server_name' => config('zomboid.server_name', 'ZomboidServer'),
             'kill_feed' => $killFeed,
+            /** Deferred: the history queries are irrelevant to "is it up right now". */
+            'history' => Inertia::defer(fn () => $this->history->summary()),
         ]);
     }
 }
