@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\StoreNewsPostRequest;
 use App\Http\Requests\Admin\UpdateNewsPostRequest;
 use App\Jobs\BroadcastMessage;
 use App\Models\NewsPost;
+use App\Models\ScheduledBroadcast;
 use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,8 +42,23 @@ class NewsController extends Controller
                 'created_at' => $post->created_at?->toIso8601String(),
             ]);
 
+        $broadcasts = ScheduledBroadcast::query()
+            ->orderBy('id')
+            ->get()
+            ->map(fn (ScheduledBroadcast $broadcast) => [
+                'id' => $broadcast->id,
+                'message' => $broadcast->message,
+                'cadence' => $broadcast->cadence->value,
+                'interval_minutes' => $broadcast->interval_minutes,
+                'time' => $broadcast->time,
+                'timezone' => $broadcast->timezone,
+                'enabled' => $broadcast->enabled,
+                'last_sent_at' => $broadcast->last_sent_at?->toIso8601String(),
+            ]);
+
         return Inertia::render('admin/news', [
             'posts' => $posts,
+            'broadcasts' => $broadcasts,
         ]);
     }
 

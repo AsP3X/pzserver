@@ -185,6 +185,12 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         Route::patch('news/{newsPost}', [Admin\NewsController::class, 'update'])->name('news.update');
         Route::delete('news/{newsPost}', [Admin\NewsController::class, 'destroy'])->name('news.destroy');
 
+        // Recurring in-game broadcasts, managed alongside the news posts
+        Route::post('broadcasts', [Admin\BroadcastController::class, 'store'])->name('broadcasts.store');
+        Route::post('broadcasts/{broadcast}/toggle', [Admin\BroadcastController::class, 'toggle'])->name('broadcasts.toggle');
+        Route::post('broadcasts/{broadcast}/send', [Admin\BroadcastController::class, 'sendNow'])->name('broadcasts.send')->middleware('throttle:admin-sensitive');
+        Route::delete('broadcasts/{broadcast}', [Admin\BroadcastController::class, 'destroy'])->name('broadcasts.destroy');
+
         Route::get('shop/promotions', [Admin\ShopPromotionController::class, 'index'])->name('shop.promotions');
         Route::post('shop/promotions', [Admin\ShopPromotionController::class, 'store'])->name('shop.promotions.store');
         Route::patch('shop/promotions/{promotion}', [Admin\ShopPromotionController::class, 'update'])->name('shop.promotions.update');

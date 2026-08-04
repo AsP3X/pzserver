@@ -36,8 +36,20 @@ type Post = {
     created_at: string | null;
 };
 
+type Broadcast = {
+    id: number;
+    message: string;
+    cadence: 'interval' | 'daily';
+    interval_minutes: number | null;
+    time: string | null;
+    timezone: string;
+    enabled: boolean;
+    last_sent_at: string | null;
+};
+
 type Props = {
     posts: Post[];
+    broadcasts: Broadcast[];
 };
 
 type Draft = {
@@ -58,13 +70,29 @@ const emptyDraft: Draft = {
     broadcast: false,
 };
 
-export default function AdminNews({ posts }: Props) {
+type BroadcastDraft = {
+    message: string;
+    cadence: 'interval' | 'daily';
+    interval_minutes: number;
+    time: string;
+};
+
+const emptyBroadcast: BroadcastDraft = {
+    message: '',
+    cadence: 'interval',
+    interval_minutes: 60,
+    time: '18:00',
+};
+
+export default function AdminNews({ posts, broadcasts }: Props) {
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState<Post | null>(null);
     const [deleting, setDeleting] = useState<Post | null>(null);
     const [draft, setDraft] = useState<Draft>(emptyDraft);
     const [saving, setSaving] = useState(false);
+    const [broadcastDraft, setBroadcastDraft] = useState<BroadcastDraft>(emptyBroadcast);
+    const [addingBroadcast, setAddingBroadcast] = useState(false);
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: t('nav.dashboard'), href: '/dashboard' },
@@ -121,6 +149,37 @@ export default function AdminNews({ posts }: Props) {
         await fetchAction(`/admin/news/${deleting.id}`, { method: 'DELETE' });
         setDeleting(null);
         router.reload({ only: ['posts'] });
+    }
+
+    async function addBroadcast() {
+        setAddingBroadcast(true);
+
+        const result = await fetchAction('/admin/broadcasts', {
+            data: {
+                message: broadcastDraft.message,
+                cadence: broadcastDraft.cadence,
+                interval_minutes:
+                    broadcastDraft.cadence === 'interval' ? broadcastDraft.interval_minutes : null,
+                time: broadcastDraft.cadence === 'daily' ? broadcastDraft.time : null,
+            },
+        });
+
+        setAddingBroadcast(false);
+
+        if (result) {
+            setBroadcastDraft(emptyBroadcast);
+            router.reload({ only: ['broadcasts'] });
+        }
+    }
+
+    async function broadcastAction(broadcast: Broadcast, action: 'toggle' | 'send' | 'delete') {
+        if (action === 'delete') {
+            await fetchAction(`/admin/broadcasts/${broadcast.id}`, { method: 'DELETE' });
+        } else {
+            await fetchAction(`/admin/broadcasts/${broadcast.id}/${action}`);
+        }
+
+        router.reload({ only: ['broadcasts'] });
     }
 
     return (
@@ -215,6 +274,150 @@ export default function AdminNews({ posts }: Props) {
                                     ))}
                                 </TableBody>
                             </Table>
+                        )}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Megaphone className="size-4" />
+                            {t('admin.news.broadcasts')}
+                        </CardTitle>
+                        <CardDescription>{t('admin.news.broadcasts_desc')}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                            <div className="flex-1 space-y-2">
+                                <Label htmlFor="broadcast-message">{t('admin.news.broadcast_message')}</Label>
+                                <Input
+                                    id="broadcast-message"
+                                    value={broadcastDraft.message}
+                                    maxLength={200}
+                                    placeholder={t('admin.news.broadcast_placeholder')}
+                                    onChange={(e) =>
+                                        setBroadcastDraft({ ...broadcastDraft, message: e.target.value })
+                                    }
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="broadcast-cadence">{t('admin.news.cadence')}</Label>
+                                <select
+                                    id="broadcast-cadence"
+                                    value={broadcastDraft.cadence}
+                                    onChange={(e) =>
+                                        setBroadcastDraft({
+                                            ...broadcastDraft,
+                                            cadence: e.target.value as 'interval' | 'daily',
+                                        })
+                                    }
+                                    className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                                >
+                                    <option value="interval">{t('admin.news.cadence_interval')}</option>
+                                    <option value="daily">{t('admin.news.cadence_daily')}</option>
+                                </select>
+                            </div>
+                            {broadcastDraft.cadence === 'interval' ? (
+                                <div className="space-y-2">
+                                    <Label htmlFor="broadcast-interval">{t('admin.news.every_minutes')}</Label>
+                                    <Input
+                                        id="broadcast-interval"
+                                        type="number"
+                                        min={5}
+                                        max={1440}
+                                        className="sm:w-28"
+                                        value={broadcastDraft.interval_minutes}
+                                        onChange={(e) =>
+                                            setBroadcastDraft({
+                                                ...broadcastDraft,
+                                                interval_minutes: Math.max(
+                                                    5,
+                                                    Math.min(1440, parseInt(e.target.value) || 60),
+                                                ),
+                                            })
+                                        }
+                                    />
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <Label htmlFor="broadcast-time">{t('admin.news.at_time')}</Label>
+                                    <Input
+                                        id="broadcast-time"
+                                        type="time"
+                                        className="sm:w-32"
+                                        value={broadcastDraft.time}
+                                        onChange={(e) =>
+                                            setBroadcastDraft({ ...broadcastDraft, time: e.target.value })
+                                        }
+                                    />
+                                </div>
+                            )}
+                            <Button
+                                disabled={addingBroadcast || broadcastDraft.message.trim().length < 2}
+                                onClick={addBroadcast}
+                            >
+                                <Plus className="mr-1.5 size-4" />
+                                {t('common.add')}
+                            </Button>
+                        </div>
+
+                        {broadcasts.length === 0 ? (
+                            <p className="text-muted-foreground py-4 text-center text-sm">
+                                {t('admin.news.no_broadcasts')}
+                            </p>
+                        ) : (
+                            <div className="divide-y rounded-md border">
+                                {broadcasts.map((broadcast) => (
+                                    <div
+                                        key={broadcast.id}
+                                        className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="truncate text-sm font-medium">{broadcast.message}</p>
+                                            <p className="text-muted-foreground text-xs">
+                                                {broadcast.cadence === 'interval'
+                                                    ? t('admin.news.repeats_every', {
+                                                          minutes: String(broadcast.interval_minutes ?? 0),
+                                                      })
+                                                    : t('admin.news.repeats_daily', {
+                                                          time: broadcast.time ?? '',
+                                                          timezone: broadcast.timezone,
+                                                      })}
+                                                {broadcast.last_sent_at &&
+                                                    ` · ${t('admin.news.last_sent', {
+                                                        time: formatRelativeTime(broadcast.last_sent_at, t),
+                                                    })}`}
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <Badge variant={broadcast.enabled ? 'secondary' : 'outline'}>
+                                                {broadcast.enabled ? t('common.enabled') : t('common.disabled')}
+                                            </Badge>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => broadcastAction(broadcast, 'send')}
+                                            >
+                                                {t('admin.news.send_now')}
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => broadcastAction(broadcast, 'toggle')}
+                                            >
+                                                {broadcast.enabled ? t('common.disable') : t('common.enable')}
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="size-8 p-0"
+                                                onClick={() => broadcastAction(broadcast, 'delete')}
+                                            >
+                                                <Trash2 className="size-4 text-destructive" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         )}
                     </CardContent>
                 </Card>
