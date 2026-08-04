@@ -14,11 +14,16 @@ use App\Http\Controllers\PlayerVaultController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\RankingsController;
 use App\Http\Controllers\ShopController;
+use App\Http\Controllers\SteamAuthController;
 use App\Http\Controllers\StatusController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', WelcomeController::class)->name('home');
+
+// Steam sign-in. Available signed out (to log in) and signed in (to link).
+Route::get('auth/steam', [SteamAuthController::class, 'redirect'])->name('steam.redirect')->middleware('throttle:10,1');
+Route::get('auth/steam/callback', [SteamAuthController::class, 'callback'])->name('steam.callback')->middleware('throttle:10,1');
 
 Route::get('status', StatusController::class)->name('status');
 Route::get('rankings', RankingsController::class)->name('rankings');

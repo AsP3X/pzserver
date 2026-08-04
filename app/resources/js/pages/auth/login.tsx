@@ -101,6 +101,24 @@ export default function Login({
                             </Button>
                         </div>
 
+                        <div className="relative py-1">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t" />
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-background px-2 text-muted-foreground">
+                                    {t('auth.or')}
+                                </span>
+                            </div>
+                        </div>
+
+                        <a
+                            href="/auth/steam"
+                            className="border-input hover:bg-accent flex h-9 w-full items-center justify-center gap-2 rounded-md border text-sm font-medium transition-colors"
+                        >
+                            {t('auth.sign_in_with_steam')}
+                        </a>
+
                         {canRegister && (
                             <div className="text-center text-sm text-muted-foreground">
                                 {t('auth.no_account')}{' '}
