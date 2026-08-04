@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions and progression, and processes item delivery and money deposit queues via file-based JSON communication."
-    "changenote"        "Initial release"
+    "changenote"        "v1.2 — Durability is now reported correctly instead of reading 100% for every item, and restoring an item's condition on delivery works. New: cause of death (fire, infection, another survivor) recorded with hours survived and zombie kills. The mod version is exported in game_state.json so a panel can detect which bridge features a server has."
 }

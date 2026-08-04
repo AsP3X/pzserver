@@ -142,6 +142,8 @@ function KR_World.export()
         state.game_version = tostring(version)
     end
 
+    state.mod_version = Bridge.VERSION
+
     local gotTime, epoch = pcall(os.time)
     if gotTime then
         state.exported_at = os.date("!%Y-%m-%dT%H:%M:%SZ", epoch)

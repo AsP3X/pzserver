@@ -31,10 +31,15 @@ running the mod, and the fix has to go through this whole flow again.
 
 ### 2. Bump the version and write a changenote
 
-Optional, but it is the only record players and future-you get:
+The version lives in two places and `make workshop-package` refuses to run if
+they disagree:
 
-- `modversion=` in `game-server/mods/KnoxRelay/42/mod.info`
-- `"changenote"` in `workshop/workshop_upload.vdf`
+- `modversion=` in `game-server/mods/KnoxRelay/42/mod.info` — metadata
+- `KR_Bridge.VERSION` in `KR_Bridge.lua` — what a running server reports in
+  `game_state.json`, so the panel can tell which bridge features it has
+
+The changenote is optional, but it is the only record players and future-you
+get: `"changenote"` in `workshop/workshop_upload.vdf`.
 
 ### 3. Re-package
 

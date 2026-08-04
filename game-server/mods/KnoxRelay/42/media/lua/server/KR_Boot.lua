@@ -30,7 +30,7 @@ local Obituary = require("KR_Obituary")
 
 local LOG = "[KnoxRelay] "
 
-print(LOG .. "Initializing server-side bridge mod...")
+print(LOG .. "Initializing server-side bridge mod v" .. Bridge.VERSION .. "...")
 
 local DELIVERY_TICKS = 6
 local DEPOSIT_TICKS = 6

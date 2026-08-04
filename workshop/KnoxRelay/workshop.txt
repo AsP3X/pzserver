@@ -1,4 +1,5 @@
 version=1
+id=3777446787
 title=Knox Relay
 description=Knox Relay is a server-side bridge mod. It exposes live server data as JSON files on disk so an external management panel can read the server's state and send instructions back.
 description=
@@ -26,5 +27,5 @@ description=Add the mod to your server, and set DoLuaChecksum=false in your serv
 description=
 description=[h1]Author[/h1]
 description=AsP3X
-tags=
+tags=Build 42;Multiplayer
 visibility=public

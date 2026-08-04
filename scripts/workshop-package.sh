@@ -16,6 +16,21 @@ echo ""
 # Source is now inside the B42 42/ subdirectory
 SRC_42="${SRC_MOD}/42"
 
+# mod.info is metadata; KR_Bridge.VERSION is what the running server reports to
+# the panel. Ship them out of step once and the panel cannot tell which bridge
+# features a server has.
+INFO_VERSION="$(sed -n 's/^modversion=//p' "${SRC_42}/mod.info" | tr -d '\r')"
+LUA_VERSION="$(sed -n 's/^KR_Bridge\.VERSION *= *"\(.*\)"$/\1/p' "${SRC_42}/media/lua/server/KR_Bridge.lua")"
+
+if [ "${INFO_VERSION}" != "${LUA_VERSION}" ]; then
+    echo "ERROR: version mismatch — mod.info says '${INFO_VERSION}', KR_Bridge.VERSION says '${LUA_VERSION}'."
+    echo "Update both before packaging."
+    exit 1
+fi
+
+echo "Version: ${INFO_VERSION}"
+echo ""
+
 # Clean previous build artifacts
 rm -rf "${DST_MOD}/media"
 echo "Cleaned previous media/ artifacts"
