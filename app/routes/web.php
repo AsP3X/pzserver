@@ -9,6 +9,7 @@ use App\Http\Controllers\ObituaryController;
 use App\Http\Controllers\PlayerInventoryController;
 use App\Http\Controllers\PlayerMapController;
 use App\Http\Controllers\PlayerProfileController;
+use App\Http\Controllers\PlayerReportController;
 use App\Http\Controllers\PlayerVaultController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\RankingsController;
@@ -38,6 +39,10 @@ Route::middleware(['auth'])->group(function () {
     Route::get('portal/inventory', PlayerInventoryController::class)->name('portal.inventory');
     Route::get('portal/map', PlayerMapController::class)->name('portal.map');
     Route::get('portal/character', PlayerCharacterController::class)->name('portal.character');
+
+    // Reports and support tickets
+    Route::get('portal/reports', [PlayerReportController::class, 'index'])->name('portal.reports');
+    Route::post('portal/reports', [PlayerReportController::class, 'store'])->name('portal.reports.store')->middleware('throttle:5,1');
 
     // Basemap tiles. Every signed-in user needs these, not just admins.
     Route::get('map-tiles/{level}/{tile}', MapTileController::class)->name('map.tile')->where('tile', '.*');
@@ -182,6 +187,10 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         Route::delete('shop/bundles/{bundle}', [Admin\ShopBundleController::class, 'destroy'])->name('shop.bundles.destroy');
 
         // Shop Promotions
+        // Player reports and support tickets
+        Route::get('reports', [Admin\ReportController::class, 'index'])->name('reports');
+        Route::patch('reports/{report}', [Admin\ReportController::class, 'update'])->name('reports.update');
+
         // Vehicles
         Route::get('vehicles', [Admin\VehicleController::class, 'index'])->name('vehicles');
 

@@ -8,6 +8,7 @@ import {
     Coins,
     Crosshair,
     Languages,
+    LifeBuoy,
     Link2,
     Timer,
     Gamepad2,
@@ -76,6 +77,7 @@ export function AppSidebar() {
             items: [
                 { title: t('nav.whitelist'), href: '/admin/whitelist', icon: Shield },
                 { title: t('nav.moderation'), href: '/admin/moderation', icon: Crosshair },
+                { title: t('nav.reports'), href: '/admin/reports', icon: LifeBuoy },
                 { title: t('nav.safe_zones'), href: '/admin/safe-zones', icon: ShieldAlert },
             ],
         },
@@ -101,6 +103,7 @@ export function AppSidebar() {
                 { title: t('nav.my_inventory'), href: '/portal/inventory', icon: Backpack },
                 { title: t('nav.my_map'), href: '/portal/map', icon: MapPin },
                 { title: t('nav.my_vault'), href: '/portal/vault', icon: Vault },
+                { title: t('nav.my_reports'), href: '/portal/reports', icon: LifeBuoy },
                 { title: t('nav.my_wallet'), href: '/shop/my/wallet', icon: Coins },
                 { title: t('nav.shop'), href: '/shop', icon: ShoppingBag },
                 { title: t('nav.rankings'), href: '/rankings', icon: Trophy },
