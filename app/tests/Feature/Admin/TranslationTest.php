@@ -357,3 +357,56 @@ describe('Translation import', function () {
         expect(\App\Models\AuditLog::where('action', 'translation.import')->exists())->toBeTrue();
     });
 });
+
+// ── Language file changes ────────────────────────────────────────────
+
+describe('Language file cache invalidation', function () {
+    it('serves a key added to the JSON file without a manual cache bust', function () {
+        $path = lang_path('en.json');
+        $original = file_get_contents($path);
+
+        try {
+            /** Warm the cache with the file as it stands. */
+            expect(TranslationService::getForLocale('en'))->not->toHaveKey('test.freshly_added');
+
+            $keys = json_decode($original, true);
+            $keys['test.freshly_added'] = 'Freshly added';
+            file_put_contents($path, json_encode($keys, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            touch($path, time() + 1);
+
+            expect(TranslationService::getForLocale('en'))
+                ->toHaveKey('test.freshly_added')
+                ->and(TranslationService::getForLocale('en')['test.freshly_added'])
+                ->toBe('Freshly added');
+        } finally {
+            file_put_contents($path, $original);
+        }
+    });
+
+    it('still caches between requests while the files are unchanged', function () {
+        $first = TranslationService::getForLocale('en');
+        $second = TranslationService::getForLocale('en');
+
+        expect($second)->toBe($first);
+    });
+
+    it('keeps database overrides winning over the file defaults', function () {
+        Translation::query()->create([
+            'locale' => 'en',
+            'group' => '',
+            'key' => 'nav.my_map',
+            'value' => 'Overridden Map',
+        ]);
+
+        TranslationService::bustCache('en');
+
+        expect(TranslationService::getForLocale('en')['nav.my_map'])->toBe('Overridden Map');
+    });
+
+    it('exposes the navigation keys the sidebar renders', function () {
+        $translations = TranslationService::getForLocale('en');
+
+        expect($translations)
+            ->toHaveKeys(['nav.my_character', 'nav.my_map', 'nav.my_reports', 'nav.news', 'nav.vehicles', 'nav.reports']);
+    });
+});

@@ -15,7 +15,7 @@ class TranslationService
      */
     public static function getForLocale(string $locale): array
     {
-        return Cache::remember("translations.{$locale}", 3600, function () use ($locale) {
+        return Cache::remember(self::cacheKey($locale), 3600, function () use ($locale) {
             // Always start from English as the base (fallback for all untranslated keys)
             $result = self::loadJsonFile('en');
 
@@ -44,20 +44,53 @@ class TranslationService
     public static function bustCache(?string $locale = null): void
     {
         if ($locale) {
-            Cache::forget("translations.{$locale}");
+            Cache::forget(self::cacheKey($locale));
         } else {
             // Clear DB locale caches
             $locales = Translation::query()->distinct()->pluck('locale')->all();
             foreach ($locales as $loc) {
-                Cache::forget("translations.{$loc}");
+                Cache::forget(self::cacheKey($loc));
             }
             // Also clear caches for active languages (may have JSON-only translations)
             $activeCodes = Language::query()->where('is_active', true)->pluck('code')->all();
             foreach ($activeCodes as $code) {
-                Cache::forget("translations.{$code}");
+                Cache::forget(self::cacheKey($code));
             }
-            Cache::forget('translations.en');
+            Cache::forget(self::cacheKey('en'));
         }
+    }
+
+    /**
+     * Cache key stamped with the language files' modification times.
+     *
+     * Editing lang/*.json is a deploy, not an admin action, so nothing calls
+     * bustCache() for it — new keys would otherwise render as raw
+     * "nav.my_map" strings for up to an hour after release. Folding the
+     * mtimes into the key retires the old entry the moment a file changes.
+     */
+    private static function cacheKey(string $locale): string
+    {
+        $stamp = self::fileStamp('en');
+
+        if ($locale !== 'en') {
+            $stamp .= '-'.self::fileStamp($locale);
+        }
+
+        return "translations.{$locale}.{$stamp}";
+    }
+
+    /**
+     * Modification time of a locale's JSON file, or '0' when it has none.
+     */
+    private static function fileStamp(string $locale): string
+    {
+        if (! self::isValidLocale($locale)) {
+            return '0';
+        }
+
+        $path = lang_path($locale.'.json');
+
+        return is_file($path) ? (string) filemtime($path) : '0';
     }
 
     /**
