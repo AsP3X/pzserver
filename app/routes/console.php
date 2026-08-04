@@ -28,6 +28,10 @@ Schedule::command('zomboid:sample-status')->everyFiveMinutes();
 
 Schedule::command('zomboid:import-pvp-violations')->everyFiveMinutes();
 
+// Positions refresh roughly every 30s, so a minute is as fine-grained as this
+// can usefully get.
+Schedule::command('zomboid:detect-raids')->everyMinute();
+
 Schedule::command('zomboid:import-pvp-kills')->everyFiveMinutes();
 
 Schedule::command('zomboid:process-respawn-kicks')->everyFiveMinutes();

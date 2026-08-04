@@ -59,6 +59,9 @@ class DiscordWebhookService
         'safezone.config.update' => ['color' => 0x9B59B6, 'emoji' => "\u{1F6E1}", 'title' => 'Safe Zone Config Updated'],
         'safezone.zone.create' => ['color' => 0x2ECC71, 'emoji' => "\u{1F6E1}", 'title' => 'Safe Zone Created'],
         'safezone.zone.delete' => ['color' => 0xE74C3C, 'emoji' => "\u{1F6E1}", 'title' => 'Safe Zone Deleted'],
+        // Raids
+        'raid.alert.detected' => ['color' => 0xE74C3C, 'emoji' => "\u{1F6A8}", 'title' => 'Raid Alert'],
+
         'safezone.violation.detected' => ['color' => 0xE74C3C, 'emoji' => "\u{26A0}", 'title' => 'PvP Violation Detected'],
         'safezone.violation.dismissed' => ['color' => 0x95A5A6, 'emoji' => "\u{2705}", 'title' => 'PvP Violation Dismissed'],
         'safezone.violation.actioned' => ['color' => 0xE74C3C, 'emoji' => "\u{1F6AB}", 'title' => 'PvP Violation Actioned'],
