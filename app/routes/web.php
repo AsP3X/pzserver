@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapTileController;
+use App\Http\Controllers\PlayerCharacterController;
 use App\Http\Controllers\ObituaryController;
 use App\Http\Controllers\PlayerInventoryController;
 use App\Http\Controllers\PlayerMapController;
@@ -33,6 +34,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('portal', PortalController::class)->name('portal');
     Route::get('portal/inventory', PlayerInventoryController::class)->name('portal.inventory');
     Route::get('portal/map', PlayerMapController::class)->name('portal.map');
+    Route::get('portal/character', PlayerCharacterController::class)->name('portal.character');
 
     // Basemap tiles. Every signed-in user needs these, not just admins.
     Route::get('map-tiles/{level}/{tile}', MapTileController::class)->name('map.tile')->where('tile', '.*');

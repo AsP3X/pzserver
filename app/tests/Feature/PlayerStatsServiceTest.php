@@ -167,3 +167,68 @@ test('getLeaderboard returns top players by hours survived', function () {
     expect($leaderboard)->toHaveCount(2)
         ->and($leaderboard[0]['username'])->toBe('Alice');
 });
+
+test('sync persists traits and vitals when the mod exports them', function () {
+    file_put_contents($this->filePath, json_encode([
+        'timestamp' => '2026-08-04T14:30:00',
+        'player_count' => 1,
+        'players' => [
+            [
+                'username' => 'Alice',
+                'zombie_kills' => 42,
+                'hours_survived' => 15.5,
+                'profession' => 'Lumberjack',
+                'skills' => ['Axe' => 3],
+                'traits' => [['id' => 'Thickskinned', 'label' => 'Thick Skinned']],
+                'vitals' => ['health' => 91.2, 'bleeding_parts' => 2, 'infected' => true, 'has_cold' => false],
+                'is_dead' => false,
+            ],
+        ],
+    ]));
+
+    (new PlayerStatsService($this->filePath))->sync();
+
+    $alice = PlayerStat::query()->find('Alice');
+
+    expect($alice->traits)->toBe([['id' => 'Thickskinned', 'label' => 'Thick Skinned']])
+        ->and($alice->vitals['health'])->toBe(91.2)
+        ->and($alice->vitals['bleeding_parts'])->toBe(2)
+        ->and($alice->vitals['infected'])->toBeTrue();
+});
+
+test('sync leaves traits and vitals null for an older mod that omits them', function () {
+    file_put_contents($this->filePath, json_encode([
+        'timestamp' => '2026-08-04T14:30:00',
+        'player_count' => 1,
+        'players' => [
+            [
+                'username' => 'Bob',
+                'zombie_kills' => 1,
+                'hours_survived' => 1.0,
+                'skills' => [],
+                'is_dead' => false,
+            ],
+        ],
+    ]));
+
+    (new PlayerStatsService($this->filePath))->sync();
+
+    $bob = PlayerStat::query()->find('Bob');
+
+    expect($bob->traits)->toBeNull()
+        ->and($bob->vitals)->toBeNull();
+});
+
+test('sync records an empty trait list distinctly from an absent one', function () {
+    file_put_contents($this->filePath, json_encode([
+        'timestamp' => '2026-08-04T14:30:00',
+        'player_count' => 1,
+        'players' => [
+            ['username' => 'Cara', 'zombie_kills' => 0, 'hours_survived' => 0.0, 'traits' => [], 'is_dead' => false],
+        ],
+    ]));
+
+    (new PlayerStatsService($this->filePath))->sync();
+
+    expect(PlayerStat::query()->find('Cara')->traits)->toBe([]);
+});

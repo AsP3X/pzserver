@@ -1,8 +1,8 @@
 import { Deferred, Head, Link } from '@inertiajs/react';
 import { Clock, Hammer, LogIn, Medal, Shield, Skull, Swords, Trophy } from 'lucide-react';
-import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
 import { ActivityFeed } from '@/components/activity-feed';
+import { categoriseSkills, SkillBar } from '@/components/skill-list';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,33 +10,6 @@ import { useTranslation } from '@/hooks/use-translation';
 import PublicLayout from '@/layouts/public-layout';
 import { formatHours, type HoursMode, loadHoursMode, saveHoursMode } from '@/lib/hours-format';
 import type { PlayerProfilePageData } from '@/types';
-
-const SKILL_CATEGORIES: Record<string, string[]> = {
-    Combat: ['Axe', 'Blunt', 'SmallBlunt', 'LongBlade', 'SmallBlade', 'Spear', 'Maintenance'],
-    Firearm: ['Aiming', 'Reloading'],
-    Crafting: ['Carpentry', 'Cooking', 'Farming', 'Fishing', 'Foraging', 'Trapping', 'Tailoring', 'Metalworking', 'Mechanics', 'Electrical'],
-    Survivalist: ['Doctor', 'Lightfoot', 'Nimble', 'Sneak', 'Sprinting', 'Fitness', 'Strength'],
-};
-
-function SkillBar({ name, level }: { name: string; level: number }) {
-    const maxLevel = 10;
-    const pct = Math.min((level / maxLevel) * 100, 100);
-
-    return (
-        <div className="flex items-center gap-3">
-            <span className="w-24 truncate text-xs text-muted-foreground">{name}</span>
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                <motion.div
-                    className="h-full rounded-full bg-primary"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${pct}%` }}
-                    transition={{ duration: 0.6, ease: 'easeOut' }}
-                />
-            </div>
-            <span className="w-6 text-right text-xs font-medium tabular-nums">{level}</span>
-        </div>
-    );
-}
 
 export default function PlayerProfile({ player, recent_events, is_admin, day_length_minutes }: PlayerProfilePageData) {
     const { t } = useTranslation();
@@ -51,29 +24,7 @@ export default function PlayerProfile({ player, recent_events, is_admin, day_len
         saveHoursMode(mode);
     };
 
-    const skills = player.skills ?? {};
-    const categorizedSkills: { category: string; skills: { name: string; level: number }[] }[] = [];
-    const assignedSkills = new Set<string>();
-
-    for (const [category, skillNames] of Object.entries(SKILL_CATEGORIES)) {
-        const categorySkills = skillNames
-            .filter((name) => name in skills)
-            .map((name) => {
-                assignedSkills.add(name);
-                return { name, level: skills[name] };
-            });
-        if (categorySkills.length > 0) {
-            categorizedSkills.push({ category, skills: categorySkills });
-        }
-    }
-
-    // Any uncategorized skills
-    const otherSkills = Object.entries(skills)
-        .filter(([name]) => !assignedSkills.has(name))
-        .map(([name, level]) => ({ name, level }));
-    if (otherSkills.length > 0) {
-        categorizedSkills.push({ category: 'Other', skills: otherSkills });
-    }
+    const categorizedSkills = categoriseSkills(player.skills ?? {});
 
     return (
         <>

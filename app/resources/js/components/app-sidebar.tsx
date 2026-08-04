@@ -94,6 +94,7 @@ export function AppSidebar() {
             label: t('nav.group.menu'),
             items: [
                 { title: t('nav.player_portal'), href: '/portal', icon: Gamepad2 },
+                { title: t('nav.my_character'), href: '/portal/character', icon: User },
                 { title: t('nav.my_inventory'), href: '/portal/inventory', icon: Backpack },
                 { title: t('nav.my_map'), href: '/portal/map', icon: MapPin },
                 { title: t('nav.my_vault'), href: '/portal/vault', icon: Vault },

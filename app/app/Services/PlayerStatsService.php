@@ -41,6 +41,9 @@ class PlayerStatsService
                     'hours_survived' => (float) ($playerData['hours_survived'] ?? 0),
                     'profession' => $playerData['profession'] ?? null,
                     'skills' => $playerData['skills'] ?? null,
+                    /** Absent on servers running a KnoxRelay older than 1.3. */
+                    'traits' => $playerData['traits'] ?? null,
+                    'vitals' => $playerData['vitals'] ?? null,
                     'is_dead' => (bool) ($playerData['is_dead'] ?? false),
                 ],
             );
