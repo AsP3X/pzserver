@@ -5,10 +5,13 @@ namespace App\Providers;
 use App\Models\AuditLog;
 use App\Observers\AuditLogObserver;
 use App\Services\AuditLogger;
+use App\Services\ConfigStateManager;
 use App\Services\DiscordWebhookService;
 use App\Services\DockerManager;
 use App\Services\GameVersionReader;
+use App\Services\ModManager;
 use App\Services\RconClient;
+use App\Services\ServerIniParser;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -36,6 +39,14 @@ class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(AuditLogger::class);
+
+        $this->app->bind(ModManager::class, function ($app) {
+            return new ModManager(
+                iniParser: $app->make(ServerIniParser::class),
+                configState: $app->make(ConfigStateManager::class),
+                protectedMods: $app['config']['zomboid.protected_mods'] ?? [],
+            );
+        });
 
         $this->app->singleton(DockerManager::class, function ($app) {
             $config = $app['config']['zomboid.docker'];

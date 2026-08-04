@@ -47,6 +47,19 @@ if [ -f "${SRC_42}/poster.png" ]; then
 fi
 echo "Copied mod.info + poster.png to mod root (for PZ discovery)"
 
+# Strip macOS metadata. PZ validates the Contents/ tree on submit and rejects
+# files it does not recognise, so a stray .DS_Store can block an upload.
+find "${DST_MOD_ROOT}" -name '.DS_Store' -delete 2>/dev/null || true
+
+# The in-game uploader reads these two from the item root; without them the
+# item does not appear in the Workshop submit screen.
+ITEM_ROOT="${REPO_ROOT}/workshop/KnoxRelay"
+for required in workshop.txt preview.png; do
+    if [ ! -f "${ITEM_ROOT}/${required}" ]; then
+        echo "WARNING: missing ${ITEM_ROOT#${REPO_ROOT}/}/${required} — the in-game uploader needs it"
+    fi
+done
+
 # Summary
 echo ""
 echo "=== Package Summary ==="

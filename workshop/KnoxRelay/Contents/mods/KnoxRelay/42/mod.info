@@ -1,5 +1,6 @@
 name=Knox Relay
 id=KnoxRelay
-modversion=1.1
+author=AsP3X
+modversion=1.0
 poster=poster.png
-description=Server-side bridge mod for Zomboid Manager. Exports game state, inventory snapshots, player positions, and processes delivery queues via file-based JSON communication.
+description=Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions and progression, and processes item delivery and money deposit queues via file-based JSON communication.

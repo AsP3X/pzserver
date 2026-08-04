@@ -50,7 +50,7 @@ class ModController extends Controller
 
         return Inertia::render('admin/mods', [
             'mods' => $mods,
-            'protectedWorkshopIds' => array_keys(ModManager::PROTECTED_MODS),
+            'protectedWorkshopIds' => $this->modManager->protectedWorkshopIds(),
             'pendingRestart' => $pendingRestart,
             'serverRunning' => $serverRunning,
         ]);
@@ -117,7 +117,7 @@ class ModController extends Controller
 
     public function destroy(Request $request, string $workshopId): JsonResponse
     {
-        if (ModManager::isProtected($workshopId)) {
+        if ($this->modManager->isProtected($workshopId)) {
             return response()->json([
                 'error' => 'This mod is required by the manager and cannot be removed.',
             ], 422);

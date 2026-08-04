@@ -13,6 +13,9 @@ function modApiHeaders(): array
 
 beforeEach(function () {
     config(['zomboid.api_key' => 'test-key-12345']);
+    // The protected list is env-driven and empty by default; these tests need a
+    // protected mod to exist, so one is configured with a fixture Workshop ID.
+    config(['zomboid.protected_mods' => ['7000000007' => 'KnoxRelay']]);
 
     $this->tempDir = sys_get_temp_dir().'/pz_mod_test_'.uniqid();
     mkdir($this->tempDir.'/Server', 0777, true);
@@ -186,22 +189,22 @@ it('returns JSON 500 with error message when state file write fails', function (
 it('refuses to remove the required KnoxRelay mod', function () {
     file_put_contents($this->iniPath, str_replace(
         ['Mods=SuperSurvivors;Hydrocraft', 'WorkshopItems=2561774086;2286126274'],
-        ['Mods=KnoxRelay;SuperSurvivors', 'WorkshopItems=3685323705;2561774086'],
+        ['Mods=KnoxRelay;SuperSurvivors', 'WorkshopItems=7000000007;2561774086'],
         file_get_contents($this->iniPath),
     ));
 
-    $this->deleteJson('/api/config/mods/3685323705', [], modApiHeaders())
+    $this->deleteJson('/api/config/mods/7000000007', [], modApiHeaders())
         ->assertStatus(422)
         ->assertJsonStructure(['error']);
 
     $response = $this->getJson('/api/config/mods', modApiHeaders())->assertOk();
-    expect($response->json('mods.0.workshop_id'))->toBe('3685323705');
+    expect($response->json('mods.0.workshop_id'))->toBe('7000000007');
 });
 
 it('refuses to reorder if the required mod is dropped', function () {
     file_put_contents($this->iniPath, str_replace(
         ['Mods=SuperSurvivors;Hydrocraft', 'WorkshopItems=2561774086;2286126274'],
-        ['Mods=KnoxRelay;SuperSurvivors', 'WorkshopItems=3685323705;2561774086'],
+        ['Mods=KnoxRelay;SuperSurvivors', 'WorkshopItems=7000000007;2561774086'],
         file_get_contents($this->iniPath),
     ));
 

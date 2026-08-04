@@ -605,10 +605,17 @@ Custom server-side Lua mod that bridges game data to the Laravel app via shared 
 
 **Mod structure (`game-server/mods/KnoxRelay/`):**
 - `mod.info` — mod metadata (name, id, description)
-- `media/lua/server/ZM_Main.lua` — entry point, event hooks
-- `media/lua/server/ZM_InventoryExporter.lua` — inventory snapshot logic
-- `media/lua/server/ZM_DeliveryQueue.lua` — give/remove item queue consumer
-- `media/lua/server/ZM_PlayerTracker.lua` — position tracking
+- `media/lua/server/KR_Boot.lua` — entry point, event hooks
+- `media/lua/server/KR_Bridge.lua` — file channel (write strategies, JSON read/write, clocks)
+- `media/lua/server/KR_Codec.lua` — JSON encoder/decoder for the PZ Lua sandbox
+- `media/lua/server/KR_Snapshot.lua` — inventory snapshot logic
+- `media/lua/server/KR_Orders.lua` — give/remove item queue consumer
+- `media/lua/server/KR_Vault.lua` — money deposit processing
+- `media/lua/server/KR_Beacon.lua` — position tracking
+- `media/lua/server/KR_Roster.lua`, `KR_Stash.lua` — player and container helpers
+- `media/lua/server/KR_World.lua`, `KR_Progress.lua`, `KR_Catalog.lua` — periodic exports
+- `media/lua/server/KR_Cooldown.lua`, `KR_Sanctuary.lua`, `KR_Feud.lua` — respawn delay, safe zones, PvP tracking
+- `media/lua/client/KR_Echo.lua` — client-side mirror of server inventory edits
 
 **Inventory snapshots:**
 - On `OnCreatePlayer` + `EveryTenMinutes`, serialize each online player's inventory to JSON via `getFileWriter()`

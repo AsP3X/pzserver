@@ -62,6 +62,8 @@ function mockAdminModManager(array $mods = []): void
     $modManager->shouldReceive('add')->byDefault();
     $modManager->shouldReceive('remove')->andReturn(['workshop_id' => '123', 'mod_id' => 'Test'])->byDefault();
     $modManager->shouldReceive('reorder')->byDefault();
+    $modManager->shouldReceive('protectedWorkshopIds')->andReturn([])->byDefault();
+    $modManager->shouldReceive('isProtected')->andReturn(false)->byDefault();
 
     app()->instance(ModManager::class, $modManager);
 

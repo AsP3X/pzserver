@@ -45,6 +45,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Protected Mods
+    |--------------------------------------------------------------------------
+    |
+    | Mods the manager refuses to remove and re-attaches automatically if they
+    | go missing, keyed by Workshop ID with the mod_id as the value. The Knox
+    | Relay bridge mod belongs here once it has been published to the Workshop
+    | and has an ID; until then the list is empty and no mod is protected.
+    |
+    */
+    'protected_mods' => array_filter([
+        (string) env('PZ_BRIDGE_WORKSHOP_ID', '') => (string) env('PZ_BRIDGE_MOD_ID', 'KnoxRelay'),
+    ], static fn ($workshopId): bool => (string) $workshopId !== '', ARRAY_FILTER_USE_KEY),
+
+    /*
+    |--------------------------------------------------------------------------
     | Map Tile Configuration
     |--------------------------------------------------------------------------
     */

@@ -5,25 +5,35 @@ namespace App\Services;
 class ModManager
 {
     /**
-     * Mods that must remain installed for the manager to work, keyed by
-     * Workshop ID with the corresponding `mod_id` as the value. The
-     * proprietary KnoxRelay mod provides the Lua bridge used by
-     * inventory, delivery, and player-position features — removing it
-     * breaks core functionality, so the API/UI refuse to remove these
-     * and write paths re-attach them automatically if they go missing.
+     * @param  array<array-key, string>  $protectedMods  Mods that must remain
+     *   installed, keyed by Workshop ID with the `mod_id` as the value. The Lua
+     *   bridge mod powers inventory, delivery, and player-position features —
+     *   removing it breaks core functionality, so the API/UI refuse to remove
+     *   these and write paths re-attach them automatically if they go missing.
+     *   Supplied from `zomboid.protected_mods` by the container binding in
+     *   AppServiceProvider, and empty until the bridge mod has a Workshop ID.
      */
-    public const PROTECTED_MODS = [
-        '3685323705' => 'KnoxRelay',
-    ];
-
     public function __construct(
         private readonly ServerIniParser $iniParser,
         private readonly ConfigStateManager $configState,
+        private readonly array $protectedMods = [],
     ) {}
 
-    public static function isProtected(string $workshopId): bool
+    /**
+     * Protected Workshop IDs as strings. PHP coerces numeric-string array
+     * keys to int, so callers that compare against IDs read from the INI
+     * must go through here rather than raw `array_keys()`.
+     *
+     * @return list<string>
+     */
+    public function protectedWorkshopIds(): array
     {
-        return array_key_exists($workshopId, self::PROTECTED_MODS);
+        return array_map(strval(...), array_keys($this->protectedMods));
+    }
+
+    public function isProtected(string $workshopId): bool
+    {
+        return in_array($workshopId, $this->protectedWorkshopIds(), true);
     }
 
     /**
@@ -247,12 +257,10 @@ class ModManager
         $modIds = array_column($orderedMods, 'mod_id');
 
         $existing = $this->readCurrentLists($iniPath)['workshop_ids'];
-        foreach (array_keys(self::PROTECTED_MODS) as $required) {
-            // Cast: PHP coerces numeric-string array keys to int; compare as strings.
-            $requiredStr = (string) $required;
-            if (in_array($requiredStr, $existing, true) && ! in_array($requiredStr, $workshopIds, true)) {
+        foreach ($this->protectedWorkshopIds() as $required) {
+            if (in_array($required, $existing, true) && ! in_array($required, $workshopIds, true)) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
-                    'mods' => ["Reorder cannot drop required mod {$requiredStr}."],
+                    'mods' => ["Reorder cannot drop required mod {$required}."],
                 ]);
             }
         }
@@ -392,11 +400,11 @@ class ModManager
      */
     private function ensureProtectedMods(array &$workshopIds, array &$modIds): void
     {
-        foreach (self::PROTECTED_MODS as $workshopId => $modId) {
+        foreach ($this->protectedMods as $workshopId => $modId) {
             // PHP coerces numeric string array keys to int, so cast back before
             // comparing against the string Workshop IDs we get from splitList.
-            // Without the cast, in_array with strict=true treats int 3685323705
-            // and "3685323705" as different and appends a duplicate every write.
+            // Without the cast, in_array with strict=true treats the int and the
+            // string form as different and appends a duplicate every write.
             $workshopIdStr = (string) $workshopId;
             if (in_array($workshopIdStr, $workshopIds, true)) {
                 continue;

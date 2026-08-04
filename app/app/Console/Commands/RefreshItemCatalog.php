@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 /**
  * Touch/request a fresh items catalog export from the game by clearing stale
- * catalog and writing an empty shell; game ZM_ItemCatalog rewrites on next tick.
+ * catalog and writing an empty shell; the game's KR_Catalog module rewrites it on the next tick.
  * Also re-downloads icons if catalog has entries.
  */
 class RefreshItemCatalog extends Command
@@ -44,7 +44,7 @@ class RefreshItemCatalog extends Command
         }
 
         $count = is_array($payload['items'] ?? null) ? count($payload['items']) : 0;
-        $this->info("Item catalog refreshed ({$count} cached items). Game will rewrite when ZM_ItemCatalog runs.");
+        $this->info("Item catalog refreshed ({$count} cached items). Game will rewrite when KR_Catalog runs.");
 
         if ($this->option('icons')) {
             $this->call('zomboid:download-item-icons');

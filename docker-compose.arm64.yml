@@ -45,7 +45,6 @@ services:
       - ${PZ_SERVER_HOST:-./data/server}:/home/steam/pzserver
       - ./game-server/configure-server.sh:/home/steam/configure-server.sh:ro
       - ./game-server/entrypoint.sh:/home/steam/entrypoint.sh:ro
-      - ./game-server/mods/KnoxRelay:/home/steam/Zomboid/mods/KnoxRelay:ro
     healthcheck:
       # Check RCON TCP port in /proc/net — proves game server is fully loaded
       # (grep reads kernel's /proc directly, works without FEX emulation)

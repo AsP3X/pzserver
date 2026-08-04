@@ -6,7 +6,13 @@ use App\Services\ServerIniParser;
 
 beforeEach(function () {
     $this->parser = new ServerIniParser;
-    $this->manager = new ModManager($this->parser, new ConfigStateManager);
+    // The protected list is env-driven and empty by default; these tests need a
+    // protected mod to exist, so one is injected with a fixture Workshop ID.
+    $this->manager = new ModManager(
+        $this->parser,
+        new ConfigStateManager,
+        ['7000000007' => 'KnoxRelay'],
+    );
     $this->tempDir = sys_get_temp_dir().'/pz_test_'.uniqid();
     mkdir($this->tempDir.'/Server', 0777, true);
     $this->iniPath = $this->tempDir.'/Server/ZomboidServer.ini';
@@ -125,7 +131,7 @@ it('writes mod state file when adding a mod', function () {
 
     $content = file_get_contents($stateFile);
     expect($content)->toContain('Mods=SuperSurvivors;Hydrocraft;TestMod;KnoxRelay')
-        ->and($content)->toContain('WorkshopItems=2561774086;2286126274;1111111111;3685323705');
+        ->and($content)->toContain('WorkshopItems=2561774086;2286126274;1111111111;7000000007');
 });
 
 it('writes mod state file when removing a mod', function () {
@@ -137,7 +143,7 @@ it('writes mod state file when removing a mod', function () {
 
     $content = file_get_contents($stateFile);
     expect($content)->toContain('Mods=Hydrocraft;KnoxRelay')
-        ->and($content)->toContain('WorkshopItems=2286126274;3685323705');
+        ->and($content)->toContain('WorkshopItems=2286126274;7000000007');
 });
 
 it('writes mod state file when reordering mods', function () {
@@ -152,7 +158,7 @@ it('writes mod state file when reordering mods', function () {
 
     $content = file_get_contents($stateFile);
     expect($content)->toContain('Mods=Hydrocraft;SuperSurvivors;KnoxRelay')
-        ->and($content)->toContain('WorkshopItems=2286126274;2561774086;3685323705');
+        ->and($content)->toContain('WorkshopItems=2286126274;2561774086;7000000007');
 });
 
 it('does not write mod state file when adding duplicate mod', function () {
@@ -178,21 +184,21 @@ it('does not write mod state file when removing nonexistent mod', function () {
 });
 
 it('flags protected workshop ids', function () {
-    expect(ModManager::isProtected('3685323705'))->toBeTrue()
-        ->and(ModManager::isProtected('1111111111'))->toBeFalse();
+    expect($this->manager->isProtected('7000000007'))->toBeTrue()
+        ->and($this->manager->isProtected('1111111111'))->toBeFalse();
 });
 
 it('allows reorder that keeps required mod', function () {
-    $this->manager->add($this->iniPath, '3685323705', 'KnoxRelay');
+    $this->manager->add($this->iniPath, '7000000007', 'KnoxRelay');
 
     $this->manager->reorder($this->iniPath, [
-        ['workshop_id' => '3685323705', 'mod_id' => 'KnoxRelay'],
+        ['workshop_id' => '7000000007', 'mod_id' => 'KnoxRelay'],
         ['workshop_id' => '2561774086', 'mod_id' => 'SuperSurvivors'],
         ['workshop_id' => '2286126274', 'mod_id' => 'Hydrocraft'],
     ]);
 
     $mods = $this->manager->list($this->iniPath);
-    expect($mods[0]['workshop_id'])->toBe('3685323705');
+    expect($mods[0]['workshop_id'])->toBe('7000000007');
 });
 
 it('throws RuntimeException when state file directory is not writable', function () {
@@ -269,7 +275,7 @@ it('preserves mods from .mod_state when the INI was pruned by PZ on shutdown', f
     // .mod_state (web-UI source of truth) still reflects the user's choices.
     file_put_contents(
         $this->tempDir.'/Server/.mod_state',
-        "Mods=Hydrocraft;KnoxRelay\nWorkshopItems=2286126274;3685323705\n"
+        "Mods=Hydrocraft;KnoxRelay\nWorkshopItems=2286126274;7000000007\n"
     );
     $this->parser->write($this->iniPath, ['Mods' => '', 'WorkshopItems' => '']);
 
@@ -278,7 +284,7 @@ it('preserves mods from .mod_state when the INI was pruned by PZ on shutdown', f
     $stateContent = file_get_contents($this->tempDir.'/Server/.mod_state');
     expect($stateContent)
         ->toContain('Mods=Hydrocraft;KnoxRelay;NewMod')
-        ->and($stateContent)->toContain('WorkshopItems=2286126274;3685323705;4242424242');
+        ->and($stateContent)->toContain('WorkshopItems=2286126274;7000000007;4242424242');
 });
 
 it('re-attaches the protected KnoxRelay mod when add() runs without it', function () {
@@ -289,22 +295,22 @@ it('re-attaches the protected KnoxRelay mod when add() runs without it', functio
     $stateContent = file_get_contents($this->tempDir.'/Server/.mod_state');
     expect($stateContent)
         ->toContain('Mods=SoloMod;KnoxRelay')
-        ->and($stateContent)->toContain('WorkshopItems=4242424242;3685323705');
+        ->and($stateContent)->toContain('WorkshopItems=4242424242;7000000007');
 });
 
 it('does not duplicate KnoxRelay when reorder already contains it', function () {
     // Regression: PHP coerces numeric-string array keys (PROTECTED_MODS) to int,
-    // and a naive in_array(..., $workshopIds, true) treats int 3685323705 and
-    // "3685323705" as different — appending a duplicate every reorder call.
+    // and a naive in_array(..., $workshopIds, true) treats int 7000000007 and
+    // "7000000007" as different — appending a duplicate every reorder call.
     $this->manager->reorder($this->iniPath, [
-        ['workshop_id' => '3685323705', 'mod_id' => 'KnoxRelay'],
+        ['workshop_id' => '7000000007', 'mod_id' => 'KnoxRelay'],
         ['workshop_id' => '2561774086', 'mod_id' => 'SuperSurvivors'],
         ['workshop_id' => '2286126274', 'mod_id' => 'Hydrocraft'],
     ]);
 
     $stateContent = file_get_contents($this->tempDir.'/Server/.mod_state');
     expect(substr_count($stateContent, 'KnoxRelay'))->toBe(1)
-        ->and(substr_count($stateContent, '3685323705'))->toBe(1);
+        ->and(substr_count($stateContent, '7000000007'))->toBe(1);
 });
 
 it('rolls back the INI when state file write fails', function () {
@@ -340,7 +346,7 @@ it('marks mods active when state matches applied snapshot', function () {
     // user intent matches what the server last loaded.
     file_put_contents(
         $this->tempDir.'/Server/.mod_state_applied',
-        "Mods=SuperSurvivors;Hydrocraft;TestMod;KnoxRelay\nWorkshopItems=2561774086;2286126274;1111111111;3685323705\n"
+        "Mods=SuperSurvivors;Hydrocraft;TestMod;KnoxRelay\nWorkshopItems=2561774086;2286126274;1111111111;7000000007\n"
     );
 
     $result = $this->manager->listWithStatus($this->iniPath, serverRunning: true);
@@ -378,13 +384,13 @@ it('flags pending_restart when a mod was removed since last server start', funct
 
     $result = $this->manager->listWithStatus($this->iniPath, serverRunning: true);
 
-    // After remove() the auto-attached KnoxRelay (3685323705) is in user intent
+    // After remove() the auto-attached KnoxRelay (7000000007) is in user intent
     // but not in .mod_state_applied — so it's correctly flagged pending_restart.
     expect($result['pending_restart'])->toBeTrue();
 
     $byId = collect($result['mods'])->keyBy('workshop_id');
     expect($byId['2561774086']['status'])->toBe('active')
-        ->and($byId['3685323705']['status'])->toBe('pending_restart');
+        ->and($byId['7000000007']['status'])->toBe('pending_restart');
 });
 
 it('falls back to active when applied snapshot is missing on running server', function () {
@@ -430,7 +436,7 @@ it('bulk imports independent Mods and WorkshopItems lists, merging into existing
 
     $config = $this->parser->read($this->iniPath);
     expect($config['Mods'])->toBe('SuperSurvivors;Hydrocraft;ModA;ModB;ModC;KnoxRelay')
-        ->and($config['WorkshopItems'])->toBe('2561774086;2286126274;1111111111;2222222222;3685323705');
+        ->and($config['WorkshopItems'])->toBe('2561774086;2286126274;1111111111;2222222222;7000000007');
 });
 
 it('bulk import merges each list independently and skips duplicates', function () {
@@ -467,7 +473,7 @@ it('bulk import writes .mod_state and re-attaches KnoxRelay', function () {
 
     $state = file_get_contents($this->tempDir.'/Server/.mod_state');
     expect($state)->toContain('Mods=SuperSurvivors;Hydrocraft;ModA;KnoxRelay')
-        ->and($state)->toContain('WorkshopItems=2561774086;2286126274;1111111111;3685323705');
+        ->and($state)->toContain('WorkshopItems=2561774086;2286126274;1111111111;7000000007');
 });
 
 it('bulk import prepends new map folders before the vanilla map and persists them', function () {

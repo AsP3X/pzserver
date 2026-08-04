@@ -8,6 +8,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // The protected list is env-driven and empty by default; these tests assert
+    // auto-attachment, so one is configured with a fixture Workshop ID.
+    config(['zomboid.protected_mods' => ['7000000007' => 'KnoxRelay']]);
+
     $this->admin = User::factory()->admin()->create();
     $this->tempDir = sys_get_temp_dir().'/pz_import_test_'.uniqid();
     mkdir($this->tempDir.'/Server', 0777, true);
