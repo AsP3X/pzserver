@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use App\Models\VehicleKeyHolder;
 use App\Services\VehicleReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -114,4 +115,101 @@ it('shows the fleet to an admin', function () {
 
 it('keeps the fleet away from players', function () {
     $this->actingAs(User::factory()->create())->get('/admin/vehicles')->assertForbidden();
+});
+
+// ── Key ownership ────────────────────────────────────────────────────
+
+it('shows a player carrying the key as holding the vehicle', function () {
+    writeFleet($this->path, [[
+        'id' => 12, 'model' => 'CarNormal', 'x' => 1, 'y' => 2,
+        'key_id' => 400, 'key_holders' => ['Alice'],
+    ]]);
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertInertia(fn ($page) => $page
+            ->has('vehicles.0.holders', 1)
+            ->where('vehicles.0.holders.0.username', 'Alice')
+            ->where('vehicles.0.holders.0.online', true)
+        );
+});
+
+it('shows every holder when a key has been copied', function () {
+    writeFleet($this->path, [[
+        'id' => 12, 'model' => 'CarNormal', 'key_id' => 400,
+        'key_holders' => ['Alice', 'Bob'],
+    ]]);
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertInertia(fn ($page) => $page->has('vehicles.0.holders', 2));
+});
+
+it('reports no holder for a vehicle whose key nobody carries', function () {
+    writeFleet($this->path, [['id' => 12, 'model' => 'CarNormal', 'key_id' => 400, 'key_holders' => []]]);
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertInertia(fn ($page) => $page->has('vehicles.0.holders', 0));
+});
+
+it('remembers a holder who has since logged off', function () {
+    writeFleet($this->path, [['id' => 12, 'model' => 'CarNormal', 'key_id' => 400, 'key_holders' => ['Alice']]]);
+
+    $this->artisan('zomboid:sync-vehicle-keys')->assertSuccessful();
+
+    /** Alice logs off: the mod can no longer see her inventory. */
+    writeFleet($this->path, [['id' => 12, 'model' => 'CarNormal', 'key_id' => 400, 'key_holders' => []]]);
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertInertia(fn ($page) => $page
+            ->has('vehicles.0.holders', 1)
+            ->where('vehicles.0.holders.0.username', 'Alice')
+            ->where('vehicles.0.holders.0.online', false)
+        );
+});
+
+it('does not list a remembered holder twice when they come back', function () {
+    writeFleet($this->path, [['id' => 12, 'model' => 'CarNormal', 'key_id' => 400, 'key_holders' => ['Alice']]]);
+
+    $this->artisan('zomboid:sync-vehicle-keys')->assertSuccessful();
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertInertia(fn ($page) => $page
+            ->has('vehicles.0.holders', 1)
+            ->where('vehicles.0.holders.0.online', true)
+        );
+});
+
+it('records one row per player per vehicle however often it syncs', function () {
+    writeFleet($this->path, [['id' => 12, 'model' => 'CarNormal', 'key_id' => 400, 'key_holders' => ['Alice']]]);
+
+    $this->artisan('zomboid:sync-vehicle-keys');
+    $this->artisan('zomboid:sync-vehicle-keys');
+    $this->artisan('zomboid:sync-vehicle-keys');
+
+    expect(VehicleKeyHolder::query()->count())->toBe(1);
+});
+
+it('keeps holders of different vehicles apart', function () {
+    writeFleet($this->path, [
+        ['id' => 12, 'model' => 'CarNormal', 'key_id' => 400, 'key_holders' => ['Alice']],
+        ['id' => 13, 'model' => 'PickUpTruck', 'key_id' => 401, 'key_holders' => ['Bob']],
+    ]);
+
+    $this->artisan('zomboid:sync-vehicle-keys')->assertSuccessful();
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertInertia(fn ($page) => $page
+            ->where('vehicles.0.holders.0.username', 'Alice')
+            ->where('vehicles.1.holders.0.username', 'Bob')
+        );
+});
+
+it('treats a fleet from a mod too old to report keys as unowned', function () {
+    writeFleet($this->path, [['id' => 12, 'model' => 'CarNormal']]);
+
+    $this->actingAs(User::factory()->admin()->create())->get('/admin/vehicles')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('vehicles.0.holders', 0)
+            ->where('vehicles.0.key_id', null)
+        );
 });

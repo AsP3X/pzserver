@@ -11,11 +11,18 @@
 
 local Codec = require("KR_Codec")
 local Bridge = require("KR_Bridge")
+local Roster = require("KR_Roster")
+local Stash = require("KR_Stash")
 
 KR_Garage = {}
 
 local LOG = "[KnoxRelay] "
 local FILE = "vehicles.json"
+
+--- Key ids below this are not real keys. The engine uses -1 for "unset", and
+--- treating a shared default of 0 as a match would make every keyless object
+--- in the world look like it opened every keyless vehicle.
+local FIRST_REAL_KEY_ID = 1
 
 --- Where a vehicle is, preferring its own coordinates and falling back to the
 --- square it sits on. A vehicle mid-teleport can briefly have neither.
@@ -47,7 +54,55 @@ local function model(vehicle)
     return (string.match(tostring(name), "([^%.]+)$")) or tostring(name)
 end
 
-local function describe(vehicle)
+--- Which online players are carrying which vehicle keys.
+---
+--- Built once per export as key id -> list of usernames, rather than asking
+--- every player about every vehicle: that would be players × vehicles lookups
+--- on a hook that already walks the whole fleet.
+---
+--- Only online players can be searched — an inventory that is not loaded
+--- cannot be read — so a car whose owner logged off reports no holder here.
+--- Remembering that is the panel's job, not the mod's.
+local function keyHolders()
+    local holders = {}
+    local players = Roster.online()
+
+    if not players then
+        return holders
+    end
+
+    for _, player in ipairs(players) do
+        local username = player:getUsername()
+
+        if username then
+            local seen = {}
+
+            for _, container in ipairs(Stash.containers(player)) do
+                local contents = container:getItems()
+
+                if contents then
+                    for index = 0, contents:size() - 1 do
+                        local item = contents:get(index)
+
+                        if item and item.getKeyId then
+                            local ok, keyId = pcall(function() return item:getKeyId() end)
+
+                            if ok and keyId and keyId >= FIRST_REAL_KEY_ID and not seen[keyId] then
+                                seen[keyId] = true
+                                holders[keyId] = holders[keyId] or {}
+                                holders[keyId][#holders[keyId] + 1] = username
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return holders
+end
+
+local function describe(vehicle, holders)
     local x, y = position(vehicle)
 
     local entry = {
@@ -81,6 +136,18 @@ local function describe(vehicle)
         entry.key_spawned = ok and keyed or false
     end
 
+    --- Ownership by possession: whoever is carrying this vehicle's key.
+    --- getKeyId comes from IsoObject, which BaseVehicle inherits — the same
+    --- pairing vanilla uses to decide whether a character can hotwire a car.
+    if vehicle.getKeyId then
+        local ok, keyId = pcall(function() return vehicle:getKeyId() end)
+
+        if ok and keyId and keyId >= FIRST_REAL_KEY_ID then
+            entry.key_id = keyId
+            entry.key_holders = holders[keyId] or {}
+        end
+    end
+
     return entry
 end
 
@@ -96,11 +163,12 @@ function KR_Garage.export()
     end
 
     local rows = {}
+    local holders = keyHolders()
 
     for index = 0, fleet:size() - 1 do
         local vehicle = fleet:get(index)
         if vehicle then
-            local described, entry = pcall(describe, vehicle)
+            local described, entry = pcall(describe, vehicle, holders)
             if described and entry then
                 rows[#rows + 1] = entry
             end

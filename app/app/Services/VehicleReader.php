@@ -88,6 +88,10 @@ class VehicleReader
             'engine_quality' => isset($vehicle['engine_quality']) ? (int) $vehicle['engine_quality'] : null,
             'engine_running' => (bool) ($vehicle['engine_running'] ?? false),
             'key_spawned' => (bool) ($vehicle['key_spawned'] ?? false),
+            /** Null when the vehicle has no real key id, so no holder can exist. */
+            'key_id' => isset($vehicle['key_id']) ? (int) $vehicle['key_id'] : null,
+            /** Online players carrying this vehicle's key, right now. */
+            'key_holders' => array_values(array_map('strval', $vehicle['key_holders'] ?? [])),
         ];
     }
 }

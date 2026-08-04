@@ -18,6 +18,10 @@ Schedule::command('pz:sync-accounts')->everyFiveMinutes();
 
 Schedule::command('zomboid:sync-player-stats')->everyTenMinutes();
 
+// Vehicle key ownership. The mod re-exports the fleet on the same ten-minute
+// hook, so anything faster would re-read an unchanged file.
+Schedule::command('zomboid:sync-vehicle-keys')->everyTenMinutes();
+
 Schedule::command('zomboid:auto-restart-check')->everyMinute();
 
 Schedule::command('zomboid:send-broadcasts')->everyMinute();

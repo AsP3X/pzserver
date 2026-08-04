@@ -12,6 +12,12 @@ import AppLayout from '@/layouts/app-layout';
 import { formatRelativeTime } from '@/lib/dates';
 import type { BreadcrumbItem } from '@/types';
 
+type Holder = {
+    username: string;
+    online: boolean;
+    last_seen_at: string | null;
+};
+
 type Vehicle = {
     id: number;
     model: string;
@@ -21,6 +27,8 @@ type Vehicle = {
     engine_quality: number | null;
     engine_running: boolean;
     key_spawned: boolean;
+    key_id: number | null;
+    holders: Holder[];
 };
 
 type Props = {
@@ -47,7 +55,9 @@ export default function AdminVehicles({ vehicles, exported_at }: Props) {
         const query = filter.toLowerCase();
         const result = vehicles.filter(
             (vehicle) =>
-                vehicle.model.toLowerCase().includes(query) || String(vehicle.id).includes(query),
+                vehicle.model.toLowerCase().includes(query) ||
+                String(vehicle.id).includes(query) ||
+                vehicle.holders.some((holder) => holder.username.toLowerCase().includes(query)),
         );
 
         result.sort((a, b) => {
@@ -130,6 +140,7 @@ export default function AdminVehicles({ vehicles, exported_at }: Props) {
                                         <TableHead>
                                             <SortableHeader column="engine_quality" label={t('admin.vehicles.engine')} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                                         </TableHead>
+                                        <TableHead>{t('admin.vehicles.owner')}</TableHead>
                                         <TableHead>{t('admin.vehicles.location')}</TableHead>
                                         <TableHead>{t('common.status')}</TableHead>
                                     </TableRow>
@@ -158,6 +169,40 @@ export default function AdminVehicles({ vehicles, exported_at }: Props) {
                                                     <span className="text-muted-foreground text-xs">—</span>
                                                 ) : (
                                                     `${vehicle.engine_quality}%`
+                                                )}
+                                            </TableCell>
+                                            <TableCell>
+                                                {vehicle.holders.length === 0 ? (
+                                                    <span className="text-muted-foreground text-xs">
+                                                        {vehicle.key_spawned
+                                                            ? t('admin.vehicles.key_unaccounted')
+                                                            : t('admin.vehicles.no_key')}
+                                                    </span>
+                                                ) : (
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {vehicle.holders.map((holder) => (
+                                                            <Badge
+                                                                key={holder.username}
+                                                                variant={holder.online ? 'secondary' : 'outline'}
+                                                                className="gap-1 text-xs"
+                                                                title={
+                                                                    holder.online
+                                                                        ? t('admin.vehicles.holding_now')
+                                                                        : holder.last_seen_at
+                                                                          ? t('admin.vehicles.last_seen', {
+                                                                                time: formatRelativeTime(
+                                                                                    holder.last_seen_at,
+                                                                                    t,
+                                                                                ),
+                                                                            })
+                                                                          : ''
+                                                                }
+                                                            >
+                                                                <KeyRound className="size-3" />
+                                                                {holder.username}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
                                                 )}
                                             </TableCell>
                                             <TableCell>
