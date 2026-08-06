@@ -79,6 +79,17 @@ read_config_state() {
     fi
 }
 
+# Portable in-place sed: GNU sed (Linux) requires `sed -i "expr" file`,
+# BSD/macOS sed requires `sed -i '' "expr" file`. Use a temp-file + mv
+# pattern so the script runs identically on both hosts.
+sed_inplace() {
+    local expr="$1"
+    local file="$2"
+    local tmp
+    tmp=$(mktemp "${file}.XXXXXX")
+    sed "$expr" "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 apply_setting() {
     local key="$1"
     local value="$2"
@@ -93,7 +104,7 @@ apply_setting() {
     escaped_value=$(printf '%s' "$value" | sed 's/[\\|&]/\\&/g')
 
     if grep -q "^${key}=" "$file" 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
+        sed_inplace "s|^${key}=.*|${key}=${escaped_value}|" "$file"
     else
         echo "${key}=${value}" >> "$file"
     fi
@@ -110,7 +121,7 @@ apply_setting_force() {
     escaped_value=$(printf '%s' "$value" | sed 's/[\\|&]/\\&/g')
 
     if grep -q "^${key}=" "$file" 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
+        sed_inplace "s|^${key}=.*|${key}=${escaped_value}|" "$file"
     else
         echo "${key}=${value}" >> "$file"
     fi

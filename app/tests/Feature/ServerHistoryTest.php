@@ -12,7 +12,7 @@ beforeEach(function () {
     $this->history = new ServerHistoryService;
 });
 
-function mockStatusResolver(bool $online, int $players = 0): void
+function mockServerHistoryResolver(bool $online, int $players = 0): void
 {
     $resolver = Mockery::mock(ServerStatusResolver::class);
     $resolver->shouldReceive('resolve')->andReturn([
@@ -33,7 +33,7 @@ function mockStatusResolver(bool $online, int $players = 0): void
 }
 
 it('records one sample per run', function () {
-    mockStatusResolver(online: true, players: 7);
+    mockServerHistoryResolver(online: true, players: 7);
 
     $this->artisan('zomboid:sample-status')->assertSuccessful();
 
@@ -45,7 +45,7 @@ it('records one sample per run', function () {
 });
 
 it('records an offline server as a sample rather than skipping it', function () {
-    mockStatusResolver(online: false);
+    mockServerHistoryResolver(online: false);
 
     $this->artisan('zomboid:sample-status')->assertSuccessful();
 
