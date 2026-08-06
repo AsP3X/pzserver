@@ -53,6 +53,33 @@ it('does NOT overwrite an existing super admin on re-run', function () {
         ->and(Hash::check('newpass123', $admin->password))->toBeFalse();
 });
 
+it('overwrites the super admin when --reset is passed', function () {
+    User::factory()->create([
+        'role' => UserRole::SuperAdmin,
+        'username' => 'oldadmin',
+        'name' => 'oldadmin',
+        'password' => 'original-password',
+    ]);
+
+    $this->artisan('zomboid:create-admin', [
+        '--username' => 'newadmin',
+        '--password' => 'newpass123',
+        '--email' => 'new@example.com',
+        '--reset' => true,
+    ])
+        ->expectsOutputToContain("Super admin 'newadmin' reset successfully.")
+        ->assertSuccessful();
+
+    expect(User::where('role', UserRole::SuperAdmin)->count())->toBe(1);
+
+    $admin = User::where('role', UserRole::SuperAdmin)->first();
+    expect($admin->username)->toBe('newadmin')
+        ->and($admin->name)->toBe('newadmin')
+        ->and($admin->email)->toBe('new@example.com')
+        ->and(Hash::check('newpass123', $admin->password))->toBeTrue()
+        ->and(Hash::check('original-password', $admin->password))->toBeFalse();
+});
+
 it('works without an email', function () {
     $this->artisan('zomboid:create-admin', [
         '--username' => 'noemail',

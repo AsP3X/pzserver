@@ -13,10 +13,11 @@ class CreateAdmin extends Command
     protected $signature = 'zomboid:create-admin
         {--username= : Admin username}
         {--email= : Admin email address}
-        {--password= : Admin password}';
+        {--password= : Admin password}
+        {--reset : Overwrite the existing super admin credentials}';
 
     /** @var string */
-    protected $description = 'Create the super admin user (does not overwrite an existing admin)';
+    protected $description = 'Create the super admin user (use --reset to overwrite an existing admin)';
 
     public function handle(): int
     {
@@ -33,11 +34,30 @@ class CreateAdmin extends Command
         $existing = User::where('role', UserRole::SuperAdmin)->first();
 
         if ($existing) {
-            // Do NOT overwrite credentials — the admin may have changed their
-            // password via the web UI.  Overwriting on every container restart
-            // silently reverts to the ADMIN_PASSWORD env var and locks the
-            // admin out of the account they already control.
-            $this->info("Super admin '{$existing->username}' already exists — leaving credentials untouched.");
+            if (! $this->option('reset')) {
+                // Do NOT overwrite credentials — the admin may have changed their
+                // password via the web UI.  Overwriting on every container restart
+                // silently reverts to the ADMIN_PASSWORD env var and locks the
+                // admin out of the account they already control.
+                $this->info("Super admin '{$existing->username}' already exists — leaving credentials untouched.");
+                $this->info('Pass --reset to overwrite username/email/password.');
+
+                return self::SUCCESS;
+            }
+
+            $existing->update([
+                'username' => $username,
+                'name' => $username,
+                'email' => $email,
+                'password' => $password,
+            ]);
+
+            if ($email) {
+                $existing->forceFill(['email_verified_at' => now()])->save();
+            }
+
+            Log::info('Super admin user reset', ['username' => $username]);
+            $this->info("Super admin '{$username}' reset successfully.");
 
             return self::SUCCESS;
         }
