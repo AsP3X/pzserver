@@ -972,9 +972,13 @@ YAML;
         }
 
         // Check common pip install location
-        $pipPath = getenv('HOME').'/.local/bin/pzmap2dzi';
-        if (is_file($pipPath)) {
-            return $pipPath;
+        // $_SERVER['HOME'] is populated by PHP from the environment — no system env() needed
+        $home = $_SERVER['HOME'] ?? '';
+        if ($home !== '') {
+            $pipPath = $home.'/.local/bin/pzmap2dzi';
+            if (is_file($pipPath)) {
+                return $pipPath;
+            }
         }
 
         // Check local copy in project

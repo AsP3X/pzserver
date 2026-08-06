@@ -376,7 +376,7 @@ class BackupManager
     {
         $metadata = $this->validateImportZip($zipPath);
         $dataPath = config('zomboid.paths.data');
-        $serverName = config('zomboid.server_name', env('PZ_SERVER_NAME', 'ZomboidServer'));
+        $serverName = config('zomboid.server_name');
 
         // 1. Create pre-import safety backup
         $preImport = $this->createBackup(BackupType::PreImport, 'Pre-import safety backup');
