@@ -7,6 +7,7 @@ use App\Services\RconSanitizer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class SendServerWarning implements ShouldQueue
 {
@@ -30,9 +31,12 @@ class SendServerWarning implements ShouldQueue
 
         try {
             $rcon->connect();
-            $rcon->command("servermsg \"".RconSanitizer::message($this->message)."\"");
-        } catch (\Throwable) {
-            // RCON unavailable — skip this warning silently
+            $rcon->command('servermsg "'.RconSanitizer::message($this->message).'"');
+        } catch (\Throwable $e) {
+            Log::warning('SendServerWarning: RCON failed — warning not delivered', [
+                'message' => $this->message,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

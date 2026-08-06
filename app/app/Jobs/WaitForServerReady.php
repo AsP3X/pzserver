@@ -52,8 +52,8 @@ class WaitForServerReady implements ShouldQueue
                 // Refresh version cache after server is ready
                 try {
                     app(GameVersionReader::class)->refreshVersion();
-                } catch (\Throwable) {
-                    // Non-fatal
+                } catch (\Throwable $e) {
+                    Log::warning('WaitForServerReady: version refresh failed', ['error' => $e->getMessage()]);
                 }
 
                 return;

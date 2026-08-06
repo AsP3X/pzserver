@@ -151,6 +151,7 @@ class DownloadItemIcons extends Command
                     }
                 } catch (\Throwable $e) {
                     $failed += count($seen[$wikiName]);
+                    $this->warn("    Failed to process {$wikiName}: {$e->getMessage()}");
                 }
 
                 $bar->advance(count($seen[$wikiName]));
