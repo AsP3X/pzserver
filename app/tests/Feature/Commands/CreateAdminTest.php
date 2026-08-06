@@ -3,6 +3,7 @@
 use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 
 uses(RefreshDatabase::class);
 
@@ -23,11 +24,12 @@ it('creates a super admin when none exists', function () {
         ->and($user->email_verified_at)->not->toBeNull();
 });
 
-it('updates existing super admin on re-run', function () {
+it('does NOT overwrite an existing super admin on re-run', function () {
     User::factory()->create([
         'role' => UserRole::SuperAdmin,
         'username' => 'oldadmin',
         'name' => 'oldadmin',
+        'password' => 'original-password',
     ]);
 
     $this->artisan('zomboid:create-admin', [
@@ -35,15 +37,20 @@ it('updates existing super admin on re-run', function () {
         '--password' => 'newpass123',
         '--email' => 'new@example.com',
     ])
-        ->expectsOutputToContain("Super admin 'newadmin' updated successfully.")
+        ->expectsOutputToContain("Super admin 'oldadmin' already exists")
         ->assertSuccessful();
 
+    // The existing admin's credentials must be untouched.
     expect(User::where('role', UserRole::SuperAdmin)->count())->toBe(1);
 
     $admin = User::where('role', UserRole::SuperAdmin)->first();
-    expect($admin->username)->toBe('newadmin')
-        ->and($admin->name)->toBe('newadmin')
-        ->and($admin->email)->toBe('new@example.com');
+    expect($admin->username)->toBe('oldadmin')
+        ->and($admin->name)->toBe('oldadmin')
+        ->and($admin->email)->not->toBe('new@example.com');
+
+    // Password must still match the original, not the env-var/option value.
+    expect(Hash::check('original-password', $admin->password))->toBeTrue()
+        ->and(Hash::check('newpass123', $admin->password))->toBeFalse();
 });
 
 it('works without an email', function () {

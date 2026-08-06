@@ -16,7 +16,7 @@ class CreateAdmin extends Command
         {--password= : Admin password}';
 
     /** @var string */
-    protected $description = 'Create or update the super admin user';
+    protected $description = 'Create the super admin user (does not overwrite an existing admin)';
 
     public function handle(): int
     {
@@ -33,19 +33,11 @@ class CreateAdmin extends Command
         $existing = User::where('role', UserRole::SuperAdmin)->first();
 
         if ($existing) {
-            $existing->update([
-                'username' => $username,
-                'name' => $username,
-                'email' => $email,
-                'password' => $password,
-            ]);
-
-            if ($email) {
-                $existing->forceFill(['email_verified_at' => now()])->save();
-            }
-
-            Log::info('Super admin user updated', ['username' => $username]);
-            $this->info("Super admin '{$username}' updated successfully.");
+            // Do NOT overwrite credentials — the admin may have changed their
+            // password via the web UI.  Overwriting on every container restart
+            // silently reverts to the ADMIN_PASSWORD env var and locks the
+            // admin out of the account they already control.
+            $this->info("Super admin '{$existing->username}' already exists — leaving credentials untouched.");
 
             return self::SUCCESS;
         }

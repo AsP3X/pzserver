@@ -165,10 +165,23 @@ if echo "$@" | grep -q "supervisord"; then
         echo "[entrypoint] WARNING: Migrations failed — run 'make migrate' manually."
     }
 
-    # Admin user — create if env vars are set and no super admin exists
+    # Admin user — only create on first boot when no super admin exists yet.
+    # Once the admin exists, their password may have been changed via the web
+    # UI; re-running create-admin every restart would overwrite it with the
+    # ADMIN_PASSWORD env var and lock them out.
     if [ -n "${ADMIN_USERNAME:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
-        echo "[entrypoint] Ensuring admin user exists..."
-        php artisan zomboid:create-admin --no-interaction 2>&1 || true
+        if ! php artisan tinker --no-interaction --execute="echo App\\Enums\\UserRole::SuperAdmin->value;" 2>/dev/null | grep -q . \
+           || ! php artisan db:table users --no-interaction 2>/dev/null | grep -q .; then
+            echo "[entrypoint] Database not ready — skipping admin creation."
+        else
+            ADMIN_EXISTS=$(php artisan tinker --no-interaction --execute="echo App\\Models\\User::where('role', App\\Enums\\UserRole::SuperAdmin)->exists() ? 'yes' : 'no';" 2>/dev/null || echo "no")
+            if [ "$ADMIN_EXISTS" = "yes" ]; then
+                echo "[entrypoint] Super admin already exists — skipping admin creation."
+            else
+                echo "[entrypoint] Creating super admin user..."
+                php artisan zomboid:create-admin --no-interaction 2>&1 || true
+            fi
+        fi
     fi
 
     # Map tiles — do NOT auto-generate (CPU/disk heavy). Run manually if needed:
