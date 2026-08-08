@@ -21,20 +21,21 @@ class WorldMapVectorBuilder
     /** @var array<string, array{fill: string, minZ: float, order: int}> */
     public const LAYER_STYLES = [
         'water' => ['fill' => '#3b8d95', 'minZ' => -99.0, 'order' => 10],
-        'road-trail' => ['fill' => '#b97a57', 'minZ' => 0.0, 'order' => 20],
-        'road-tertiary' => ['fill' => '#ab9e8f', 'minZ' => -1.0, 'order' => 21],
-        'road-secondary' => ['fill' => '#867d71', 'minZ' => -3.0, 'order' => 22],
-        'road-primary' => ['fill' => '#867d71', 'minZ' => -3.0, 'order' => 23],
-        'railway' => ['fill' => '#c8bfe7', 'minZ' => 1.0, 'order' => 24],
-        'building' => ['fill' => '#d29e69', 'minZ' => 0.0, 'order' => 30],
-        'building-Residential' => ['fill' => '#d29e69', 'minZ' => 0.0, 'order' => 31],
-        'building-CommunityServices' => ['fill' => '#8b75eb', 'minZ' => 0.0, 'order' => 32],
-        'building-Hospitality' => ['fill' => '#7fcee1', 'minZ' => 0.0, 'order' => 33],
-        'building-Industrial' => ['fill' => '#383635', 'minZ' => 0.0, 'order' => 34],
-        'building-Medical' => ['fill' => '#e58097', 'minZ' => 0.0, 'order' => 35],
-        'building-RestaurantsAndEntertainment' => ['fill' => '#f5e13c', 'minZ' => 0.0, 'order' => 36],
-        'building-RetailAndCommercial' => ['fill' => '#b8cd54', 'minZ' => 0.0, 'order' => 37],
-        // Show woodland earlier so mid-zoom still has green massing (worldmap natural=wood only; not full forest.xml)
+        'road-trail' => ['fill' => '#b97a57', 'minZ' => -0.5, 'order' => 20],
+        'road-tertiary' => ['fill' => '#ab9e8f', 'minZ' => -1.5, 'order' => 21],
+        'road-secondary' => ['fill' => '#867d71', 'minZ' => -3.5, 'order' => 22],
+        'road-primary' => ['fill' => '#867d71', 'minZ' => -3.5, 'order' => 23],
+        'railway' => ['fill' => '#c8bfe7', 'minZ' => 0.5, 'order' => 24],
+        // Buildings appear slightly earlier for denser town silhouette at mid-zoom
+        'building' => ['fill' => '#d29e69', 'minZ' => -0.75, 'order' => 30],
+        'building-Residential' => ['fill' => '#d29e69', 'minZ' => -0.75, 'order' => 31],
+        'building-CommunityServices' => ['fill' => '#8b75eb', 'minZ' => -0.75, 'order' => 32],
+        'building-Hospitality' => ['fill' => '#7fcee1', 'minZ' => -0.75, 'order' => 33],
+        'building-Industrial' => ['fill' => '#383635', 'minZ' => -0.75, 'order' => 34],
+        'building-Medical' => ['fill' => '#e58097', 'minZ' => -0.75, 'order' => 35],
+        'building-RestaurantsAndEntertainment' => ['fill' => '#f5e13c', 'minZ' => -0.75, 'order' => 36],
+        'building-RetailAndCommercial' => ['fill' => '#b8cd54', 'minZ' => -0.75, 'order' => 37],
+        // Woodland from worldmap natural=wood (full forest.xml is too large for the pack)
         'natural-wood' => ['fill' => '#bdc5a3', 'minZ' => -3.5, 'order' => 5],
     ];
 

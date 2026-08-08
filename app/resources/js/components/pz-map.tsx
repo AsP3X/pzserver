@@ -51,6 +51,8 @@ type PzMapProps = {
     showPacks?: boolean;
     /** Live cursor world-square readout. */
     showCoordinates?: boolean;
+    /** Fit-world / fit-players toolbar (vector mode default). */
+    showFitControls?: boolean;
     onMarkerClick?: (marker: PlayerMarker) => void;
     onMarkerAction?: (marker: PlayerMarker, action: MarkerAction) => void;
     zones?: ZoneOverlay[];
@@ -238,6 +240,7 @@ export default function PzMap({
     showLegend,
     showPacks,
     showCoordinates,
+    showFitControls,
     onMarkerClick,
     onMarkerAction,
     zones,
@@ -266,6 +269,7 @@ export default function PzMap({
     const legendEnabled = showLegend ?? useVector;
     const packsEnabled = showPacks ?? useVector;
     const coordsEnabled = showCoordinates ?? useVector;
+    const fitEnabled = showFitControls ?? (useVector || interactive);
 
     // Stable refs for callbacks so event handlers always see latest values
     const onZoneDrawnRef = useRef(onZoneDrawn);
@@ -572,11 +576,47 @@ export default function PzMap({
         });
     }, [eventMarkers, onEventMarkerClick]);
 
+    const fitWorld = useCallback(() => {
+        const map = mapRef.current;
+        const b = mapConfig.bounds;
+        if (!map || !b) {
+            return;
+        }
+        const [minX, minY, maxX, maxY] = b;
+        map.fitBounds(
+            L.latLngBounds(L.latLng(-maxY, minX), L.latLng(-minY, maxX)),
+            { padding: [28, 28], animate: true },
+        );
+    }, [mapConfig.bounds]);
+
+    const fitPlayers = useCallback(() => {
+        const map = mapRef.current;
+        if (!map || markers.length === 0) {
+            return;
+        }
+        const bounds = L.latLngBounds(markers.map((m) => L.latLng(-m.y, m.x)));
+        map.fitBounds(bounds, {
+            padding: [48, 48],
+            maxZoom: Math.min(mapConfig.maxZoom, useVector ? 1.5 : mapConfig.maxZoom - 1),
+            animate: true,
+        });
+    }, [markers, mapConfig.maxZoom, useVector]);
+
+    const fitHome = useCallback(() => {
+        const map = mapRef.current;
+        if (!map) {
+            return;
+        }
+        map.setView(L.latLng(-mapConfig.center.y, mapConfig.center.x), mapConfig.defaultZoom, {
+            animate: true,
+        });
+    }, [mapConfig.center.x, mapConfig.center.y, mapConfig.defaultZoom]);
+
     const packs = mapConfig.maps?.filter((p) => p.name) ?? [];
 
     return (
         <div className={`relative isolate h-full w-full ${className}`}>
-            <div ref={containerRef} className="h-full w-full" />
+            <div ref={containerRef} className="h-full w-full dark:brightness-[0.92] dark:contrast-[1.05]" />
 
             {packsEnabled && packs.length > 0 && (
                 <div className="pointer-events-none absolute top-2 left-2 z-[500] flex max-w-[min(100%,20rem)] flex-wrap gap-1">
@@ -589,6 +629,39 @@ export default function PzMap({
                             {pack.name}
                         </span>
                     ))}
+                </div>
+            )}
+
+            {fitEnabled && interactive && (
+                <div className="absolute top-2 right-2 z-[500] flex flex-col gap-1">
+                    <button
+                        type="button"
+                        onClick={fitHome}
+                        className="rounded border border-border/70 bg-background/90 px-2 py-1 text-[11px] font-medium shadow-sm backdrop-blur-sm hover:bg-muted"
+                        title={t('map.fit_home')}
+                    >
+                        {t('map.fit_home')}
+                    </button>
+                    {mapConfig.bounds && (
+                        <button
+                            type="button"
+                            onClick={fitWorld}
+                            className="rounded border border-border/70 bg-background/90 px-2 py-1 text-[11px] font-medium shadow-sm backdrop-blur-sm hover:bg-muted"
+                            title={t('map.fit_world')}
+                        >
+                            {t('map.fit_world')}
+                        </button>
+                    )}
+                    {markers.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={fitPlayers}
+                            className="rounded border border-border/70 bg-background/90 px-2 py-1 text-[11px] font-medium shadow-sm backdrop-blur-sm hover:bg-muted"
+                            title={t('map.fit_players')}
+                        >
+                            {t('map.fit_players')}
+                        </button>
+                    )}
                 </div>
             )}
 
