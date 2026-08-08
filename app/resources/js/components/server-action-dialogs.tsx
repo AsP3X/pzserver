@@ -358,13 +358,14 @@ export function WipeDialog({
                 <DialogHeader>
                     <DialogTitle className="text-destructive">Wipe Server</DialogTitle>
                     <DialogDescription>
-                        This will permanently delete all save data. A backup will be created automatically before wiping.
+                        Deletes the multiplayer world and player data. Sandbox (zombies/environment), spawn points/regions, and server.ini are kept. A safety backup is created first.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
                     <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-                        All player progress, buildings, and world state will be permanently destroyed.
-                        This action cannot be undone.
+                        Destroyed: map chunks, player characters, vehicles, zombie population, and account DB for this
+                        world. Kept: SandboxVars, spawnpoints/spawnregions, mods/Map= config. Clients may need to
+                        clear their local multiplayer map cache for a fully clean map.
                     </div>
                     <div className="grid gap-2">
                         <Label htmlFor="wipe-countdown">Countdown</Label>

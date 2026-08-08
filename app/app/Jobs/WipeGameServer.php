@@ -7,11 +7,11 @@ use App\Services\AuditLogger;
 use App\Services\BackupManager;
 use App\Services\DockerManager;
 use App\Services\RconClient;
+use App\Services\WorldWipeService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Process;
 
 class WipeGameServer implements ShouldQueue
 {
@@ -25,11 +25,15 @@ class WipeGameServer implements ShouldQueue
         private readonly string $ip,
     ) {}
 
-    public function handle(RconClient $rcon, DockerManager $docker, BackupManager $backupManager): void
-    {
+    public function handle(
+        RconClient $rcon,
+        DockerManager $docker,
+        BackupManager $backupManager,
+        WorldWipeService $wipeService,
+    ): void {
         Cache::forget('server.pending_action:wipe');
 
-        // 1. Create pre-wipe backup
+        // 1. Create pre-wipe backup (includes world + config so restore is possible)
         try {
             $result = $backupManager->createBackup(BackupType::PreRollback, 'Pre-wipe safety backup');
 
@@ -48,59 +52,58 @@ class WipeGameServer implements ShouldQueue
             $rcon->command('save');
             sleep(5);
             $rcon->command('quit');
+            // Give PZ a moment to flush before we force-stop
+            sleep(3);
         } catch (\Throwable $e) {
             Log::warning('RCON unavailable during scheduled wipe, proceeding with Docker stop', [
                 'error' => $e->getMessage(),
             ]);
         }
 
-        $docker->stopContainer(timeout: 30);
+        try {
+            $docker->stopContainer(timeout: 60);
+        } catch (\Throwable $e) {
+            Log::error('Docker stop failed during wipe', ['error' => $e->getMessage()]);
+        }
+
+        // 3. Wipe world/player data; keep SandboxVars + spawn + server.ini
+        $wipe = $wipeService->wipeSaveData();
 
         AuditLogger::record(
             actor: 'system',
             action: 'server.wipe.executed',
             target: config('zomboid.docker.container_name'),
-            details: ['source' => 'scheduled_job'],
+            details: [
+                'source' => 'scheduled_job',
+                'ok' => $wipe['ok'],
+                'server_name' => $wipe['server_name'],
+                'deleted_count' => count($wipe['deleted']),
+                'preserved' => array_map('basename', $wipe['preserved']),
+                'errors' => $wipe['errors'],
+            ],
             ip: $this->ip,
         );
 
-        // 3. Delete save data + PZ internal backups (PZ auto-restores from these on startup)
-        $dataPath = config('zomboid.paths.data');
-        $serverName = config('zomboid.server_name', 'ZomboidServer');
-        $savePath = "{$dataPath}/Saves/Multiplayer/{$serverName}";
-        $startupBackups = "{$dataPath}/backups/startup";
-        $serverDb = "{$dataPath}/db/{$serverName}.db";
-
-        if (is_dir($savePath)) {
-            $deleteResult = Process::run(['rm', '-rf', $savePath]);
-
-            if ($deleteResult->successful()) {
-                Log::info('Save data deleted', ['path' => $savePath]);
-            } else {
-                Log::error('Failed to delete save data', [
-                    'path' => $savePath,
-                    'error' => $deleteResult->errorOutput(),
-                ]);
-            }
+        if (! $wipe['ok']) {
+            Log::error('World wipe completed with errors', [
+                'errors' => $wipe['errors'],
+                'deleted' => $wipe['deleted'],
+            ]);
         } else {
-            Log::info('Save directory does not exist, nothing to delete', ['path' => $savePath]);
+            Log::info('World wipe successful', [
+                'deleted_count' => count($wipe['deleted']),
+                'preserved' => $wipe['preserved'],
+            ]);
         }
 
-        // Remove PZ startup backups — PZ restores saves from these on boot
-        if (is_dir($startupBackups)) {
-            $backupResult = Process::run(['rm', '-rf', $startupBackups]);
-            Log::info('PZ startup backups deleted', ['success' => $backupResult->successful()]);
-        }
+        // 4. Start server (fresh world; sandbox/spawn config still on disk)
+        try {
+            $docker->startContainer();
+        } catch (\Throwable $e) {
+            Log::error('Docker start failed after wipe', ['error' => $e->getMessage()]);
 
-        // Remove player account database so accounts are reset
-        if (file_exists($serverDb)) {
-            Process::run(['rm', '-f', $serverDb]);
-            Process::run(['rm', '-f', "{$serverDb}-shm", "{$serverDb}-wal"]);
-            Log::info('Server player database deleted', ['path' => $serverDb]);
+            return;
         }
-
-        // 4. Start server
-        $docker->startContainer();
 
         // 5. Wait for server ready
         WaitForServerReady::dispatch(

@@ -185,6 +185,7 @@
     "admin.dashboard.view_full_rankings": "სრული რეიტინგის ნახვა",
     "admin.dashboard.view_rankings": "რეიტინგების ნახვა",
     "admin.dashboard.wipe": "გასუფთავება",
+    "admin.dashboard.wipe_help": "წაშლის მსოფლიოს და მოთამაშის save-ებს. ინარჩუნებს SandboxVars, spawn-ებს და server.ini-ს.",
     "admin.dashboard.zombie_kills": "მოკლული ზომბები",
     "admin.discord.change_url": "შეცვლა",
     "admin.discord.description": "სერვერის მოვლენების შეტყობინებების გაგზავნა Discord არხში.",

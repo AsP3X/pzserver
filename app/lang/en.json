@@ -185,6 +185,7 @@
     "admin.dashboard.view_full_rankings": "View Full Rankings",
     "admin.dashboard.view_rankings": "View Rankings",
     "admin.dashboard.wipe": "Wipe",
+    "admin.dashboard.wipe_help": "Clears world and player saves. Keeps SandboxVars, spawns, and server.ini.",
     "admin.dashboard.zombie_kills": "Zombie Kills",
     "admin.discord.change_url": "Change",
     "admin.discord.description": "Send server event notifications to a Discord channel.",

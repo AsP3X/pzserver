@@ -70,6 +70,16 @@ make exec CMD="npm run build"
 make exec CMD="php artisan config:clear"
 ```
 
+### Server wipe (world reset, keep sandbox/spawns)
+
+Admin → Dashboard → **Wipe** (or `POST /admin/server/wipe`).
+
+**Deletes:** `Saves/Multiplayer/*` (map, players, vehicles, zombie pop), `db/{ServerName}.db`, PZ `backups/startup` + `backups/version` (auto-restore archives), Lua bridge live JSON/inventory state.
+
+**Keeps:** `Server/{name}.ini`, `{name}_SandboxVars.lua` (zombies/environment/loot), `{name}_spawnpoints.lua`, `{name}_spawnregions.lua`, mod state files.
+
+Requires the **queue worker** (`pz-queue`) to be running. A pre-wipe backup is attempted first.
+
 ### Map basemap (admin player map)
 
 The Player map has a **Map view** toggle (persisted in the browser):
