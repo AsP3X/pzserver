@@ -86,6 +86,11 @@ return [
         'vector_default_zoom' => (float) env('PZ_MAP_VECTOR_DEFAULT_ZOOM', -1.5),
         // Optional path to worldmap.xml for `php artisan zomboid:build-worldmap-vector`
         'worldmap_xml' => env('PZ_WORLDMAP_XML'),
+        // Extra media/ roots searched for Map= folders (in addition to game server + Workshop)
+        'extra_media_roots' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('PZ_MAP_EXTRA_MEDIA_ROOTS', '')),
+        ))),
         'proxy_url' => env('PZ_MAP_PROXY_URL', 'https://map.projectzomboid.com/maps/SurvivalB417812L0/map_files/{z}/{x}_{y}.jpg'),
         'proxy_tile_size' => 1024,
         'proxy_dzi' => [

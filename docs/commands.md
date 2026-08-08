@@ -72,14 +72,21 @@ make exec CMD="php artisan config:clear"
 
 ### Map tiles (admin player map)
 
-Local isometric basemap tiles are **optional**. By default the panel uses the **vector** basemap (`docs/map-vector.md`). Rebuild the vector pack after a game map update:
+Local isometric basemap tiles are **optional**. By default the panel uses the **vector** basemap (`docs/map-vector.md`). Rebuild the vector pack after a game map update **or when Map= / map mods change**:
 
 ```bash
+# Show Map= folders resolved from server.ini + Workshop
+docker exec -it pz-app php artisan zomboid:build-worldmap-vector --list-only
+
+# Merge vanilla + map mods into public/map-vector/vanilla/map.json
 docker exec -it pz-app php artisan zomboid:build-worldmap-vector
 
-# Explicit worldmap path (must be readable inside the container)
+# Include workshop worldmaps not listed on Map=
+docker exec -it pz-app php artisan zomboid:build-worldmap-vector --scan-workshop
+
+# Single worldmap only (skip Map= discovery)
 docker exec -it pz-app php artisan zomboid:build-worldmap-vector \
-  --xml="/path/to/media/maps/Muldraugh, KY/worldmap.xml"
+  --xml="/pz-server/media/maps/Muldraugh, KY/worldmap.xml"
 
 # Compose service name / Make
 docker compose exec app php artisan zomboid:build-worldmap-vector

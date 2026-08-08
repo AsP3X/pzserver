@@ -58,35 +58,145 @@ class WorldMapVectorBuilder
         string $source = 'vanilla',
         int $cellSize = self::DEFAULT_CELL_SIZE,
     ): array {
-        if (! is_file($worldmapXmlPath)) {
-            throw new InvalidArgumentException("worldmap.xml not found: {$worldmapXmlPath}");
+        return $this->buildFromSources([
+            [
+                'name' => $source,
+                'xml' => $worldmapXmlPath,
+                'annotations' => $annotationsLuaPath,
+                'labels' => $mapLabelJsonPath,
+                'origin' => 'direct',
+            ],
+        ], $source, $cellSize);
+    }
+
+    /**
+     * Merge multiple map packs into one basemap.
+     *
+     * Sources should be ordered like server.ini Map= (mod maps first, vanilla last).
+     * Later entries in that list are loaded first as the base; earlier entries
+     * overwrite cells so the first Map= folder wins on overlaps (vanilla last).
+     *
+     * @param  list<array{name: string, xml: string, annotations?: string|null, labels?: string|null, origin?: string}>  $sources
+     * @return array{
+     *     v: int,
+     *     source: string,
+     *     maps: list<array{name: string, origin: string}>,
+     *     cellSize: int,
+     *     bounds: array{0: int, 1: int, 2: int, 3: int},
+     *     bg: array{0: int, 1: int, 2: int},
+     *     styles: array<string, array{fill: string, minZ: float, order: int}>,
+     *     cells: array<string, list<array{0: string, 1: list<int>}>>,
+     *     labels: list<array{t: string, x: float, y: float, k: string, s: float}>,
+     *     stats: array{features: int, cells: int, points: int, labels: int, sources: int}
+     * }
+     */
+    public function buildFromSources(
+        array $sources,
+        string $source = 'merged',
+        int $cellSize = self::DEFAULT_CELL_SIZE,
+    ): array {
+        if ($sources === []) {
+            throw new InvalidArgumentException('No worldmap sources provided');
         }
 
-        $translations = $this->loadLabelTranslations($mapLabelJsonPath);
-        $geometry = $this->parseWorldmapXml($worldmapXmlPath, $cellSize);
-        $labels = $this->parseAnnotations($annotationsLuaPath, $translations);
+        /** @var array<string, list<array{0: string, 1: list<int>}>> $cells */
+        $cells = [];
+        $minX = PHP_INT_MAX;
+        $minY = PHP_INT_MAX;
+        $maxX = PHP_INT_MIN;
+        $maxY = PHP_INT_MIN;
+        $featureCount = 0;
+        $pointCount = 0;
+        /** @var list<array{t: string, x: float, y: float, k: string, s: float}> $labels */
+        $labels = [];
+        /** @var list<array{name: string, origin: string}> $mapMeta */
+        $mapMeta = [];
+        /** @var array<string, string> $mergedTranslations */
+        $mergedTranslations = [];
 
-        // Town labels from worldmap place features (name_en)
-        foreach ($geometry['place_labels'] as $label) {
-            $labels[] = $label;
+        // Apply base (last Map= entry) first, then overlays so earlier Map= folders win.
+        $ordered = array_reverse(array_values($sources));
+
+        foreach ($ordered as $entry) {
+            $xml = $entry['xml'] ?? null;
+            if (! is_string($xml) || ! is_file($xml)) {
+                throw new InvalidArgumentException('worldmap.xml not found: '.(string) $xml);
+            }
+
+            $name = (string) ($entry['name'] ?? basename(dirname($xml)));
+            $origin = (string) ($entry['origin'] ?? 'unknown');
+            $mapMeta[] = ['name' => $name, 'origin' => $origin];
+
+            $labelsPath = isset($entry['labels']) && is_string($entry['labels']) ? $entry['labels'] : null;
+            $mergedTranslations = array_merge($mergedTranslations, $this->loadLabelTranslations($labelsPath));
+
+            $geometry = $this->parseWorldmapXml($xml, $cellSize);
+
+            // Cell replace: overlay pack owns the whole cell when it defines it.
+            foreach ($geometry['cells'] as $cellKey => $features) {
+                $cells[$cellKey] = $features;
+            }
+
+            $featureCount += $geometry['feature_count'];
+            $pointCount += $geometry['point_count'];
+            $minX = min($minX, $geometry['bounds'][0]);
+            $minY = min($minY, $geometry['bounds'][1]);
+            $maxX = max($maxX, $geometry['bounds'][2]);
+            $maxY = max($maxY, $geometry['bounds'][3]);
+
+            $annotations = isset($entry['annotations']) && is_string($entry['annotations'])
+                ? $entry['annotations']
+                : null;
+            foreach ($this->parseAnnotations($annotations, $mergedTranslations) as $label) {
+                $labels[] = $label;
+            }
+            foreach ($geometry['place_labels'] as $label) {
+                $labels[] = $label;
+            }
         }
 
+        // mapMeta was built base-first; restore Map= order for the asset metadata
+        $mapMeta = array_reverse($mapMeta);
         $labels = $this->dedupeLabels($labels);
+        ksort($cells, SORT_NATURAL);
+
+        // Recount after cell overwrites so stats match the published geometry
+        $featureCount = 0;
+        $pointCount = 0;
+        foreach ($cells as $features) {
+            $featureCount += count($features);
+            foreach ($features as $feature) {
+                $pointCount += intdiv(count($feature[1]), 2);
+            }
+        }
+
+        if ($featureCount === 0) {
+            throw new RuntimeException('No drawable features found in provided worldmap sources');
+        }
+
+        $sourceTag = $source;
+        if ($source === 'merged' && count($mapMeta) === 1) {
+            $sourceTag = $mapMeta[0]['name'];
+        } elseif ($source === 'merged') {
+            $sourceTag = 'merged:'.implode('+', array_column($mapMeta, 'name'));
+        }
 
         return [
             'v' => self::FORMAT_VERSION,
-            'source' => $source,
+            'source' => $sourceTag,
+            'maps' => $mapMeta,
             'cellSize' => $cellSize,
-            'bounds' => $geometry['bounds'],
+            'bounds' => [$minX, $minY, $maxX, $maxY],
             'bg' => [219, 215, 192],
             'styles' => self::LAYER_STYLES,
-            'cells' => $geometry['cells'],
+            'cells' => $cells,
             'labels' => $labels,
             'stats' => [
-                'features' => $geometry['feature_count'],
-                'cells' => count($geometry['cells']),
-                'points' => $geometry['point_count'],
+                'features' => $featureCount,
+                'cells' => count($cells),
+                'points' => $pointCount,
                 'labels' => count($labels),
+                'sources' => count($mapMeta),
             ],
         ];
     }

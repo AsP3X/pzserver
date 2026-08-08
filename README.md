@@ -136,7 +136,8 @@ These are generated on the host and are gitignored:
 The admin **Player map** shows live/offline player markers on a basemap. By default the panel uses a **vector basemap** (`public/map-vector/vanilla/map.json`, ~1.5 MB) drawn from vanilla `worldmap.xml` — no tile generation and no CDN. Details: [docs/map-vector.md](docs/map-vector.md).
 
 ```bash
-# Rebuild after a Project Zomboid map update (needs game media)
+# Rebuild after a PZ map update or when Map= / map mods change
+docker exec -it pz-app php artisan zomboid:build-worldmap-vector --list-only
 docker exec -it pz-app php artisan zomboid:build-worldmap-vector
 # or:
 docker compose exec app php artisan zomboid:build-worldmap-vector

@@ -78,3 +78,35 @@ it('writes JSON without stats metadata', function () {
         @unlink($out);
     }
 });
+
+it('merges mod + vanilla maps with first Map= entry winning cell overlaps', function () {
+    $data = $this->builder->buildFromSources([
+        [
+            'name' => 'Mod Town',
+            'xml' => $this->fixtureDir.'/mod-town-worldmap.xml',
+            'origin' => 'workshop:1',
+        ],
+        [
+            'name' => 'Muldraugh, KY',
+            'xml' => $this->fixtureDir.'/sample-worldmap.xml',
+            'annotations' => $this->fixtureDir.'/sample-annotations.lua',
+            'labels' => $this->fixtureDir.'/MapLabel.json',
+            'origin' => 'server-media',
+        ],
+    ]);
+
+    expect($data['stats']['sources'])->toBe(2)
+        ->and($data['maps'])->toHaveCount(2)
+        ->and($data['cells'])->toHaveKey('80,80') // mod-only town
+        ->and($data['cells'])->toHaveKey('35,32')
+        ->and($data['cells'])->toHaveKey('36,32');
+
+    // Overlap cell: mod pack wins (Industrial), not vanilla Residential
+    $layers = collect($data['cells']['35,32'])->pluck(0)->all();
+    expect($layers)->toContain('building-Industrial')
+        ->and($layers)->not->toContain('building-Residential');
+
+    $texts = collect($data['labels'])->pluck('t')->all();
+    expect($texts)->toContain('MODVILLE')
+        ->and($texts)->toContain('MULDRAUGH');
+});
