@@ -95,6 +95,24 @@ CONFIG_STATE="MaxPlayers=50" MAX_PLAYERS=24 \
 
 assert_setting "falls back to default 16 when nothing is set" MaxPlayers 16
 
+# --- PauseEmpty ---------------------------------------------------------------
+# PZ only reads the INI at startup and rewrites it from memory on shutdown, so a
+# web UI toggle survives a restart only via .config_state. These pin the whole
+# chain: default -> env (both image names) -> .config_state.
+assert_setting "PauseEmpty defaults to true when nothing is set" PauseEmpty true
+
+PZ_PAUSE_ON_EMPTY=false \
+    assert_setting "ARM64 PZ_PAUSE_ON_EMPTY is honoured" PauseEmpty false
+
+PAUSE_ON_EMPTY=false \
+    assert_setting "AMD64 PAUSE_ON_EMPTY is honoured when PZ_PAUSE_ON_EMPTY is unset" PauseEmpty false
+
+CONFIG_STATE="PauseEmpty=true" PZ_PAUSE_ON_EMPTY=false \
+    assert_setting "web UI PauseEmpty=true survives a restart against PZ_PAUSE_ON_EMPTY=false" PauseEmpty true
+
+CONFIG_STATE="PauseEmpty=false" PZ_PAUSE_ON_EMPTY=true \
+    assert_setting "web UI PauseEmpty=false survives a restart against PZ_PAUSE_ON_EMPTY=true" PauseEmpty false
+
 # --- Passwords (same both-names fix) -----------------------------------------
 ADMIN_PASSWORD="s3cret-admin" \
     assert_setting "AMD64 ADMIN_PASSWORD is honoured when PZ_ADMIN_PASSWORD is unset" AdminPassword "s3cret-admin"
