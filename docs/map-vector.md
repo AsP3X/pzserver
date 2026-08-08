@@ -86,6 +86,15 @@ When only `--xml` is set, discovery is skipped. Without `--xml`, sources come fr
 
 After adding/removing **map mods**, re-run the bake and hard-refresh the browser so the new pack is used. Commit the regenerated `map.json` if you want deploys to ship that exact merge without baking on the server.
 
+### Admin UI
+
+**Admin → Player map → Vector basemap** card:
+
+- Lists resolved `Map=` packs (origin + found/missing)
+- Optional **Also include workshop maps not listed on Map=**
+- **Rebuild vector basemap** runs the same bake as the artisan command (`POST /admin/players/map/bake-vector`)
+- Writes `public/map-vector/vanilla/map.json` (or `PZ_MAP_VECTOR_PATH`) and records audit action `map.vector_bake`
+
 ## Configuration
 
 | Env / config | Default | Meaning |

@@ -4,8 +4,8 @@ use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapTileController;
 use App\Http\Controllers\NewsController;
-use App\Http\Controllers\PlayerCharacterController;
 use App\Http\Controllers\ObituaryController;
+use App\Http\Controllers\PlayerCharacterController;
 use App\Http\Controllers\PlayerInventoryController;
 use App\Http\Controllers\PlayerMapController;
 use App\Http\Controllers\PlayerProfileController;
@@ -14,8 +14,8 @@ use App\Http\Controllers\PlayerVaultController;
 use App\Http\Controllers\PortalController;
 use App\Http\Controllers\RankingsController;
 use App\Http\Controllers\ShopController;
-use App\Http\Controllers\SteamAuthController;
 use App\Http\Controllers\StatusController;
+use App\Http\Controllers\SteamAuthController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Route;
 
@@ -92,6 +92,7 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
         // World actions (weather). Sensitive: these change the world for everyone.
         Route::post('world/actions', [Admin\WorldActionController::class, 'store'])->name('world.actions')->middleware('throttle:admin-sensitive');
 
+        Route::post('players/map/bake-vector', [Admin\PlayerMapController::class, 'bakeVector'])->name('players.map.bake-vector')->middleware('throttle:admin-sensitive');
         Route::post('players/map/generate-tiles', [Admin\PlayerMapController::class, 'generateTiles'])->name('players.map.generate-tiles')->middleware('throttle:admin-sensitive');
         Route::post('players/map/stop-tiles', [Admin\PlayerMapController::class, 'stopTiles'])->name('players.map.stop-tiles')->middleware('throttle:admin-sensitive');
 

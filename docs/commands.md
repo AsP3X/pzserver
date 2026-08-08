@@ -93,6 +93,8 @@ docker compose exec app php artisan zomboid:build-worldmap-vector
 make exec CMD="php artisan zomboid:build-worldmap-vector"
 ```
 
+**Admin UI (no SSH):** Admin → Player map → **Vector basemap** → **Rebuild vector basemap** (`POST /admin/players/map/bake-vector`).
+
 Proxy tiles (`map.projectzomboid.com`) or local isometric tiles are opt-in via `PZ_MAP_BASEMAP`.
 
 After generation, tiles are **packed into a single SQLite file** (`data/map-tiles/tiles.sqlite`) so the host does not retain millions of loose DZI image files. See [map-tiles.md](map-tiles.md) for full details.

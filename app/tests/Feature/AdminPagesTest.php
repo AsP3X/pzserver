@@ -616,6 +616,11 @@ it('renders the player map page with merged data', function () {
         ],
     ]);
 
+    $onlinePlayers = Mockery::mock(OnlinePlayersReader::class);
+    $onlinePlayers->shouldReceive('getOnlineUsernames')->andReturn(['Alice']);
+    $onlinePlayers->shouldReceive('getOnlinePlayers')->andReturn(['usernames' => ['Alice'], 'source' => 'test']);
+    app()->instance(OnlinePlayersReader::class, $onlinePlayers);
+
     $response = $this->actingAs(adminUser())->get('/admin/players/map');
 
     $response->assertOk();
@@ -624,12 +629,51 @@ it('renders the player map page with merged data', function () {
         ->has('markers', 2)
         ->has('mapConfig')
         ->has('hasTiles')
+        ->has('vectorSources')
+        ->has('vectorAsset')
         ->where('markers.0.username', 'Alice')
         ->where('markers.0.status', 'online')
         ->where('markers.0.x', 10510)
         ->where('markers.1.username', 'Bob')
         ->where('markers.1.status', 'offline')
     );
+});
+
+it('bakes the vector basemap from the admin endpoint', function () {
+    $root = sys_get_temp_dir().'/pz_admin_vector_'.getmypid().'_'.bin2hex(random_bytes(4));
+    $server = $root.'/server';
+    $out = $root.'/map.json';
+    mkdir($server.'/media/maps/Muldraugh, KY', 0755, true);
+    copy(base_path('tests/Fixtures/worldmap/sample-worldmap.xml'), $server.'/media/maps/Muldraugh, KY/worldmap.xml');
+    file_put_contents($root.'/server.ini', "Map=Muldraugh, KY\n");
+
+    config([
+        'zomboid.game_server_path' => $server,
+        'zomboid.paths.server_ini' => $root.'/server.ini',
+        'zomboid.map.vector_path' => $out,
+        'zomboid.map.extra_media_roots' => [],
+    ]);
+
+    try {
+        $response = $this->actingAs(adminUser())->postJson('/admin/players/map/bake-vector', [
+            'scan_workshop' => false,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true);
+
+        expect(is_file($out))->toBeTrue()
+            ->and(AuditLog::query()->where('action', 'map.vector_bake')->exists())->toBeTrue();
+    } finally {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $file) {
+            $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+        }
+        @rmdir($root);
+    }
 });
 
 it('renders player map with empty data', function () {

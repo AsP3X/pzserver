@@ -51,6 +51,31 @@ type Faction = {
     members: string[];
 };
 
+type VectorSource = {
+    name: string;
+    origin: string;
+    xml: string;
+    has_annotations: boolean;
+    missing?: boolean;
+};
+
+type VectorAsset = {
+    exists: boolean;
+    bytes: number | null;
+    modified_at: string | null;
+    url: string;
+};
+
+type VectorBakeResult = {
+    ok: boolean;
+    message: string;
+    bytes?: number;
+    source?: string;
+    maps?: Array<{ name: string; origin: string }>;
+    stats?: Record<string, number>;
+    finished_at?: string;
+} | null;
+
 type Props = {
     markers: PlayerMarker[];
     onlineCount: number;
@@ -65,6 +90,9 @@ type Props = {
     safeZones: SafeZone[];
     safehouses: Safehouse[];
     factions: Faction[];
+    vectorSources?: VectorSource[];
+    vectorAsset?: VectorAsset | null;
+    vectorBakeResult?: VectorBakeResult;
 };
 
 const statusDotColor: Record<PlayerMarker['status'], string> = {
@@ -92,11 +120,17 @@ export default function PlayerMap({
     safeZones,
     safehouses,
     factions,
+    vectorSources = [],
+    vectorAsset = null,
+    vectorBakeResult = null,
 }: Props) {
     const { t } = useTranslation();
     const [genLoading, setGenLoading] = useState(false);
     const [stopLoading, setStopLoading] = useState(false);
     const [genMessage, setGenMessage] = useState<string | null>(null);
+    const [bakeLoading, setBakeLoading] = useState(false);
+    const [bakeMessage, setBakeMessage] = useState<string | null>(null);
+    const [scanWorkshop, setScanWorkshop] = useState(false);
 
     const isGenerating = Boolean(tilesGenerating || tileProgress?.generating);
 
@@ -114,8 +148,51 @@ export default function PlayerMap({
             'localTilesReady',
             'tilesGenerating',
             'canResume',
+            'vectorSources',
+            'vectorAsset',
+            'vectorBakeResult',
         ],
     });
+
+    async function bakeVector() {
+        setBakeLoading(true);
+        setBakeMessage(null);
+        try {
+            const csrf = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+            const res = await fetch('/admin/players/map/bake-vector', {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ scan_workshop: scanWorkshop }),
+            });
+            const json = await res.json().catch(() => ({}));
+            setBakeMessage(
+                typeof json.message === 'string'
+                    ? json.message
+                    : res.ok
+                      ? t('admin.player_map.vector_bake_ok')
+                      : t('admin.player_map.vector_bake_failed'),
+            );
+            router.reload({
+                only: [
+                    'hasTiles',
+                    'tileSource',
+                    'mapConfig',
+                    'vectorSources',
+                    'vectorAsset',
+                    'vectorBakeResult',
+                ],
+            });
+        } catch {
+            setBakeMessage(t('admin.player_map.vector_bake_network_error'));
+        }
+        setBakeLoading(false);
+    }
 
     async function generateTiles(opts: { force?: boolean; resume?: boolean } = {}) {
         setGenLoading(true);
@@ -277,7 +354,102 @@ export default function PlayerMap({
                     </div>
                 </div>
 
-                {/* Always-visible map tile controls (not buried in header overflow) */}
+                {/* Vector basemap: default efficient path (Map= + workshop worldmap.xml) */}
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base">{t('admin.player_map.vector_panel_title')}</CardTitle>
+                        <p className="text-muted-foreground text-sm">{t('admin.player_map.vector_panel_help')}</p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                            <span>
+                                {vectorAsset?.exists
+                                    ? t('admin.player_map.vector_asset_ready', {
+                                          size: vectorAsset.bytes
+                                              ? `${(vectorAsset.bytes / 1024 / 1024).toFixed(2)} MB`
+                                              : '—',
+                                      })
+                                    : t('admin.player_map.vector_asset_missing')}
+                            </span>
+                            {vectorAsset?.modified_at && (
+                                <span>
+                                    {t('admin.player_map.vector_asset_updated', {
+                                        time: new Date(vectorAsset.modified_at).toLocaleString(),
+                                    })}
+                                </span>
+                            )}
+                        </div>
+
+                        {vectorSources.length > 0 ? (
+                            <div className="overflow-x-auto rounded-md border border-border">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-muted/50 text-muted-foreground">
+                                        <tr>
+                                            <th className="px-3 py-2 font-medium">{t('admin.player_map.vector_col_map')}</th>
+                                            <th className="px-3 py-2 font-medium">{t('admin.player_map.vector_col_origin')}</th>
+                                            <th className="px-3 py-2 font-medium">{t('admin.player_map.vector_col_status')}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {vectorSources.map((src) => (
+                                            <tr key={`${src.name}-${src.origin}`} className="border-t border-border">
+                                                <td className="px-3 py-1.5 font-medium">{src.name}</td>
+                                                <td className="text-muted-foreground px-3 py-1.5 font-mono">{src.origin}</td>
+                                                <td className="px-3 py-1.5">
+                                                    {src.missing ? (
+                                                        <span className="text-red-400">{t('admin.player_map.vector_source_missing')}</span>
+                                                    ) : (
+                                                        <span className="text-green-500">{t('admin.player_map.vector_source_ok')}</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <p className="text-muted-foreground text-xs">{t('admin.player_map.vector_sources_empty')}</p>
+                        )}
+
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                className="size-4 rounded border-border"
+                                checked={scanWorkshop}
+                                onChange={(e) => setScanWorkshop(e.target.checked)}
+                                disabled={bakeLoading}
+                            />
+                            <span>{t('admin.player_map.vector_scan_workshop')}</span>
+                        </label>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={bakeLoading}
+                                onClick={() => bakeVector()}
+                                className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                            >
+                                {bakeLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                {t('admin.player_map.vector_bake')}
+                            </button>
+                        </div>
+
+                        {(bakeMessage || vectorBakeResult?.message) && (
+                            <div
+                                className={`rounded-md border px-3 py-2 text-sm ${
+                                    (bakeMessage ?? vectorBakeResult?.message)?.toLowerCase().includes('fail')
+                                    || vectorBakeResult?.ok === false
+                                        ? 'border-red-500/30 bg-red-500/10 text-red-400'
+                                        : 'border-border bg-background'
+                                }`}
+                            >
+                                {bakeMessage ?? vectorBakeResult?.message}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+
+                {/* Optional isometric tile controls */}
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base">{t('admin.player_map.tiles_panel_title')}</CardTitle>

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\BakeVectorMapRequest;
+use App\Services\AuditLogger;
 use App\Services\HoldingsReader;
 use App\Services\MapConfigBuilder;
 use App\Services\MapTileGenerator;
@@ -13,6 +15,7 @@ use App\Services\PlayerPositionReader;
 use App\Services\PlayersDbReader;
 use App\Services\SafeZoneManager;
 use App\Services\ServerStatusResolver;
+use App\Services\WorldMapVectorBakeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -31,6 +34,8 @@ class PlayerMapController extends Controller
         private readonly MapTileProgress $tileProgress,
         private readonly MapTileGenerator $tileGenerator,
         private readonly HoldingsReader $holdingsReader,
+        private readonly WorldMapVectorBakeService $vectorBake,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function __invoke(): InertiaResponse
@@ -130,7 +135,35 @@ class PlayerMapController extends Controller
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
             'safehouses' => $holdings['safehouses'],
             'factions' => $holdings['factions'],
+            'vectorSources' => $this->vectorBake->listSources(),
+            'vectorAsset' => $this->vectorBake->assetStatus(),
+            'vectorBakeResult' => $this->vectorBake->lastResult(),
         ]);
+    }
+
+    /**
+     * Rebuild the vector basemap from Map= / workshop worldmap.xml packs.
+     */
+    public function bakeVector(BakeVectorMapRequest $request): JsonResponse
+    {
+        $scanWorkshop = (bool) $request->boolean('scan_workshop');
+        $result = $this->vectorBake->bake(scanWorkshop: $scanWorkshop);
+
+        $this->auditLogger->log(
+            actor: $request->user()?->name ?? 'admin',
+            action: 'map.vector_bake',
+            target: 'vector-basemap',
+            details: [
+                'ok' => $result['ok'],
+                'scan_workshop' => $scanWorkshop,
+                'source' => $result['source'] ?? null,
+                'bytes' => $result['bytes'] ?? null,
+                'maps' => $result['maps'] ?? null,
+            ],
+            ip: $request->ip(),
+        );
+
+        return response()->json($result, $result['ok'] ? 200 : 422);
     }
 
     /**
