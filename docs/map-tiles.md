@@ -16,11 +16,39 @@ Set `PZ_MAP_BASEMAP=proxy` (or fall back when the vector pack is missing) to use
 - No local disk usage beyond the panel itself
 - Requires outbound HTTPS from the browser (or users) to the proxy host
 
-## Advanced: local isometric tiles
+## 3D isometric basemap (live + optional local)
 
-Local generation is an **advanced** option (Admin → Player map → **Isometric tiles** collapsible). Prefer the **vector** basemap for day-to-day use. Use isometric tiles only if you want photorealistic art, custom/mod maps as images, or offline tiles without the vector pack.
+Admin → Player map → **Map view** toggle:
 
-Force isometric after a successful generate: `PZ_MAP_BASEMAP=local` (or `proxy` for the public CDN).
+| Mode | What you see | Server load |
+|------|----------------|-------------|
+| **Vector (2D)** | Schematic worldmap (default) | Minimal (static JSON) |
+| **3D isometric** | Game-like isometric tiles | **Live CDN** immediately (`map.projectzomboid.com`); optional local pack |
+
+### Live first (no wait)
+
+Switching to **3D isometric** always shows tiles **right away** via the public proxy when local tiles are not ready. Generation never blanks the map.
+
+### Efficient local generation (`--profile=lite` default)
+
+When you need offline / modded isometric tiles, generate with the **lite** profile (Admin UI default):
+
+- Ground layer only (`layer_range: [0,0]`)
+- More omitted high-zoom levels (`omit_levels: 5`)
+- 1 worker + nice/ionice (game disk friendly)
+- WebP + packed `tiles.sqlite`
+
+```bash
+# Lite (recommended on a live server)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=lite
+
+# Full detail (heavier — prefer when idle)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=full
+```
+
+After a successful pack, 3D mode automatically prefers **local** tiles over the CDN.
+
+Force server-wide default isometric: `PZ_MAP_BASEMAP=local` or `proxy`.
 
 ## Optional: local tiles (packed SQLite)
 

@@ -115,10 +115,13 @@ class PlayerMapController extends Controller
             }
         }
 
+        $mapModes = $this->mapConfigBuilder->buildModes();
         $mapConfig = $this->mapConfigBuilder->build();
         $safeZoneConfig = $this->safeZoneManager->getConfig();
         $holdings = $this->holdingsReader->read();
-        $hasBasemap = (bool) ($mapConfig['hasBasemap'] ?? false);
+        $hasBasemap = (bool) ($mapConfig['hasBasemap'] ?? false)
+            || (bool) ($mapModes['vector']['hasBasemap'] ?? false)
+            || (bool) ($mapModes['isometric']['hasBasemap'] ?? false);
         $canResume = $this->tileStore->hasLooseTiles() && ! $this->tileGenerator->isRunning();
 
         return Inertia::render('admin/player-map', [
@@ -126,9 +129,10 @@ class PlayerMapController extends Controller
             'onlineCount' => $resolved['player_count'],
             'serverStatus' => $resolved['game_status'],
             'mapConfig' => $mapConfig,
+            'mapModes' => $mapModes,
             'hasTiles' => $hasBasemap,
             'tileSource' => $mapConfig['source'] ?? 'none',
-            'localTilesReady' => (bool) ($mapConfig['local_ready'] ?? false),
+            'localTilesReady' => (bool) ($mapModes['isometric_local_ready'] ?? false),
             'canResume' => $canResume,
             'tileProgress' => $this->readTileProgress(),
             'tilesGenerating' => $this->tileGenerator->isRunning(),
@@ -171,9 +175,11 @@ class PlayerMapController extends Controller
      */
     public function generateTiles(Request $request): JsonResponse
     {
+        $profile = (string) $request->input('profile', 'lite');
         $result = $this->tileGenerator->start(
             force: (bool) $request->boolean('force'),
             resume: (bool) $request->boolean('resume'),
+            profile: $profile,
         );
 
         return response()->json($result, $result['ok'] ? 200 : (

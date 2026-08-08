@@ -12,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import AppLayout from '@/layouts/app-layout';
 import { fetchAction } from '@/lib/fetch-action';
 import type { BreadcrumbItem } from '@/types';
-import type { MapConfig, PlayerMarker } from '@/types/server';
+import type { MapConfig, MapModes, MapViewMode, PlayerMarker } from '@/types/server';
 
 type TileProgress = {
     generating: boolean;
@@ -82,6 +82,7 @@ type Props = {
     onlineCount: number;
     serverStatus: 'offline' | 'starting' | 'online';
     mapConfig: MapConfig;
+    mapModes?: MapModes | null;
     hasTiles: boolean;
     tileSource?: 'local' | 'proxy' | 'none' | string;
     localTilesReady?: boolean;
@@ -95,6 +96,20 @@ type Props = {
     vectorAsset?: VectorAsset | null;
     vectorBakeResult?: VectorBakeResult;
 };
+
+const VIEW_MODE_KEY = 'pz-map-view-mode';
+
+function readStoredViewMode(fallback: MapViewMode): MapViewMode {
+    if (typeof window === 'undefined') {
+        return fallback;
+    }
+    const stored = window.localStorage.getItem(VIEW_MODE_KEY);
+    if (stored === 'vector' || stored === 'isometric') {
+        return stored;
+    }
+
+    return fallback;
+}
 
 const statusDotColor: Record<PlayerMarker['status'], string> = {
     online: 'fill-green-500 text-green-500',
@@ -112,6 +127,7 @@ export default function PlayerMap({
     onlineCount,
     serverStatus,
     mapConfig,
+    mapModes = null,
     hasTiles,
     tileSource = 'proxy',
     localTilesReady = false,
@@ -132,12 +148,40 @@ export default function PlayerMap({
     const [bakeLoading, setBakeLoading] = useState(false);
     const [bakeMessage, setBakeMessage] = useState<string | null>(null);
     const [scanWorkshop, setScanWorkshop] = useState(false);
+    const [isoProfile, setIsoProfile] = useState<'lite' | 'full'>('lite');
+
+    const modeDefault: MapViewMode =
+        mapModes?.default === 'isometric' ? 'isometric' : 'vector';
+    const [viewMode, setViewMode] = useState<MapViewMode>(() => readStoredViewMode(modeDefault));
 
     const isGenerating = Boolean(tilesGenerating || tileProgress?.generating);
-    // Isometric tiles are advanced: expand when actively used or generating
+    // Isometric tiles panel: expand when generating or when viewing 3D mode
     const [isoOpen, setIsoOpen] = useState(
-        () => isGenerating || localTilesReady || tileSource === 'local' || tileSource === 'proxy' || canResume,
+        () => isGenerating || localTilesReady || viewMode === 'isometric' || canResume,
     );
+
+    const vectorModeConfig = mapModes?.vector ?? (mapConfig.source === 'vector' ? mapConfig : null);
+    const isometricModeConfig = mapModes?.isometric ?? mapConfig;
+    const activeMapConfig: MapConfig =
+        viewMode === 'isometric'
+            ? isometricModeConfig
+            : (vectorModeConfig ?? mapConfig);
+    const activeHasTiles = Boolean(activeMapConfig.hasBasemap ?? hasTiles);
+    const isometricLocalReady = Boolean(mapModes?.isometric_local_ready ?? localTilesReady);
+    const isometricLiveProxy =
+        viewMode === 'isometric' && activeMapConfig.source === 'proxy';
+
+    function selectViewMode(mode: MapViewMode) {
+        setViewMode(mode);
+        try {
+            window.localStorage.setItem(VIEW_MODE_KEY, mode);
+        } catch {
+            // ignore quota / private mode
+        }
+        if (mode === 'isometric') {
+            setIsoOpen(true);
+        }
+    }
 
     usePoll(isGenerating ? 3000 : 5000, {
         only: [
@@ -156,6 +200,8 @@ export default function PlayerMap({
             'vectorSources',
             'vectorAsset',
             'vectorBakeResult',
+            'mapModes',
+            'mapConfig',
         ],
     });
 
@@ -213,12 +259,27 @@ export default function PlayerMap({
                     'X-Requested-With': 'XMLHttpRequest',
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({ force: !!opts.force, resume: !!opts.resume }),
+                body: JSON.stringify({
+                    force: !!opts.force,
+                    resume: !!opts.resume,
+                    profile: isoProfile,
+                }),
             });
             const json = await res.json().catch(() => ({}));
             setGenMessage(json.message || (res.ok ? 'Started' : 'Failed to start'));
+            selectViewMode('isometric');
+            setIsoOpen(true);
             router.reload({
-                only: ['tilesGenerating', 'tileProgress', 'hasTiles', 'tileSource', 'localTilesReady', 'canResume'],
+                only: [
+                    'tilesGenerating',
+                    'tileProgress',
+                    'hasTiles',
+                    'tileSource',
+                    'localTilesReady',
+                    'canResume',
+                    'mapModes',
+                    'mapConfig',
+                ],
             });
         } catch {
             setGenMessage('Network error starting tile generation');
@@ -351,13 +412,67 @@ export default function PlayerMap({
                             </Badge>
                         )}
                         <Badge
-                            variant={tileSource === 'vector' || localTilesReady || tileSource === 'proxy' ? 'default' : 'secondary'}
+                            variant={activeHasTiles ? 'default' : 'secondary'}
                             className="text-sm"
                         >
-                            {t('admin.player_map.basemap_badge', { source: tileSource })}
+                            {t('admin.player_map.basemap_badge', {
+                                source:
+                                    viewMode === 'isometric'
+                                        ? `3d/${activeMapConfig.source ?? 'iso'}`
+                                        : (activeMapConfig.source ?? tileSource),
+                            })}
                         </Badge>
                     </div>
                 </div>
+
+                {/* Vector | 3D isometric basemap switcher */}
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base">{t('admin.player_map.view_mode_title')}</CardTitle>
+                        <p className="text-muted-foreground text-sm">{t('admin.player_map.view_mode_help')}</p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <div className="inline-flex rounded-lg border border-border p-1">
+                            <button
+                                type="button"
+                                disabled={!vectorModeConfig?.hasBasemap}
+                                onClick={() => selectViewMode('vector')}
+                                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                    viewMode === 'vector'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-muted'
+                                } disabled:opacity-40`}
+                            >
+                                {t('admin.player_map.view_mode_vector')}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!isometricModeConfig?.hasBasemap}
+                                onClick={() => selectViewMode('isometric')}
+                                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                    viewMode === 'isometric'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-muted'
+                                } disabled:opacity-40`}
+                            >
+                                {t('admin.player_map.view_mode_isometric')}
+                            </button>
+                        </div>
+                        {viewMode === 'isometric' && (
+                            <p className="text-muted-foreground text-xs">
+                                {isometricLocalReady
+                                    ? t('admin.player_map.view_mode_iso_local')
+                                    : t('admin.player_map.view_mode_iso_live')}
+                            </p>
+                        )}
+                        {viewMode === 'isometric' && isGenerating && (
+                            <div className="flex items-center gap-2 rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">
+                                <Loader2 className="size-3.5 animate-spin" />
+                                {t('admin.player_map.view_mode_iso_generating')}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
 
                 {/* Vector basemap: default efficient path (Map= + workshop worldmap.xml) */}
                 <Card>
@@ -485,6 +600,34 @@ export default function PlayerMap({
                                 <p className="text-muted-foreground text-xs">
                                     {t('admin.player_map.tiles_panel_env_hint')}
                                 </p>
+                                <div className="flex flex-wrap items-center gap-3 text-sm">
+                                    <span className="text-muted-foreground">{t('admin.player_map.iso_profile_label')}</span>
+                                    <label className="inline-flex items-center gap-1.5">
+                                        <input
+                                            type="radio"
+                                            name="iso-profile"
+                                            checked={isoProfile === 'lite'}
+                                            onChange={() => setIsoProfile('lite')}
+                                            disabled={genLoading || isGenerating}
+                                        />
+                                        {t('admin.player_map.iso_profile_lite')}
+                                    </label>
+                                    <label className="inline-flex items-center gap-1.5">
+                                        <input
+                                            type="radio"
+                                            name="iso-profile"
+                                            checked={isoProfile === 'full'}
+                                            onChange={() => setIsoProfile('full')}
+                                            disabled={genLoading || isGenerating}
+                                        />
+                                        {t('admin.player_map.iso_profile_full')}
+                                    </label>
+                                </div>
+                                <p className="text-muted-foreground text-xs">
+                                    {isoProfile === 'lite'
+                                        ? t('admin.player_map.iso_profile_lite_help')
+                                        : t('admin.player_map.iso_profile_full_help')}
+                                </p>
                                 <div className="flex flex-wrap items-center gap-2">
                                     {isGenerating ? (
                                         <button
@@ -599,16 +742,25 @@ export default function PlayerMap({
 
                 <Card className="isolate flex-1">
                     <CardContent className="relative h-[350px] p-0 sm:h-[500px] lg:h-[600px]">
-                        {!hasTiles && !isGenerating && (
+                        {!activeHasTiles && !isGenerating && (
                             <div className="bg-muted/80 text-muted-foreground absolute top-2 left-1/2 z-[1000] -translate-x-1/2 rounded-md px-3 py-1.5 text-xs backdrop-blur-sm">
                                 {t('admin.player_map.no_tiles')} <code className="font-mono">{t('admin.player_map.no_tiles_command')}</code>{' '}
                                 {t('admin.player_map.no_tiles_suffix')}
                             </div>
                         )}
+                        {isometricLiveProxy && (
+                            <div className="bg-background/85 text-muted-foreground absolute top-2 left-1/2 z-[1000] -translate-x-1/2 rounded-md border border-border px-3 py-1.5 text-[11px] shadow-sm backdrop-blur-sm">
+                                {t('admin.player_map.iso_live_banner')}
+                            </div>
+                        )}
                         <PzMap
+                            key={`map-${viewMode}-${activeMapConfig.source ?? 'none'}-${activeMapConfig.tileUrl ?? activeMapConfig.vectorUrl ?? ''}`}
                             markers={markers}
-                            mapConfig={mapConfig}
-                            hasTiles={hasTiles}
+                            mapConfig={activeMapConfig}
+                            hasTiles={activeHasTiles}
+                            showLegend={viewMode === 'vector'}
+                            showPacks={viewMode === 'vector'}
+                            showCoordinates={viewMode === 'vector'}
                             onMarkerAction={handleMarkerAction}
                             zones={zoneOverlays}
                             className="h-full w-full rounded-xl"

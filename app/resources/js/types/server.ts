@@ -336,6 +336,17 @@ export type MapConfig = {
     local_ready?: boolean;
 };
 
+/** Dual basemap modes for the Vector | 3D isometric UI toggle. */
+export type MapModes = {
+    default: 'vector' | 'isometric' | string;
+    vector: MapConfig | null;
+    isometric: MapConfig;
+    isometric_local_ready: boolean;
+    isometric_generating: boolean;
+};
+
+export type MapViewMode = 'vector' | 'isometric';
+
 export type InventoryItem = {
     full_type: string;
     name: string;

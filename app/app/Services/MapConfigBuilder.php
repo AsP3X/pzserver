@@ -19,21 +19,7 @@ class MapConfigBuilder
      *
      * Force with config zomboid.map.basemap = vector|local|proxy|auto
      *
-     * @return array{
-     *     tileUrl: string|null,
-     *     tileSize: int,
-     *     minZoom: int|float,
-     *     maxZoom: int|float,
-     *     defaultZoom: int|float,
-     *     center: array{x: float|int, y: float|int},
-     *     dzi: array|null,
-     *     source: string,
-     *     local_ready: bool,
-     *     tiles_path: string,
-     *     vectorUrl: string|null,
-     *     bounds: array{0: int, 1: int, 2: int, 3: int}|null,
-     *     hasBasemap: bool
-     * }
+     * @return array<string, mixed>
      */
     public function build(): array
     {
@@ -74,6 +60,48 @@ class MapConfigBuilder
         }
 
         return $this->proxyConfig();
+    }
+
+    /**
+     * Dual basemap modes for the map UI toggle.
+     *
+     * - vector: schematic worldmap (efficient, default)
+     * - isometric: game-like 3D/iso tiles — local pack when ready, else live CDN proxy
+     *   so the site always has something to render without waiting on generation
+     *
+     * @return array{
+     *     default: string,
+     *     vector: array<string, mixed>|null,
+     *     isometric: array<string, mixed>,
+     *     isometric_local_ready: bool,
+     *     isometric_generating: bool
+     * }
+     */
+    public function buildModes(): array
+    {
+        $vector = $this->vectorConfig();
+        $local = $this->localTileConfig();
+        $proxy = $this->proxyConfig();
+        $isometric = $local ?? $proxy;
+        $generating = $this->progress->isRunning();
+
+        $default = 'vector';
+        $forced = strtolower((string) config('zomboid.map.basemap', 'auto'));
+        if (in_array($forced, ['local', 'proxy'], true)) {
+            $default = 'isometric';
+        } elseif ($forced === 'vector' || ($vector !== null && $vector['hasBasemap'])) {
+            $default = 'vector';
+        } elseif ($isometric['hasBasemap'] ?? false) {
+            $default = 'isometric';
+        }
+
+        return [
+            'default' => $default,
+            'vector' => $vector,
+            'isometric' => $isometric,
+            'isometric_local_ready' => $local !== null,
+            'isometric_generating' => $generating,
+        ];
     }
 
     /**

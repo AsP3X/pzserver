@@ -60,7 +60,7 @@ class MapTileGenerator
     /**
      * @return array{ok: bool, message: string, log: string, pid?: int}
      */
-    public function start(bool $force = false, bool $resume = false): array
+    public function start(bool $force = false, bool $resume = false, string $profile = 'lite'): array
     {
         if ($force && $resume) {
             return [
@@ -68,6 +68,11 @@ class MapTileGenerator
                 'message' => 'Choose either force regenerate or resume, not both.',
                 'log' => $this->logPath(),
             ];
+        }
+
+        $profile = strtolower($profile);
+        if (! in_array($profile, ['lite', 'full'], true)) {
+            $profile = 'lite';
         }
 
         // Always reconcile first — restart leaves generating=true with a dead PID
@@ -87,24 +92,26 @@ class MapTileGenerator
             'step' => 0,
             'steps' => 3,
             'message' => $force
-                ? 'Queued full regenerate…'
-                : ($resume ? 'Queued resume…' : 'Queued map tile generation…'),
+                ? "Queued full regenerate ({$profile})…"
+                : ($resume ? "Queued resume ({$profile})…" : "Queued isometric tile generation ({$profile})…"),
+            'profile' => $profile,
         ]);
 
         $log = $this->logPath();
         @file_put_contents(
             $log,
-            '['.now()->toIso8601String()."] UI generate force=".($force ? '1' : '0')
+            '['.now()->toIso8601String().'] UI generate force='.($force ? '1' : '0')
             .' resume='.($resume ? '1' : '0')
+            ." profile={$profile}"
             ." php={$php}\n",
             FILE_APPEND
         );
 
-        $flags = '';
+        $flags = '--profile='.escapeshellarg($profile);
         if ($force) {
-            $flags = '--force';
+            $flags .= ' --force';
         } elseif ($resume) {
-            $flags = '--resume';
+            $flags .= ' --resume';
         }
 
         $artisan = base_path('artisan');

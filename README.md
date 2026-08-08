@@ -133,7 +133,10 @@ These are generated on the host and are gitignored:
 
 ## Map basemap (admin player map)
 
-The admin **Player map** shows live/offline player markers on a basemap. By default the panel uses a **vector basemap** (`public/map-vector/vanilla/map.json`, ~1.5 MB) drawn from vanilla `worldmap.xml` — no tile generation and no CDN. Details: [docs/map-vector.md](docs/map-vector.md).
+The admin **Player map** shows live/offline player markers on a basemap. **Map view** toggle:
+
+- **Vector (2D)** — default schematic basemap (`map.json`, low resource). [docs/map-vector.md](docs/map-vector.md)
+- **3D isometric** — game-like tiles; **live CDN first** (no wait), optional local generate with `--profile=lite`. [docs/map-tiles.md](docs/map-tiles.md)
 
 ```bash
 # Rebuild after a PZ map update or when Map= / map mods change

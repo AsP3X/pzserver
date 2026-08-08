@@ -172,3 +172,14 @@ it('can force proxy over available vector', function () {
     expect($config['source'])->toBe('proxy')
         ->and($config['vectorUrl'])->toBeNull();
 });
+
+it('exposes dual vector and isometric modes for the map UI toggle', function () {
+    $modes = $this->builder->buildModes();
+
+    expect($modes['default'])->toBe('vector')
+        ->and($modes['vector'])->not->toBeNull()
+        ->and($modes['vector']['source'])->toBe('vector')
+        ->and($modes['isometric']['hasBasemap'])->toBeTrue()
+        ->and(in_array($modes['isometric']['source'], ['proxy', 'local'], true))->toBeTrue()
+        ->and($modes['isometric_local_ready'])->toBeFalse();
+});
