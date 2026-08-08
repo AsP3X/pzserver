@@ -9,6 +9,19 @@ uses(Tests\TestCase::class);
 beforeEach(function () {
     $this->tempDir = sys_get_temp_dir().'/pz_map_cfg_'.getmypid().'_'.bin2hex(random_bytes(4));
     mkdir($this->tempDir, 0755, true);
+    $this->vectorDir = $this->tempDir.'/vector';
+    mkdir($this->vectorDir, 0755, true);
+    $this->vectorPath = $this->vectorDir.'/map.json';
+    file_put_contents($this->vectorPath, json_encode([
+        'v' => 1,
+        'bounds' => [0, 0, 19800, 15696],
+        'cells' => new stdClass,
+        'styles' => new stdClass,
+        'labels' => [],
+        'bg' => [219, 215, 192],
+        'cellSize' => 300,
+    ]));
+
     $this->store = new MapTileStore($this->tempDir);
     $this->builder = new MapConfigBuilder($this->store);
 
@@ -20,6 +33,12 @@ beforeEach(function () {
         'zomboid.map.default_zoom' => 13,
         'zomboid.map.center_x' => 10500.0,
         'zomboid.map.center_y' => 9800.0,
+        'zomboid.map.basemap' => 'auto',
+        'zomboid.map.vector_path' => $this->vectorPath,
+        'zomboid.map.vector_url' => '/map-vector/vanilla/map.json',
+        'zomboid.map.vector_min_zoom' => -4,
+        'zomboid.map.vector_max_zoom' => 4,
+        'zomboid.map.vector_default_zoom' => -1.5,
         'zomboid.map.proxy_url' => 'https://example.test/{z}/{x}_{y}.jpg',
         'zomboid.map.proxy_tile_size' => 1024,
         'zomboid.map.proxy_dzi' => [
@@ -54,16 +73,37 @@ afterEach(function () {
     @rmdir($root);
 });
 
-it('falls back to proxy when no local tiles exist', function () {
+it('prefers vector basemap in auto mode', function () {
+    $config = $this->builder->build();
+
+    expect($config['source'])->toBe('vector')
+        ->and($config['hasBasemap'])->toBeTrue()
+        ->and($config['vectorUrl'])->toBe('/map-vector/vanilla/map.json')
+        ->and($config['tileUrl'])->toBeNull()
+        ->and($config['dzi'])->toBeNull()
+        ->and($config['bounds'])->toBe([0, 0, 19800, 15696])
+        ->and($config['minZoom'])->toBe(-4.0)
+        ->and($this->builder->hasVectorBasemap())->toBeTrue();
+});
+
+it('falls back to proxy when vector is missing and no local tiles', function () {
+    config(['zomboid.map.vector_path' => $this->tempDir.'/missing.json']);
+
     $config = $this->builder->build();
 
     expect($config['source'])->toBe('proxy')
         ->and($config['local_ready'])->toBeFalse()
         ->and($config['tileUrl'])->toBe('https://example.test/{z}/{x}_{y}.jpg')
+        ->and($config['hasBasemap'])->toBeTrue()
         ->and($this->builder->hasLocalTiles())->toBeFalse();
 });
 
-it('keeps the proxy basemap while a render is still writing loose tiles', function () {
+it('keeps the proxy basemap while a render is still writing loose tiles when basemap is local', function () {
+    config([
+        'zomboid.map.basemap' => 'local',
+        'zomboid.map.vector_path' => $this->tempDir.'/missing.json',
+    ]);
+
     $layer = $this->tempDir.'/html/map_data/base/layer0_files/14';
     mkdir($layer, 0755, true);
     file_put_contents($layer.'/900_900.jpg', 'PARTIAL');
@@ -79,7 +119,8 @@ it('keeps the proxy basemap while a render is still writing loose tiles', functi
     $progress->start(['stage' => 'render', 'message' => 'Rendering tiles…']);
 
     try {
-        expect($this->builder->build()['source'])->toBe('proxy');
+        // local mode with incomplete loose tiles → empty (not usable mid-render)
+        expect($this->builder->build()['source'])->toBe('none');
 
         $progress->finish(true, 'done');
 
@@ -89,7 +130,9 @@ it('keeps the proxy basemap while a render is still writing loose tiles', functi
     }
 });
 
-it('prefers packed local tiles over proxy', function () {
+it('prefers packed local tiles when basemap is forced to local', function () {
+    config(['zomboid.map.basemap' => 'local']);
+
     $layer = $this->tempDir.'/html/map_data/base/layer0_files/0';
     mkdir($layer, 0755, true);
     file_put_contents($layer.'/1_2.webp', 'TILE');
@@ -110,4 +153,13 @@ it('prefers packed local tiles over proxy', function () {
         ->and($config['tileUrl'])->toBe('/map-tiles/{z}/{x}_{y}')
         ->and($config['dzi']['width'])->toBe(4096)
         ->and($this->builder->hasLocalTiles())->toBeTrue();
+});
+
+it('can force proxy over available vector', function () {
+    config(['zomboid.map.basemap' => 'proxy']);
+
+    $config = $this->builder->build();
+
+    expect($config['source'])->toBe('proxy')
+        ->and($config['vectorUrl'])->toBeNull();
 });

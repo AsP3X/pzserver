@@ -41,7 +41,7 @@ class PlayerMapController extends Controller
             'hasPzAccount' => $pzUsername !== null,
             'marker' => $pzUsername === null ? null : $this->resolveMarker($pzUsername),
             'mapConfig' => $mapConfig,
-            'hasTiles' => $mapConfig['tileUrl'] !== null && $mapConfig['dzi'] !== null,
+            'hasTiles' => (bool) ($mapConfig['hasBasemap'] ?? false),
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
         ]);
     }

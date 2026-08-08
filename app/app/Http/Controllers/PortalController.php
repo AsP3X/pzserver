@@ -47,7 +47,7 @@ class PortalController extends Controller
         }
 
         $mapConfig = $this->mapConfigBuilder->build();
-        $hasTiles = $mapConfig['tileUrl'] !== null;
+        $hasTiles = (bool) ($mapConfig['hasBasemap'] ?? false);
 
         return Inertia::render('portal', [
             'pzAccount' => [

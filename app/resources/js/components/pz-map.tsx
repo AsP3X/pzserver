@@ -2,6 +2,11 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useRef } from 'react';
 import type { DziInfo, MapConfig, PlayerMarker } from '@/types/server';
+import {
+    createWorldSquareCrs,
+    loadWorldMapVector,
+    WorldMapVectorLayer,
+} from '@/lib/worldmap-vector-layer';
 
 type MarkerAction = 'kick' | 'ban' | 'access' | 'inventory';
 
@@ -207,6 +212,15 @@ const eventTypeColors: Record<string, string> = {
     disconnect: '#f59e0b',
 };
 
+function isVectorBasemap(mapConfig: MapConfig, hasTiles: boolean): boolean {
+    if (mapConfig.source === 'vector' && mapConfig.vectorUrl) {
+        return true;
+    }
+
+    // Backward-compatible: hasTiles true with no tile URL can still mean vector if vectorUrl set
+    return Boolean(hasTiles && mapConfig.vectorUrl && !mapConfig.tileUrl);
+}
+
 export default function PzMap({
     markers = [],
     mapConfig,
@@ -245,14 +259,21 @@ export default function PzMap({
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
 
+        const useVector = isVectorBasemap(mapConfig, hasTiles);
         const dzi = mapConfig.dzi;
-        const crs = dzi ? createPzCRS(dzi) : L.CRS.Simple;
+        const crs = useVector
+            ? createWorldSquareCrs()
+            : dzi
+              ? createPzCRS(dzi)
+              : createWorldSquareCrs();
         const maxNativeZoom = dzi?.maxNativeZoom ?? mapConfig.maxZoom;
 
         const map = L.map(containerRef.current, {
             crs,
             minZoom: mapConfig.minZoom,
             maxZoom: mapConfig.maxZoom,
+            zoomSnap: useVector ? 0.25 : 1,
+            zoomDelta: useVector ? 0.5 : 1,
             zoomControl: interactive,
             dragging: interactive,
             scrollWheelZoom: interactive,
@@ -267,8 +288,45 @@ export default function PzMap({
         const center = L.latLng(-mapConfig.center.y, mapConfig.center.x);
         map.setView(center, mapConfig.defaultZoom);
 
-        if (hasTiles && mapConfig.tileUrl && dzi) {
-            // errorTileUrl keeps the basemap from looking totally broken on missing tiles
+        if (useVector && mapConfig.vectorUrl) {
+            const vectorUrl = mapConfig.vectorUrl;
+            const paper = '#dbd7c0';
+            // Immediate paper background while JSON loads
+            map.getContainer().style.background = paper;
+
+            if (mapConfig.bounds) {
+                const [minX, minY, maxX, maxY] = mapConfig.bounds;
+                const maxBounds = L.latLngBounds(
+                    L.latLng(-maxY - 500, minX - 500),
+                    L.latLng(-minY + 500, maxX + 500),
+                );
+                map.setMaxBounds(maxBounds);
+            }
+
+            loadWorldMapVector(vectorUrl)
+                .then((data) => {
+                    if (mapRef.current !== map) {
+                        return; // unmounted
+                    }
+                    const layer = new WorldMapVectorLayer(data);
+                    layer.addTo(map);
+
+                    if (!mapConfig.bounds && data.bounds) {
+                        const [minX, minY, maxX, maxY] = data.bounds;
+                        map.setMaxBounds(
+                            L.latLngBounds(
+                                L.latLng(-maxY - 500, minX - 500),
+                                L.latLng(-minY + 500, maxX + 500),
+                            ),
+                        );
+                    }
+                })
+                .catch(() => {
+                    if (mapRef.current === map) {
+                        addCoordinateGrid(map);
+                    }
+                });
+        } else if (hasTiles && mapConfig.tileUrl && dzi) {
             createDziTileLayer(mapConfig.tileUrl, {
                 tileSize: mapConfig.tileSize,
                 minZoom: mapConfig.minZoom,

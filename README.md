@@ -131,11 +131,21 @@ These are generated on the host and are gitignored:
 
 ---
 
-## Map tiles (admin player map)
+## Map basemap (admin player map)
 
-The admin **Player map** shows live/offline player markers on a basemap. By default the panel uses **proxy tiles** from [map.projectzomboid.com](https://map.projectzomboid.com) (no local generation required).
+The admin **Player map** shows live/offline player markers on a basemap. By default the panel uses a **vector basemap** (`public/map-vector/vanilla/map.json`, ~1.5 MB) drawn from vanilla `worldmap.xml` — no tile generation and no CDN. Details: [docs/map-vector.md](docs/map-vector.md).
 
-### Optional local tiles
+```bash
+# Rebuild after a Project Zomboid map update (needs game media)
+docker exec -it pz-app php artisan zomboid:build-worldmap-vector
+# or:
+docker compose exec app php artisan zomboid:build-worldmap-vector
+make exec CMD="php artisan zomboid:build-worldmap-vector"
+```
+
+Force isometric proxy or local tiles with `PZ_MAP_BASEMAP=proxy` or `PZ_MAP_BASEMAP=local`.
+
+### Optional local isometric tiles
 
 You can generate **local** isometric tiles from the game install with `pzmap2dzi` (Admin → Player map → **Generate local tiles**, or artisan). Generation is **opt-in** and heavy (CPU/RAM/disk); it is **not** scheduled or run on container start.
 
@@ -227,7 +237,7 @@ Full details: **[docs/map-tiles.md](docs/map-tiles.md)**.
 - **Config editors** — `server.ini` + sandbox (categorized UI)  
 - **Mods** — Workshop IDs + load order  
 - **Players** — kick, ban, teleport, access levels, XP, items  
-- **Map** — live player markers (proxy basemap by default; optional local tiles packed as one `tiles.sqlite`)  
+- **Map** — live player markers (vector basemap by default; optional proxy or local isometric `tiles.sqlite`)  
 - **Backups** — manual, scheduled, rollback  
 - **Whitelist, Discord webhooks, auto-restart, status page**
 
@@ -318,7 +328,8 @@ Admin  ──TCP 8000 / 443────► app (panel) ──RCON──► game-
 
 - Upstream feature list & screenshots: original [README history](https://github.com/trongio/Zomboid_Server_Manager_Docker)
 - Install deep-dives: `docs/installation-windows.md`, `docs/installation-linux.md`
-- Map tiles (local generation + SQLite pack): `docs/map-tiles.md`
+- Map vector basemap: `docs/map-vector.md`
+- Map tiles (optional isometric + SQLite pack): `docs/map-tiles.md`
 - Publishing Knox Relay mod updates to the Steam Workshop: `docs/workshop-updates.md`
 - Command reference: `docs/commands.md`
 - Troubleshooting: `docs/troubleshooting.md`

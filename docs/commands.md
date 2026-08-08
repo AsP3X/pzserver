@@ -72,7 +72,21 @@ make exec CMD="php artisan config:clear"
 
 ### Map tiles (admin player map)
 
-Local basemap tiles are **optional**. By default the panel uses proxy tiles from map.projectzomboid.com.
+Local isometric basemap tiles are **optional**. By default the panel uses the **vector** basemap (`docs/map-vector.md`). Rebuild the vector pack after a game map update:
+
+```bash
+docker exec -it pz-app php artisan zomboid:build-worldmap-vector
+
+# Explicit worldmap path (must be readable inside the container)
+docker exec -it pz-app php artisan zomboid:build-worldmap-vector \
+  --xml="/path/to/media/maps/Muldraugh, KY/worldmap.xml"
+
+# Compose service name / Make
+docker compose exec app php artisan zomboid:build-worldmap-vector
+make exec CMD="php artisan zomboid:build-worldmap-vector"
+```
+
+Proxy tiles (`map.projectzomboid.com`) or local isometric tiles are opt-in via `PZ_MAP_BASEMAP`.
 
 After generation, tiles are **packed into a single SQLite file** (`data/map-tiles/tiles.sqlite`) so the host does not retain millions of loose DZI image files. See [map-tiles.md](map-tiles.md) for full details.
 

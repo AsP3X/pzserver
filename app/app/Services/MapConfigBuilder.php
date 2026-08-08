@@ -10,55 +10,178 @@ class MapConfigBuilder
     ) {}
 
     /**
-     * Build map configuration, preferring local tiles then falling back to proxy.
+     * Build map configuration.
+     *
+     * Preference (when basemap=auto):
+     *   1. Vector worldmap (default — no tile generation)
+     *   2. Local packed/loose isometric tiles
+     *   3. Public proxy tiles
+     *
+     * Force with config zomboid.map.basemap = vector|local|proxy|auto
      *
      * @return array{
      *     tileUrl: string|null,
      *     tileSize: int,
-     *     minZoom: int,
-     *     maxZoom: int,
-     *     defaultZoom: int,
+     *     minZoom: int|float,
+     *     maxZoom: int|float,
+     *     defaultZoom: int|float,
      *     center: array{x: float|int, y: float|int},
      *     dzi: array|null,
      *     source: string,
      *     local_ready: bool,
-     *     tiles_path: string
+     *     tiles_path: string,
+     *     vectorUrl: string|null,
+     *     bounds: array{0: int, 1: int, 2: int, 3: int}|null,
+     *     hasBasemap: bool
      * }
      */
     public function build(): array
     {
+        $mode = strtolower((string) config('zomboid.map.basemap', 'auto'));
         $tilesPath = $this->tileStore->rootPath();
-        $localDzi = $this->tileStore->getDziConfig();
 
-        if ($this->localTilesUsable() && $localDzi !== null) {
-            // Relative URL so tiles work behind NPM/Caddy regardless of APP_URL.
-            // Not the /admin/ route: players see maps too.
-            return [
-                'tileUrl' => '/map-tiles/{z}/{x}_{y}',
-                'tileSize' => (int) config('zomboid.map.tile_size'),
-                'minZoom' => (int) config('zomboid.map.min_zoom'),
-                'maxZoom' => (int) config('zomboid.map.max_zoom'),
-                'defaultZoom' => (int) config('zomboid.map.default_zoom'),
-                'center' => [
-                    'x' => config('zomboid.map.center_x'),
-                    'y' => config('zomboid.map.center_y'),
-                ],
-                'dzi' => $localDzi,
-                'source' => 'local',
-                'local_ready' => true,
-                'tiles_path' => $tilesPath,
-            ];
+        if ($mode === 'vector') {
+            $vector = $this->vectorConfig();
+            if ($vector !== null) {
+                return $vector;
+            }
+
+            return $this->emptyConfig($tilesPath);
         }
 
-        // Fall back to proxy tiles from map.projectzomboid.com
+        if ($mode === 'local') {
+            $local = $this->localTileConfig();
+            if ($local !== null) {
+                return $local;
+            }
+
+            return $this->emptyConfig($tilesPath);
+        }
+
+        if ($mode === 'proxy') {
+            return $this->proxyConfig();
+        }
+
+        // auto: vector → local → proxy
+        $vector = $this->vectorConfig();
+        if ($vector !== null) {
+            return $vector;
+        }
+
+        $local = $this->localTileConfig();
+        if ($local !== null) {
+            return $local;
+        }
+
+        return $this->proxyConfig();
+    }
+
+    /**
+     * Whether a usable basemap exists (vector, local tiles, or proxy URL).
+     */
+    public function hasBasemap(): bool
+    {
+        return (bool) ($this->build()['hasBasemap'] ?? false);
+    }
+
+    /**
+     * Whether a usable local tile set exists on disk (packed or legacy loose).
+     */
+    public function hasLocalTiles(): bool
+    {
+        return $this->localTilesUsable();
+    }
+
+    /**
+     * Whether the vector basemap asset is present and readable.
+     */
+    public function hasVectorBasemap(): bool
+    {
+        return $this->vectorAssetPath() !== null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function vectorConfig(): ?array
+    {
+        $path = $this->vectorAssetPath();
+        if ($path === null) {
+            return null;
+        }
+
+        $meta = $this->readVectorMeta($path);
+        $bounds = $meta['bounds'] ?? null;
+        $url = (string) config('zomboid.map.vector_url', '/map-vector/vanilla/map.json');
+
+        return [
+            'tileUrl' => null,
+            'tileSize' => (int) config('zomboid.map.tile_size', 256),
+            'minZoom' => (float) config('zomboid.map.vector_min_zoom', -4),
+            'maxZoom' => (float) config('zomboid.map.vector_max_zoom', 4),
+            'defaultZoom' => (float) config('zomboid.map.vector_default_zoom', -1.5),
+            'center' => [
+                'x' => config('zomboid.map.center_x'),
+                'y' => config('zomboid.map.center_y'),
+            ],
+            'dzi' => null,
+            'source' => 'vector',
+            'local_ready' => false,
+            'tiles_path' => $this->tileStore->rootPath(),
+            'vectorUrl' => $url,
+            'bounds' => $bounds,
+            'hasBasemap' => true,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function localTileConfig(): ?array
+    {
+        if (! $this->localTilesUsable()) {
+            return null;
+        }
+
+        $localDzi = $this->tileStore->getDziConfig();
+        if ($localDzi === null) {
+            return null;
+        }
+
+        return [
+            'tileUrl' => '/map-tiles/{z}/{x}_{y}',
+            'tileSize' => (int) config('zomboid.map.tile_size'),
+            'minZoom' => (int) config('zomboid.map.min_zoom'),
+            'maxZoom' => (int) config('zomboid.map.max_zoom'),
+            'defaultZoom' => (int) config('zomboid.map.default_zoom'),
+            'center' => [
+                'x' => config('zomboid.map.center_x'),
+                'y' => config('zomboid.map.center_y'),
+            ],
+            'dzi' => $localDzi,
+            'source' => 'local',
+            'local_ready' => true,
+            'tiles_path' => $this->tileStore->rootPath(),
+            'vectorUrl' => null,
+            'bounds' => null,
+            'hasBasemap' => true,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function proxyConfig(): array
+    {
         $proxyDzi = config('zomboid.map.proxy_dzi');
         $w = (int) $proxyDzi['width'];
         $h = (int) $proxyDzi['height'];
         $sqr = (int) $proxyDzi['sqr'];
         $maxNativeZoom = (int) ceil(log(max($w, $h), 2));
+        $tileUrl = config('zomboid.map.proxy_url');
 
         return [
-            'tileUrl' => config('zomboid.map.proxy_url'),
+            'tileUrl' => $tileUrl,
             'tileSize' => (int) config('zomboid.map.proxy_tile_size'),
             'minZoom' => (int) config('zomboid.map.min_zoom'),
             'maxZoom' => (int) config('zomboid.map.max_zoom'),
@@ -78,16 +201,82 @@ class MapConfigBuilder
             ],
             'source' => 'proxy',
             'local_ready' => false,
-            'tiles_path' => $tilesPath,
+            'tiles_path' => $this->tileStore->rootPath(),
+            'vectorUrl' => null,
+            'bounds' => null,
+            'hasBasemap' => $tileUrl !== null && $tileUrl !== '',
         ];
     }
 
     /**
-     * Whether a usable local tile set exists on disk (packed or legacy loose).
+     * @return array<string, mixed>
      */
-    public function hasLocalTiles(): bool
+    private function emptyConfig(string $tilesPath): array
     {
-        return $this->localTilesUsable();
+        return [
+            'tileUrl' => null,
+            'tileSize' => (int) config('zomboid.map.tile_size', 256),
+            'minZoom' => (float) config('zomboid.map.vector_min_zoom', -4),
+            'maxZoom' => (float) config('zomboid.map.vector_max_zoom', 4),
+            'defaultZoom' => (float) config('zomboid.map.vector_default_zoom', -1.5),
+            'center' => [
+                'x' => config('zomboid.map.center_x'),
+                'y' => config('zomboid.map.center_y'),
+            ],
+            'dzi' => null,
+            'source' => 'none',
+            'local_ready' => false,
+            'tiles_path' => $tilesPath,
+            'vectorUrl' => null,
+            'bounds' => null,
+            'hasBasemap' => false,
+        ];
+    }
+
+    private function vectorAssetPath(): ?string
+    {
+        $configured = config('zomboid.map.vector_path');
+
+        // Explicit path: use only that file (do not silently fall back to public).
+        if (is_string($configured) && $configured !== '') {
+            return is_file($configured) && is_readable($configured) ? $configured : null;
+        }
+
+        $candidates = [
+            public_path('map-vector/vanilla/map.json'),
+            base_path('public/map-vector/vanilla/map.json'),
+        ];
+
+        foreach ($candidates as $path) {
+            if (is_file($path) && is_readable($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{bounds?: array{0: int, 1: int, 2: int, 3: int}}
+     */
+    private function readVectorMeta(string $path): array
+    {
+        // Only parse the start of the file for bounds — full JSON is for the browser.
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            return [];
+        }
+
+        $chunk = fread($fh, 4096) ?: '';
+        fclose($fh);
+
+        if (preg_match('/"bounds"\s*:\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]/', $chunk, $m)) {
+            return [
+                'bounds' => [(int) $m[1], (int) $m[2], (int) $m[3], (int) $m[4]],
+            ];
+        }
+
+        return [];
     }
 
     /**

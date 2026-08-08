@@ -1,16 +1,24 @@
-# Map tiles (admin player map)
+# Map tiles (optional isometric basemap)
 
 The admin **Player map** (`/admin/players/map`) plots player markers on a basemap. The same basemap config is reused for safe zones, moderation, and the player portal map widget.
 
-## Default: proxy tiles (no generation)
+## Default: vector basemap (no tile generation)
 
-Out of the box the panel uses tiles from **map.projectzomboid.com** (configurable via `PZ_MAP_PROXY_URL` / `config/zomboid.php` → `map.proxy_*`).
+Out of the box the panel uses a **compact vector pack** baked from vanilla `worldmap.xml` (~1.5 MB, Canvas-rendered). See **[map-vector.md](map-vector.md)**.
+
+- No `pzmap2dzi` run, no tile CDN, no multi-file pyramid
+- Schematic “in-game world map” look (water, roads, buildings, labels)
+
+## Optional: proxy tiles
+
+Set `PZ_MAP_BASEMAP=proxy` (or fall back when the vector pack is missing) to use tiles from **map.projectzomboid.com** (configurable via `PZ_MAP_PROXY_URL` / `config/zomboid.php` → `map.proxy_*`).
 
 - No local disk usage beyond the panel itself
-- No `pzmap2dzi` run required
 - Requires outbound HTTPS from the browser (or users) to the proxy host
 
-Local generation is **optional** and only needed if you want offline basemaps, custom/mod maps, or to avoid depending on the public tile CDN.
+## Optional: local isometric tiles
+
+Local generation is **optional** and only needed if you want photorealistic isometric basemaps, custom/mod maps rendered as images, or offline tiles without the vector pack.
 
 ## Optional: local tiles (packed SQLite)
 
@@ -219,10 +227,13 @@ Logs:
 | `PZ_MAP_TILES_HOST` | `./data/map-tiles` | Host bind mount (compose) |
 | `config('zomboid.map.*')` | see `app/config/zomboid.php` | Zoom defaults, proxy URL/DZI, tile size |
 
-Detection order in `MapConfigBuilder`:
+Detection order in `MapConfigBuilder` (`PZ_MAP_BASEMAP=auto`):
 
-1. Local pack (`tiles.sqlite`) or legacy loose tiles → `source: local`
-2. Else public proxy → `source: proxy`
+1. Vector pack (`public/map-vector/vanilla/map.json`) → `source: vector`
+2. Local pack (`tiles.sqlite`) or legacy loose tiles → `source: local`
+3. Else public proxy → `source: proxy`
+
+Force with `PZ_MAP_BASEMAP=vector|local|proxy`.
 
 ### Implementation pointers (developers)
 

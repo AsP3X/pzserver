@@ -113,7 +113,7 @@ class PlayerMapController extends Controller
         $mapConfig = $this->mapConfigBuilder->build();
         $safeZoneConfig = $this->safeZoneManager->getConfig();
         $holdings = $this->holdingsReader->read();
-        $hasBasemap = $mapConfig['tileUrl'] !== null && $mapConfig['dzi'] !== null;
+        $hasBasemap = (bool) ($mapConfig['hasBasemap'] ?? false);
         $canResume = $this->tileStore->hasLooseTiles() && ! $this->tileGenerator->isRunning();
 
         return Inertia::render('admin/player-map', [

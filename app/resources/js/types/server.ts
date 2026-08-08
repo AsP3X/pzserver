@@ -317,6 +317,14 @@ export type MapConfig = {
     defaultZoom: number;
     center: { x: number; y: number };
     dzi: DziInfo | null;
+    /** Basemap source: vector | local | proxy | none */
+    source?: string;
+    /** URL to compact worldmap vector JSON (when source=vector) */
+    vectorUrl?: string | null;
+    /** World-square bounds [minX, minY, maxX, maxY] for vector basemap */
+    bounds?: [number, number, number, number] | null;
+    hasBasemap?: boolean;
+    local_ready?: boolean;
 };
 
 export type InventoryItem = {

@@ -268,8 +268,11 @@ export default function PlayerMap({
                                 {t('admin.player_map.dead_count', { count: String(counts.dead) })}
                             </Badge>
                         )}
-                        <Badge variant={localTilesReady ? 'default' : 'secondary'} className="text-sm">
-                            tiles: {tileSource}
+                        <Badge
+                            variant={tileSource === 'vector' || localTilesReady || tileSource === 'proxy' ? 'default' : 'secondary'}
+                            className="text-sm"
+                        >
+                            {t('admin.player_map.basemap_badge', { source: tileSource })}
                         </Badge>
                     </div>
                 </div>
@@ -278,7 +281,11 @@ export default function PlayerMap({
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base">{t('admin.player_map.tiles_panel_title')}</CardTitle>
-                        <p className="text-muted-foreground text-sm">{t('admin.player_map.tiles_panel_help')}</p>
+                        <p className="text-muted-foreground text-sm">
+                            {tileSource === 'vector'
+                                ? t('admin.player_map.tiles_panel_help_vector')
+                                : t('admin.player_map.tiles_panel_help')}
+                        </p>
                     </CardHeader>
                     <CardContent className="space-y-3">
                         <div className="flex flex-wrap items-center gap-2">

@@ -42,7 +42,7 @@ class ModerationController extends Controller
 
         return Inertia::render('admin/moderation', [
             'mapConfig' => $mapConfig,
-            'hasTiles' => $mapConfig['tileUrl'] !== null,
+            'hasTiles' => (bool) ($mapConfig['hasBasemap'] ?? false),
             'filters' => $filters,
             'events' => Inertia::defer(function () use ($filters) {
                 $query = GameEvent::query();

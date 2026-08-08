@@ -39,7 +39,7 @@ class SafeZoneController extends Controller
             'config' => $config,
             'violations' => $violations,
             'mapConfig' => $mapConfig,
-            'hasTiles' => $mapConfig['tileUrl'] !== null,
+            'hasTiles' => (bool) ($mapConfig['hasBasemap'] ?? false),
         ]);
     }
 

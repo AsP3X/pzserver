@@ -91,7 +91,7 @@ The Laravel app is the single control plane wrapping three integration points:
 - **RCON** (`Services/RconClient.php`) — Source RCON TCP protocol. Player commands, broadcasts, saves. Singleton in service container.
 - **Docker Engine API** (`Services/DockerManager.php`) — HTTP calls to `/var/run/docker.sock`. Start/stop/restart game server container.
 - **File I/O** (`Services/ServerIniParser.php`, `Services/SandboxLuaParser.php`) — Read/write PZ config files mounted from game server volume.
-- **Map tiles** (`Services/MapTileStore.php`, `zomboid:generate-map-tiles`) — Optional local basemap. After `pzmap2dzi` render, pack the DZI pyramid into a single `tiles.sqlite` and delete the multi-file tree (avoids millions of files for backup/delete). Proxy tiles used by default. Docs: `docs/map-tiles.md`.
+- **Map basemap** — Default: compact **vector** pack from vanilla `worldmap.xml` (`public/map-vector/vanilla/map.json`, Canvas in `worldmap-vector-layer.ts`). Rebuild: `zomboid:build-worldmap-vector`. Docs: `docs/map-vector.md`. Optional isometric tiles (`MapTileStore`, `zomboid:generate-map-tiles` → `tiles.sqlite`) or proxy CDN: `docs/map-tiles.md`.
 
 ## Key Design Constraints
 

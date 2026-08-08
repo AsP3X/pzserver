@@ -76,6 +76,16 @@ return [
         'default_zoom' => 13,
         'center_x' => 10500.0,
         'center_y' => 9800.0,
+        // Basemap mode: auto (vector → local tiles → proxy), or force vector|local|proxy
+        'basemap' => env('PZ_MAP_BASEMAP', 'auto'),
+        // Compact vector basemap (worldmap.xml bake) — default efficient path
+        'vector_url' => env('PZ_MAP_VECTOR_URL', '/map-vector/vanilla/map.json'),
+        'vector_path' => env('PZ_MAP_VECTOR_PATH'), // null = public/map-vector/vanilla/map.json
+        'vector_min_zoom' => (float) env('PZ_MAP_VECTOR_MIN_ZOOM', -4),
+        'vector_max_zoom' => (float) env('PZ_MAP_VECTOR_MAX_ZOOM', 4),
+        'vector_default_zoom' => (float) env('PZ_MAP_VECTOR_DEFAULT_ZOOM', -1.5),
+        // Optional path to worldmap.xml for `php artisan zomboid:build-worldmap-vector`
+        'worldmap_xml' => env('PZ_WORLDMAP_XML'),
         'proxy_url' => env('PZ_MAP_PROXY_URL', 'https://map.projectzomboid.com/maps/SurvivalB417812L0/map_files/{z}/{x}_{y}.jpg'),
         'proxy_tile_size' => 1024,
         'proxy_dzi' => [
