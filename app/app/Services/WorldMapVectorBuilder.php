@@ -217,8 +217,8 @@ class WorldMapVectorBuilder
     public function writeJson(array $data, string $outputPath, bool $pretty = false): void
     {
         $dir = dirname($outputPath);
-        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
-            throw new RuntimeException("Failed to create directory: {$dir}");
+        if (! is_dir($dir) && ! @mkdir($dir, 0775, true) && ! is_dir($dir)) {
+            throw new RuntimeException("Failed to create directory (permission denied?): {$dir}");
         }
 
         // Drop stats from the public asset (keep build-time metadata out of the client payload)
@@ -230,9 +230,24 @@ class WorldMapVectorBuilder
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | ($pretty ? JSON_PRETTY_PRINT : 0),
         );
 
-        if (file_put_contents($outputPath, $json) === false) {
-            throw new RuntimeException("Failed to write: {$outputPath}");
+        // Atomic write: temp in same dir then rename
+        $tmp = $outputPath.'.'.getmypid().'.tmp';
+        $written = @file_put_contents($tmp, $json);
+        if ($written === false) {
+            $err = error_get_last()['message'] ?? 'unknown error';
+            throw new RuntimeException("Failed to write (permission denied?): {$outputPath} — {$err}");
         }
+
+        if (! @rename($tmp, $outputPath)) {
+            @unlink($tmp);
+            // Fallback non-atomic overwrite
+            if (@file_put_contents($outputPath, $json) === false) {
+                $err = error_get_last()['message'] ?? 'unknown error';
+                throw new RuntimeException("Failed to replace (permission denied?): {$outputPath} — {$err}");
+            }
+        }
+
+        @chmod($outputPath, 0664);
     }
 
     /**

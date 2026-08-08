@@ -25,7 +25,7 @@ class BuildWorldMapVector extends Command
     public function handle(WorldMapVectorBuilder $builder, WorldMapSourceLocator $locator): int
     {
         $output = $this->option('output')
-            ?: public_path('map-vector/vanilla/map.json');
+            ?: storage_path('app/map-vector/vanilla/map.json');
 
         $sources = $this->resolveSources($locator);
         if ($sources === []) {

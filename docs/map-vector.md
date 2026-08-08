@@ -18,11 +18,14 @@ For a **game-like 3D isometric** basemap (live CDN + optional local generate), u
 
 ## Asset location
 
-```
-app/public/map-vector/vanilla/map.json
-```
+| Path | Role |
+|------|------|
+| `storage/app/map-vector/vanilla/map.json` | **Runtime bake** (Admin UI / artisan default) — writable by `www-data` |
+| `public/map-vector/vanilla/map.json` | Packaged seed (read fallback; optional mirror after bake) |
 
-Served as `/map-vector/vanilla/map.json`. Format version `1`:
+Served by Laravel at **`/map-vector/data`** (not a static nginx file), so bakes are never stuck behind a host-owned bind mount.
+
+Format version `1`:
 
 - **cells** — features keyed by `"cellX,cellY"` (300-square cells), absolute world-square rings
 - **styles** — fill colors + min zoom (vanilla palette from `ISMapDefinitions.lua`)
@@ -49,7 +52,7 @@ Stack must already be up (`make up` / `docker compose up -d`) when using Docker.
 # Preview what will be merged (Map= + resolved paths)
 docker exec -it pz-app php artisan zomboid:build-worldmap-vector --list-only
 
-# Full rebuild into public/map-vector/vanilla/map.json (vanilla + Map= mod packs)
+# Full rebuild into storage/app/map-vector/vanilla/map.json (vanilla + Map= mod packs)
 docker exec -it pz-app php artisan zomboid:build-worldmap-vector
 
 # Also pick up workshop maps that have worldmap.xml but are not on Map=

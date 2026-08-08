@@ -71,6 +71,16 @@ find /var/www/html/storage /var/www/html/bootstrap/cache -not -name '.gitignore'
 find /var/www/html/storage /var/www/html/bootstrap/cache -type d -exec chmod 775 {} + 2>/dev/null || true
 find /var/www/html/storage /var/www/html/bootstrap/cache -type f -not -name '.gitignore' -exec chmod 664 {} + 2>/dev/null || true
 
+# Runtime vector basemap bakes (Admin UI) write under storage — ensure dir exists
+mkdir -p /var/www/html/storage/app/map-vector/vanilla 2>/dev/null || true
+chown -R www-data:www-data /var/www/html/storage/app/map-vector 2>/dev/null || true
+chmod -R 775 /var/www/html/storage/app/map-vector 2>/dev/null || true
+# Best-effort: allow www-data to update packaged public seed if bind-mounted
+if [ -d /var/www/html/public/map-vector ]; then
+    chgrp -R www-data /var/www/html/public/map-vector 2>/dev/null || true
+    chmod -R g+w /var/www/html/public/map-vector 2>/dev/null || true
+fi
+
 # ── PZ data permissions ──────────────────────────────────────────────
 # Game server creates config files as root — make them writable by www-data
 # so the Laravel app can update server.ini and SandboxVars.lua from the web UI.

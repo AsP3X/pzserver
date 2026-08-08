@@ -40,7 +40,7 @@ beforeEach(function () {
         'zomboid.map.center_y' => 9800.0,
         'zomboid.map.basemap' => 'auto',
         'zomboid.map.vector_path' => $this->vectorPath,
-        'zomboid.map.vector_url' => '/map-vector/vanilla/map.json',
+        'zomboid.map.vector_url' => '/map-vector/data',
         'zomboid.map.vector_min_zoom' => -4,
         'zomboid.map.vector_max_zoom' => 4,
         'zomboid.map.vector_default_zoom' => -1.25,
@@ -83,7 +83,7 @@ it('prefers vector basemap in auto mode', function () {
 
     expect($config['source'])->toBe('vector')
         ->and($config['hasBasemap'])->toBeTrue()
-        ->and($config['vectorUrl'])->toBe('/map-vector/vanilla/map.json')
+        ->and($config['vectorUrl'])->toBe('/map-vector/data')
         ->and($config['tileUrl'])->toBeNull()
         ->and($config['dzi'])->toBeNull()
         ->and($config['bounds'])->toBe([0, 0, 19800, 15696])

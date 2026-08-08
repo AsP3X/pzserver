@@ -59,6 +59,7 @@ it('bakes a vector pack to the configured output path', function () {
         ->and(is_file($this->out))->toBeTrue()
         ->and($result['bytes'])->toBeGreaterThan(100)
         ->and($this->service->assetStatus()['exists'])->toBeTrue()
+        ->and($this->service->resolveReadablePath())->toBe($this->out)
         ->and($this->service->lastResult()['ok'] ?? false)->toBeTrue();
 });
 

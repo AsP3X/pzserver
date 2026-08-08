@@ -83,17 +83,20 @@ class WorldMapVectorBakeService
         $output = $this->outputPath();
 
         try {
-            @set_time_limit(180);
+            @set_time_limit(300);
             $data = $this->builder->buildFromSources($sources, 'merged');
             $this->builder->writeJson($data, $output);
+            // Best-effort mirror into public/ for static hosting / deploys (may fail if bind-mounted root-owned)
+            $this->mirrorToPublic($data);
         } catch (\Throwable $e) {
+            $hint = $this->permissionHint($output, $e->getMessage());
             $result = [
                 'ok' => false,
-                'message' => 'Bake failed: '.$e->getMessage(),
+                'message' => 'Bake failed: '.$e->getMessage().$hint,
                 'finished_at' => now()->toIso8601String(),
             ];
             $this->writeLastResult($result);
-            $this->appendLog('ERROR '.$e->getMessage());
+            $this->appendLog('ERROR '.$e->getMessage().' path='.$output);
 
             return $result;
         }
@@ -112,29 +115,45 @@ class WorldMapVectorBakeService
         ];
         $this->writeLastResult($result);
         $this->appendLog(sprintf(
-            'OK bytes=%d sources=%d features=%d',
+            'OK bytes=%d sources=%d features=%d path=%s',
             $bytes,
             $data['stats']['sources'] ?? count($sources),
             $data['stats']['features'] ?? 0,
+            $output,
         ));
 
         return $result;
     }
 
     /**
-     * @return array{exists: bool, bytes: int|null, modified_at: string|null, url: string}
+     * @return array{exists: bool, bytes: int|null, modified_at: string|null, url: string, path: string|null}
      */
     public function assetStatus(): array
     {
-        $path = $this->outputPath();
-        $exists = is_file($path);
+        $path = $this->resolveReadablePath();
+        $exists = $path !== null && is_file($path);
 
         return [
             'exists' => $exists,
             'bytes' => $exists ? (int) filesize($path) : null,
             'modified_at' => $exists ? date('c', (int) filemtime($path)) : null,
-            'url' => (string) config('zomboid.map.vector_url', '/map-vector/vanilla/map.json'),
+            'url' => (string) config('zomboid.map.vector_url', '/map-vector/data'),
+            'path' => $path,
         ];
+    }
+
+    /**
+     * Prefer runtime storage bake, then packaged public/ seed.
+     */
+    public function resolveReadablePath(): ?string
+    {
+        foreach ($this->candidatePaths() as $path) {
+            if (is_file($path) && is_readable($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -157,6 +176,9 @@ class WorldMapVectorBakeService
         }
     }
 
+    /**
+     * Writable path for UI/runtime bakes (under storage — owned by www-data in Docker).
+     */
     public function outputPath(): string
     {
         $configured = config('zomboid.map.vector_path');
@@ -164,7 +186,24 @@ class WorldMapVectorBakeService
             return $configured;
         }
 
-        return public_path('map-vector/vanilla/map.json');
+        return storage_path('app/map-vector/vanilla/map.json');
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function candidatePaths(): array
+    {
+        $configured = config('zomboid.map.vector_path');
+        $paths = [];
+        if (is_string($configured) && $configured !== '') {
+            $paths[] = $configured;
+        }
+        $paths[] = storage_path('app/map-vector/vanilla/map.json');
+        $paths[] = public_path('map-vector/vanilla/map.json');
+        $paths[] = base_path('public/map-vector/vanilla/map.json');
+
+        return array_values(array_unique($paths));
     }
 
     private function resultPath(): string
@@ -175,6 +214,33 @@ class WorldMapVectorBakeService
     private function logPath(): string
     {
         return storage_path('logs/map-vector-bake.log');
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function mirrorToPublic(array $data): void
+    {
+        $public = public_path('map-vector/vanilla/map.json');
+        if ($public === $this->outputPath()) {
+            return;
+        }
+
+        try {
+            $this->builder->writeJson($data, $public);
+        } catch (\Throwable $e) {
+            // Common on bind-mounted ./app as host user: www-data cannot overwrite public/
+            $this->appendLog('WARN public mirror skipped: '.$e->getMessage());
+        }
+    }
+
+    private function permissionHint(string $path, string $message): string
+    {
+        if (! str_contains(strtolower($message), 'permission') && ! str_contains(strtolower($message), 'failed to write')) {
+            return '';
+        }
+
+        return ' (path: '.$path.'; runtime bakes use storage/app/map-vector — ensure the app container can write storage/)';
     }
 
     /**

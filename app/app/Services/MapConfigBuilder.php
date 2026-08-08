@@ -140,7 +140,7 @@ class MapConfigBuilder
 
         $meta = $this->readVectorMeta($path);
         $bounds = $meta['bounds'] ?? null;
-        $url = (string) config('zomboid.map.vector_url', '/map-vector/vanilla/map.json');
+        $url = (string) config('zomboid.map.vector_url', '/map-vector/data');
 
         return [
             'tileUrl' => null,
@@ -274,12 +274,14 @@ class MapConfigBuilder
     {
         $configured = config('zomboid.map.vector_path');
 
-        // Explicit path: use only that file (do not silently fall back to public).
+        // Explicit path: use only that file (do not silently fall back).
         if (is_string($configured) && $configured !== '') {
             return is_file($configured) && is_readable($configured) ? $configured : null;
         }
 
+        // Prefer runtime storage bake (www-data writable), then packaged public seed.
         $candidates = [
+            storage_path('app/map-vector/vanilla/map.json'),
             public_path('map-vector/vanilla/map.json'),
             base_path('public/map-vector/vanilla/map.json'),
         ];

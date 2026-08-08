@@ -79,8 +79,10 @@ return [
         // Basemap mode: auto (vector → local tiles → proxy), or force vector|local|proxy
         'basemap' => env('PZ_MAP_BASEMAP', 'auto'),
         // Compact vector basemap (worldmap.xml bake) — default efficient path
-        'vector_url' => env('PZ_MAP_VECTOR_URL', '/map-vector/vanilla/map.json'),
-        'vector_path' => env('PZ_MAP_VECTOR_PATH'), // null = public/map-vector/vanilla/map.json
+        // Served by MapVectorController (avoids nginx serving a stale host-owned public/ file)
+        'vector_url' => env('PZ_MAP_VECTOR_URL', '/map-vector/data'),
+        // Writable runtime bake path (null = storage/app/map-vector/vanilla/map.json)
+        'vector_path' => env('PZ_MAP_VECTOR_PATH'),
         'vector_min_zoom' => (float) env('PZ_MAP_VECTOR_MIN_ZOOM', -4),
         'vector_max_zoom' => (float) env('PZ_MAP_VECTOR_MAX_ZOOM', 4),
         'vector_default_zoom' => (float) env('PZ_MAP_VECTOR_DEFAULT_ZOOM', -1.25),

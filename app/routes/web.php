@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapTileController;
+use App\Http\Controllers\MapVectorController;
 use App\Http\Controllers\NewsController;
 use App\Http\Controllers\ObituaryController;
 use App\Http\Controllers\PlayerCharacterController;
@@ -26,6 +27,9 @@ Route::get('auth/steam', [SteamAuthController::class, 'redirect'])->name('steam.
 Route::get('auth/steam/callback', [SteamAuthController::class, 'callback'])->name('steam.callback')->middleware('throttle:10,1');
 
 Route::get('status', StatusController::class)->name('status');
+
+// Vector basemap JSON (runtime storage bake + public seed fallback)
+Route::get('map-vector/data', MapVectorController::class)->name('map.vector');
 Route::get('rankings', RankingsController::class)->name('rankings');
 Route::get('obituary', ObituaryController::class)->name('obituary');
 Route::get('news', [NewsController::class, 'index'])->name('news');
