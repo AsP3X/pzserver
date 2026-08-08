@@ -64,6 +64,45 @@ test('parses valid game state JSON', function () {
         ->and($result['weather']['condition'])->toBe('clear');
 });
 
+test('exposes world_day so the dashboard can show days survived rather than the calendar day', function () {
+    $data = [
+        'time' => [
+            'year' => 1993, 'month' => 7, 'day' => 9, 'hour' => 9, 'minute' => 0,
+            'day_of_year' => 190, 'world_day' => 1, 'is_night' => false,
+            'formatted' => '09:00', 'date' => '1993-07-09',
+        ],
+        'season' => 'summer',
+        'exported_at' => '2026-02-27T09:00:00Z',
+    ];
+
+    file_put_contents($this->filePath, json_encode($data));
+
+    $result = (new GameStateReader($this->filePath))->getGameState();
+
+    // A freshly wiped world is day 1, even though the calendar still reads 190.
+    expect($result['time']['world_day'])->toBe(1)
+        ->and($result['time']['day_of_year'])->toBe(190);
+});
+
+test('reads state from a KnoxRelay older than 1.4 that exports no world_day', function () {
+    $data = [
+        'time' => [
+            'year' => 1993, 'month' => 7, 'day' => 9, 'hour' => 14, 'minute' => 30,
+            'day_of_year' => 190, 'is_night' => false,
+            'formatted' => '14:30', 'date' => '1993-07-09',
+        ],
+        'season' => 'summer',
+        'exported_at' => '2026-02-27T14:30:00Z',
+    ];
+
+    file_put_contents($this->filePath, json_encode($data));
+
+    $result = (new GameStateReader($this->filePath))->getGameState();
+
+    expect($result)->not->toBeNull()
+        ->and($result['time'])->not->toHaveKey('world_day');
+});
+
 test('returns null for malformed JSON', function () {
     file_put_contents($this->filePath, 'not valid json {{{');
 

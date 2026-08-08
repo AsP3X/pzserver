@@ -202,6 +202,7 @@ it('includes game state when server is online and data exists', function () {
             'hour' => 14,
             'minute' => 30,
             'day_of_year' => 190,
+            'world_day' => 12,
             'is_night' => false,
             'formatted' => '14:30',
             'date' => '1993-07-09',
@@ -235,6 +236,7 @@ it('includes game state when server is online and data exists', function () {
         ->has('game_state')
         ->where('game_state.season', 'summer')
         ->where('game_state.time.hour', 14)
+        ->where('game_state.time.world_day', 12)
         ->where('game_state.weather.temperature', 28.5)
     );
 });

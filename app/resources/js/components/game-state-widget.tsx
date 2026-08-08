@@ -78,7 +78,9 @@ export function GameStateWidget({ gameState }: { gameState: GameState | null }) 
                 <div>
                     <span className="font-semibold tabular-nums">{time.formatted ?? '—'}</span>
                     <span className="ml-1.5 text-sm text-muted-foreground">
-                        {t('game_state.day', { day: String(time.day_of_year ?? '—') })}
+                        {typeof time.world_day === 'number'
+                            ? t('game_state.day', { day: String(time.world_day) })
+                            : (time.date ?? '')}
                     </span>
                 </div>
             </div>

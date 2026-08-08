@@ -79,7 +79,13 @@ export type GameState = {
         day: number;
         hour: number;
         minute: number;
+        /** Calendar day of the in-game year. Every world starts on 9 July, so a fresh world reads 190. */
         day_of_year: number;
+        /**
+         * Days this world has been running, 1-based, so a freshly wiped world reads 1.
+         * Absent on servers running a KnoxRelay older than 1.4.
+         */
+        world_day?: number | null;
         is_night: boolean;
         formatted: string;
         date: string;

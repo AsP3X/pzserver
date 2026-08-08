@@ -178,6 +178,16 @@ function KR_World.export()
         dayOfYear = dayOfYear + (MONTH_LENGTHS[index] or 30)
     end
 
+    -- How long this world has been running, 1-based, so a freshly wiped world
+    -- reads "Day 1". Not to be confused with day_of_year above: that is the
+    -- calendar date, and since every PZ world starts on 9 July it opens at 190
+    -- no matter how many times the world is wiped.
+    local worldDay = nil
+    local worldAge = ask(function() return clock:getWorldAgeHours() end, nil)
+    if worldAge then
+        worldDay = math.floor(worldAge / 24) + 1
+    end
+
     local state = {
         time = {
             year = year,
@@ -186,6 +196,7 @@ function KR_World.export()
             hour = hour,
             minute = minute,
             day_of_year = dayOfYear,
+            world_day = worldDay,
             is_night = night,
             formatted = string.format("%02d:%02d", hour, minute),
             date = string.format("%04d-%02d-%02d", year, month, day),
