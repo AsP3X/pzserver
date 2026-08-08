@@ -16,8 +16,38 @@ SERVER_NAME="${SERVERNAME:-${SERVER_NAME:-${PZ_SERVER_NAME:-ZomboidServer}}}"
 # Root directories. Overridable so the script can be exercised against a
 # temporary tree in tests; the defaults are the real in-container paths, so
 # production behaviour is unchanged (these vars are never set in the images).
-PZ_CONFIG_DIR="${PZ_CONFIG_DIR:-/home/steam/Zomboid}"
-PZ_INSTALL_DIR="${PZ_INSTALL_DIR:-/home/steam/ZomboidDedicatedServer}"
+PZ_STEAM_HOME="${PZ_STEAM_HOME:-/home/steam}"
+PZ_CONFIG_DIR="${PZ_CONFIG_DIR:-${PZ_STEAM_HOME}/Zomboid}"
+
+# The two base images install the server to different roots:
+#   ARM64 (joyfui)         -> ${PZ_STEAM_HOME}/pzserver
+#   AMD64 (renegademaster) -> ${PZ_STEAM_HOME}/ZomboidDedicatedServer
+# Guessing wrong is silent but total: every Workshop step below derives its
+# cache root from PZ_INSTALL_DIR, so a root that doesn't exist makes the scan
+# report "all mods already cached", points SteamCMD's +force_install_dir at the
+# wrong tree, skips the B42 root-level mod.info surfacing, and links nothing
+# into Zomboid/mods/. Prefer a root holding an actual install over one that
+# merely exists — on first boot the ARM64 bind mount is an empty directory and
+# SteamCMD hasn't run yet. An explicit PZ_INSTALL_DIR always wins (compose sets
+# it; tests point it at a throwaway tree).
+if [ -z "${PZ_INSTALL_DIR:-}" ]; then
+    for candidate in "${PZ_STEAM_HOME}/pzserver" "${PZ_STEAM_HOME}/ZomboidDedicatedServer"; do
+        if [ -f "${candidate}/start-server.sh" ]; then
+            PZ_INSTALL_DIR="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "${PZ_INSTALL_DIR:-}" ]; then
+    for candidate in "${PZ_STEAM_HOME}/pzserver" "${PZ_STEAM_HOME}/ZomboidDedicatedServer"; do
+        if [ -d "$candidate" ]; then
+            PZ_INSTALL_DIR="$candidate"
+            break
+        fi
+    done
+fi
+PZ_INSTALL_DIR="${PZ_INSTALL_DIR:-${PZ_STEAM_HOME}/ZomboidDedicatedServer}"
+echo "[configure-server] Server install dir: ${PZ_INSTALL_DIR}"
 
 INI_DIR="${PZ_CONFIG_DIR}/Server"
 INI_FILE="${INI_DIR}/${SERVER_NAME}.ini"
@@ -245,7 +275,9 @@ if [ "${#MISSING_WORKSHOP_IDS[@]}" -gt 0 ]; then
         echo "[configure-server] WARNING: SteamCMD workshop download exited non-zero — some mods may be missing."
     fi
 else
-    echo "[configure-server] All Workshop mods already cached locally."
+    # Name the root: an empty scan used to look identical to a genuinely warm
+    # cache, which is how a wrong PZ_INSTALL_DIR hid for so long.
+    echo "[configure-server] All Workshop mods already cached in ${WORKSHOP_CACHE_ROOT}."
 fi
 
 # Surface PZ Build 42 mod manifests so the server can discover them.

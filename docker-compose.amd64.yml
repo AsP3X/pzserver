@@ -48,6 +48,9 @@ services:
       # by this image. Set them via the web UI config page after first boot.
       USE_STEAM: "true"
       TZ: ${TZ:-Asia/Tbilisi}
+      # Where the renegademaster image installs the server (see the bind mount
+      # below). configure-server.sh reads the Workshop cache from here.
+      PZ_INSTALL_DIR: /home/steam/ZomboidDedicatedServer
     volumes:
       - ${PZ_SERVER_HOST:-./data/server}:/home/steam/ZomboidDedicatedServer
       # Live-edit mounts (override image copies when present)
