@@ -224,6 +224,7 @@ it('includes game state when server is online and data exists', function () {
 
     $reader = Mockery::mock(GameStateReader::class);
     $reader->shouldReceive('getGameState')->andReturn($gameState);
+    $reader->shouldReceive('isStale')->andReturn(false);
     app()->instance(GameStateReader::class, $reader);
 
     $user = User::factory()->admin()->create();
@@ -238,6 +239,35 @@ it('includes game state when server is online and data exists', function () {
         ->where('game_state.time.hour', 14)
         ->where('game_state.time.world_day', 12)
         ->where('game_state.weather.temperature', 28.5)
+        ->where('game_state_stale', false)
+    );
+});
+
+it('flags game state as stale when the bridge has stopped writing', function () {
+    mockDashboardResolver();
+
+    $reader = Mockery::mock(GameStateReader::class);
+    $reader->shouldReceive('getGameState')->andReturn([
+        'time' => [
+            'year' => 1993, 'month' => 7, 'day' => 9, 'hour' => 14, 'minute' => 30,
+            'day_of_year' => 190, 'world_day' => 12, 'is_night' => false,
+            'formatted' => '14:30', 'date' => '1993-07-09',
+        ],
+        'season' => 'summer',
+        'paused' => false,
+        'exported_at' => '2026-02-27T14:30:00Z',
+    ]);
+    $reader->shouldReceive('isStale')->andReturn(true);
+    app()->instance(GameStateReader::class, $reader);
+
+    $user = User::factory()->admin()->create();
+
+    $response = $this->actingAs($user)->get(route('dashboard'));
+
+    $response->assertOk();
+    $response->assertInertia(fn ($page) => $page
+        ->component('dashboard')
+        ->where('game_state_stale', true)
     );
 });
 
@@ -256,5 +286,7 @@ it('returns null game state when server is online but file missing', function ()
     $response->assertInertia(fn ($page) => $page
         ->component('dashboard')
         ->where('game_state', null)
+        // No state to be stale about — the flag must not report a dead bridge.
+        ->where('game_state_stale', false)
     );
 });

@@ -120,6 +120,7 @@ class DashboardController extends Controller
             'server' => $server,
             'auto_restart' => $autoRestartData,
             'game_state' => $gameState,
+            'game_state_stale' => $gameState !== null && $this->gameStateReader->isStale(),
             'recent_audit' => Inertia::defer(fn () => $recentAudit),
             'backup_summary' => Inertia::defer(fn () => $backupSummary),
             'leaderboard' => Inertia::defer(fn () => [

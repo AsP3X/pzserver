@@ -225,6 +225,12 @@ function KR_World.export()
         }
     end
 
+    -- Whether the world simulation is frozen. With PauseEmpty=true and nobody
+    -- connected the clock stops dead, so a panel polling this file sees the
+    -- same time, weather and temperature forever. Say so explicitly, or a
+    -- paused world is indistinguishable from a bridge that has stopped writing.
+    state.paused = ask(function() return isGamePaused() end, nil)
+
     state.events = events()
 
     local gotVersion, version = pcall(function() return getCore():getVersion() end)

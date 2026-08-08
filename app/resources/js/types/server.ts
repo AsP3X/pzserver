@@ -104,6 +104,12 @@ export type GameState = {
     } | null;
     /** Absent on servers running a KnoxRelay older than 1.3. */
     events?: WorldEvents | null;
+    /**
+     * World simulation frozen — PauseEmpty with nobody connected. The clock,
+     * weather and temperature are genuinely not moving, so the UI says so
+     * rather than looking broken. Absent on a KnoxRelay older than 1.5.
+     */
+    paused?: boolean | null;
     exported_at: string;
 };
 
@@ -166,6 +172,8 @@ export type DashboardData = {
     server: ServerStatus;
     auto_restart: AutoRestartInfo;
     game_state: GameState | null;
+    /** Server-computed: the bridge file has not been written recently. */
+    game_state_stale: boolean;
     recent_audit: AuditEntry[];
     backup_summary: BackupSummary;
     leaderboard: Leaderboard;
@@ -291,6 +299,8 @@ export type StatusServerStatus = {
 export type StatusPageData = {
     server: StatusServerStatus;
     game_state: GameState | null;
+    /** Server-computed: the bridge file has not been written recently. */
+    game_state_stale: boolean;
     mods: ModEntry[];
     server_name: string;
 };

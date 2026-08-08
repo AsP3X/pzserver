@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions and progression, and processes item delivery and money deposit queues via file-based JSON communication."
-    "changenote"    "1.4 — export world_day (days since world creation) so panels can show days survived instead of the calendar day, which reads 190 on every fresh world"
+    "changenote"    "1.5 — export world state on a real-time hook so the clock, weather and temperature keep refreshing on a paused empty server; report whether the world is paused; export world_day (days since world creation) so panels can show days survived instead of the calendar day, which reads 190 on every fresh world"
 }

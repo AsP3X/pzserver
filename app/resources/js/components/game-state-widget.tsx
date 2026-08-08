@@ -1,4 +1,5 @@
 import {
+    AlertTriangle,
     Cloud,
     CloudDrizzle,
     CloudFog,
@@ -6,6 +7,7 @@ import {
     Flower2,
     Leaf,
     Moon,
+    Pause,
     Snowflake,
     Sun,
     Thermometer,
@@ -39,7 +41,14 @@ const weatherLabelKeys: Record<string, string> = {
     night: 'game_state.night',
 };
 
-export function GameStateWidget({ gameState }: { gameState: GameState | null }) {
+export function GameStateWidget({
+    gameState,
+    stale = false,
+}: {
+    gameState: GameState | null;
+    /** The bridge has stopped writing — everything below is a last-known value. */
+    stale?: boolean;
+}) {
     const { t } = useTranslation();
 
     // Partial/empty bridge files (e.g. 0-byte game_state.json) must not crash the page
@@ -114,6 +123,28 @@ export function GameStateWidget({ gameState }: { gameState: GameState | null }) 
                     </div>
                 </>
             )}
+
+            {/*
+                Why the numbers above are standing still. A stale bridge and a
+                paused world look identical otherwise, and both look like a bug.
+            */}
+            {stale ? (
+                <>
+                    <div className="h-5 w-px bg-border" />
+                    <div className="flex items-center gap-1.5" title={t('game_state.stale_hint')}>
+                        <AlertTriangle className="size-4 text-amber-500" />
+                        <span className="text-sm text-amber-500">{t('game_state.stale')}</span>
+                    </div>
+                </>
+            ) : gameState.paused ? (
+                <>
+                    <div className="h-5 w-px bg-border" />
+                    <div className="flex items-center gap-1.5" title={t('game_state.paused_hint')}>
+                        <Pause className="size-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">{t('game_state.paused')}</span>
+                    </div>
+                </>
+            ) : null}
         </div>
     );
 }

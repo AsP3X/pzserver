@@ -19,6 +19,7 @@ class GameStateReader
      *     season: string,
      *     weather: array{temperature: float, rain_intensity: float, fog_intensity: float, wind_intensity: float, snow_intensity: float, is_raining: bool, is_foggy: bool, is_snowing: bool, condition: string}|null,
      *     game_version: string|null,
+     *     paused: bool|null,
      *     exported_at: string,
      * }|null
      */

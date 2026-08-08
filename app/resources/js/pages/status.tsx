@@ -23,6 +23,7 @@ type KillFeedEvent = {
 export default function Status({
     server,
     game_state,
+    game_state_stale,
     mods,
     server_name,
     kill_feed = [],
@@ -73,7 +74,7 @@ export default function Status({
                     {/* Game State */}
                     {server.status !== 'offline' && (
                         <div className="mb-8 grid gap-4 lg:grid-cols-2">
-                            <GameStateWidget gameState={game_state} />
+                            <GameStateWidget gameState={game_state} stale={game_state_stale} />
                             {game_state?.events && <WorldEvents events={game_state.events} />}
                         </div>
                     )}

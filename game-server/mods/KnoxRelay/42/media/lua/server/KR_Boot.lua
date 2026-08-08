@@ -9,11 +9,17 @@
 --   every tick   inventory export requests
 --   6 ticks      deliveries and money deposits    (~15 real seconds)
 --   12 ticks     player positions                 (~30 real seconds)
---   24 ticks     world state                      (~1 real minute)
 --   48 ticks     safehouse and faction claims      (~2 real minutes)
 --
 -- Respawn cooldown, safe zones and PvP tracking run every tick; they do their
 -- own internal rate limiting for anything expensive.
+--
+-- World state is the exception: it hangs off OnTickEvenPaused, a real-time
+-- hook, not the in-game clock. GameTime fires every EveryX event, so a server
+-- with PauseEmpty=true and nobody connected stops firing them altogether and
+-- the panel's clock, weather and temperature freeze with no way to tell that
+-- apart from a dead bridge. IngameState.updateInternal triggers
+-- OnTickEvenPaused before it reaches the pause gate, so it keeps running.
 --
 
 local Bridge = require("KR_Bridge")
@@ -39,14 +45,48 @@ print(LOG .. "Initializing server-side bridge mod v" .. Bridge.VERSION .. "...")
 local DELIVERY_TICKS = 6
 local DEPOSIT_TICKS = 6
 local POSITION_TICKS = 12
-local WORLD_TICKS = 24
 local HOLDINGS_TICKS = 48
+
+--- Real seconds between world exports. OnTickEvenPaused fires every frame, so
+--- this is what keeps it to a file write rather than a busy loop.
+local WORLD_SECONDS = 10
 
 local sinceDelivery = 0
 local sinceDeposit = 0
 local sincePosition = 0
-local sinceWorld = 0
 local sinceHoldings = 0
+local lastWorldExport = 0
+local framesSinceWorld = 0
+
+--- Roughly WORLD_SECONDS of frames, for when os.time is unavailable. Erring
+--- long is fine; erring short would write the file on every frame.
+local WORLD_FRAMES = 600
+
+--- Export world state at most once per WORLD_SECONDS of wall time.
+---
+--- Called from both the real-time hook and the in-game one: if a build ever
+--- fails to deliver OnTickEvenPaused, the minute hook still exports whenever
+--- the clock is running, which is the case that matters most.
+local function exportWorld()
+    local gotTime, now = pcall(os.time)
+
+    if gotTime and type(now) == "number" then
+        if (now - lastWorldExport) < WORLD_SECONDS then
+            return
+        end
+        lastWorldExport = now
+    else
+        -- No clock to throttle against, and this runs once per frame, so
+        -- count frames instead of writing the file sixty times a second.
+        framesSinceWorld = framesSinceWorld + 1
+        if framesSinceWorld < WORLD_FRAMES then
+            return
+        end
+        framesSinceWorld = 0
+    end
+
+    World.export()
+end
 
 --- A player joined or spawned.
 --- Unreliable on dedicated servers, so nothing critical hangs off it; death
@@ -92,11 +132,7 @@ local function onEveryOneMinute()
         Beacon.export()
     end
 
-    sinceWorld = sinceWorld + 1
-    if sinceWorld >= WORLD_TICKS then
-        sinceWorld = 0
-        World.export()
-    end
+    exportWorld()
 
     sinceHoldings = sinceHoldings + 1
     if sinceHoldings >= HOLDINGS_TICKS then
@@ -110,6 +146,13 @@ local function onEveryOneMinute()
     --- Feud's scan is what spots the corpses, so obituaries flush after it.
     Feud.tick()
     Obituary.flush()
+end
+
+--- The real-time heartbeat. Fires every frame whether or not the world is
+--- paused, so it is the only hook that keeps running on an empty server with
+--- PauseEmpty=true. exportWorld() throttles it to a write every WORLD_SECONDS.
+local function onTickEvenPaused()
+    exportWorld()
 end
 
 --- Progression and the vehicle fleet are the heaviest exports, so they share
@@ -159,4 +202,14 @@ Events.EveryTenMinutes.Add(onEveryTenMinutes)
 Events.EveryOneMinute.Add(onEveryOneMinute)
 Events.OnServerStarted.Add(onServerStarted)
 
-print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, MoneyDeposit")
+-- No vanilla Lua subscribes to OnTickEvenPaused, so treat it as optional: an
+-- indexing error here would take the whole mod down with it, and everything
+-- else still works without the real-time cadence.
+local tickHooked = pcall(function() Events.OnTickEvenPaused.Add(onTickEvenPaused) end)
+
+print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, MoneyDeposit"
+    .. (tickHooked and ", OnTickEvenPaused" or ""))
+
+if not tickHooked then
+    print(LOG .. "WARNING: OnTickEvenPaused unavailable — world state will not refresh while the server is paused and empty")
+end

@@ -68,6 +68,7 @@ export default function Dashboard({
     server,
     auto_restart,
     game_state,
+    game_state_stale,
     recent_audit,
     backup_summary,
     leaderboard,
@@ -296,7 +297,9 @@ export default function Dashboard({
                 </div>
 
                 {/* Game State Widget */}
-                {server.status !== 'offline' && <GameStateWidget gameState={game_state} />}
+                {server.status !== 'offline' && (
+                    <GameStateWidget gameState={game_state} stale={game_state_stale} />
+                )}
 
                 {/* Stats Cards */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

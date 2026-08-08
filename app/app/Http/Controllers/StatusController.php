@@ -78,6 +78,7 @@ class StatusController extends Controller
         return Inertia::render('status', [
             'server' => $server,
             'game_state' => $gameState,
+            'game_state_stale' => $gameState !== null && $this->gameStateReader->isStale(),
             'mods' => $mods,
             'server_name' => config('zomboid.server_name', 'ZomboidServer'),
             'kill_feed' => $killFeed,

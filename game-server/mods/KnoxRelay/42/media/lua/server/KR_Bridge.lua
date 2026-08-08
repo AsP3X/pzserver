@@ -18,7 +18,7 @@ KR_Bridge = {}
 --- Mod version, exported in game_state.json so the panel can tell which
 --- bridge features the server it is talking to actually has. Keep in step
 --- with modversion in mod.info; nothing else reads that file at runtime.
-KR_Bridge.VERSION = "1.4"
+KR_Bridge.VERSION = "1.5"
 
 local LOG = "[KnoxRelay] "
 
