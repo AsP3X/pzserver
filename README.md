@@ -171,8 +171,11 @@ Run inside the **app** container (`pz-app`). Stack must already be up.
 # Clear previous tiles / partial runs
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear
 
-# Full generate (render → pack into tiles.sqlite → remove loose files)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
+# Lite generate (recommended on a live server — low disk/CPU)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=lite
+
+# Full detail generate (heavier — prefer when the game is idle)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=full
 
 # Stop a running job (keeps partial tiles for resume)
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop
@@ -187,30 +190,31 @@ docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
 Via Compose service name (same effect):
 
 ```bash
-docker compose exec app php artisan zomboid:generate-map-tiles --force
+docker compose exec app php artisan zomboid:generate-map-tiles --force --profile=lite
 docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
 ```
 
 Or with Make / PowerShell wrappers:
 
 ```bash
-make exec CMD="php artisan zomboid:generate-map-tiles --force"
+make exec CMD="php artisan zomboid:generate-map-tiles --force --profile=lite"
 ```
 
 ```powershell
-.\make.ps1 exec php artisan zomboid:generate-map-tiles --force
+.\make.ps1 exec php artisan zomboid:generate-map-tiles --force --profile=lite
 .\make.ps1 exec php artisan zomboid:generate-map-tiles --pack-only
 ```
 
 | Flag | Meaning |
 |------|---------|
 | `--force` | Clear existing pack/loose tiles and re-render from scratch |
+| `--profile=lite\|full` | **lite** (default): ground only, fewer zooms; **full**: more building layers |
 | `--resume` | Continue an interrupted render (never deletes loose tiles) |
 | `--stop` | Request stop of a running job (keeps partial tiles) |
 | `--clear` | Only delete tiles + progress state, then exit |
 | `--pack-only` | Convert an existing loose pyramid into `tiles.sqlite` (no re-render) |
 | `--keep-loose` | Do not delete the multi-file pyramid after packing |
-| `--workers=N` | Override render worker count (default: CPU cores) |
+| `--workers=N` | Override render worker count (default: 1 via `PZ_MAP_WORKERS`) |
 | `--map=` | Specific map name for pzmap2dzi (default: all / vanilla) |
 
 Env: `PZ_MAP_TILES_PATH` (container path, default `/map-tiles`) / host bind `PZ_MAP_TILES_HOST` (default `./data/map-tiles`).

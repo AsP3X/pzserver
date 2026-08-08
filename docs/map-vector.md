@@ -4,14 +4,17 @@ Admin and portal maps use a **vector basemap** by default: geometry baked from v
 
 This matches the *schematic* in-game world map (water, roads, buildings, town labels) — not photorealistic isometric tiles.
 
+For a **game-like 3D isometric** basemap (live CDN + optional local generate), use the Player map **Map view** toggle — see [map-tiles.md](map-tiles.md).
+
 ## Why vector
 
-| | Vector (default) | Local isometric tiles | Proxy tiles |
-|--|------------------|----------------------|-------------|
-| Storage | ~1.5 MB `map.json` | large `tiles.sqlite` | none |
-| Generation | one offline bake when the game map changes | hours of disk-heavy render | none |
-| Look | vanilla paper map | isometric world art | isometric CDN |
-| Offline | yes | yes | no |
+| | Vector (default) | 3D isometric (CDN) | Local isometric pack |
+|--|------------------|--------------------|----------------------|
+| Storage | ~1.5–1.6 MB `map.json` | none on server | large `tiles.sqlite` |
+| Generation | one offline bake when the game map changes | none | hours of disk-heavy render (`--profile=lite` recommended) |
+| Look | vanilla paper map | game-like isometric | game-like isometric (offline / modded) |
+| Offline | yes | no | yes |
+| Live on site | yes | yes (immediate) | after generate + pack |
 
 ## Asset location
 
@@ -116,9 +119,15 @@ After adding/removing **map mods**, re-run the bake and hard-refresh the browser
 - **UI polish:** collapsible map key, Map= pack chips, live X/Y cursor, fit Home/World/Players, measure tool, dark paper mode.
 - **Forest:** when `worldmap-forest.xml` sits beside `worldmap.xml`, bake one soft green rect per forest cell (dense overview without 100k polygons).
 
-## Optional isometric tiles
+## 3D isometric (optional)
 
-Still available for a photorealistic basemap: see [map-tiles.md](map-tiles.md). Force with:
+Admin → Player map → **Map view** → **3D isometric**:
+
+- **Live CDN first** (`map.projectzomboid.com`) so the map never waits on generation
+- **Optional local pack** via Advanced → Isometric tiles (`--profile=lite` default, or `full`)
+- Full detail: [map-tiles.md](map-tiles.md)
+
+Server-wide force (skips vector default for `MapConfigBuilder::build()` only; UI toggle still works via `mapModes`):
 
 ```bash
 PZ_MAP_BASEMAP=local   # after generating tiles.sqlite

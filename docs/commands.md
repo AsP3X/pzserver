@@ -70,9 +70,18 @@ make exec CMD="npm run build"
 make exec CMD="php artisan config:clear"
 ```
 
-### Map tiles (admin player map)
+### Map basemap (admin player map)
 
-Local isometric basemap tiles are **optional**. By default the panel uses the **vector** basemap (`docs/map-vector.md`). Rebuild the vector pack after a game map update **or when Map= / map mods change**:
+The Player map has a **Map view** toggle (persisted in the browser):
+
+| Mode | Behaviour | Docs |
+|------|-----------|------|
+| **Vector (2D)** | Default schematic basemap from `worldmap.xml` | [map-vector.md](map-vector.md) |
+| **3D isometric** | Game-like tiles — **live CDN first**, optional local pack | [map-tiles.md](map-tiles.md) |
+
+#### Vector pack (default)
+
+Rebuild after a game map update **or when Map= / map mods change**:
 
 ```bash
 # Show Map= folders resolved from server.ini + Workshop
@@ -95,16 +104,21 @@ make exec CMD="php artisan zomboid:build-worldmap-vector"
 
 **Admin UI (no SSH):** Admin → Player map → **Vector basemap** → **Rebuild vector basemap** (`POST /admin/players/map/bake-vector`).
 
-Proxy tiles (`map.projectzomboid.com`) or local isometric tiles are opt-in via `PZ_MAP_BASEMAP`.
+#### 3D isometric (live CDN + optional local)
 
-After generation, tiles are **packed into a single SQLite file** (`data/map-tiles/tiles.sqlite`) so the host does not retain millions of loose DZI image files. See [map-tiles.md](map-tiles.md) for full details.
+- **Live immediately:** 3D mode uses `map.projectzomboid.com` when no local pack is ready (no server disk load).
+- **Optional local:** generate with **lite** (default, low resource) or **full** profile; result packs into `data/map-tiles/tiles.sqlite`.
+- Generation never blanks the map — CDN stays visible until local tiles are ready.
 
 ```bash
 # Clear previous tiles (cleanup before a clean test)
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear
 
-# Full generate (wipes previous, then render + pack)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
+# Lite generate (recommended on a live server — ground layer, fewer zooms, 1 worker)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=lite
+
+# Full detail (heavier — prefer when the game server is idle)
+docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=full
 
 # Stop a running job (keeps partial loose tiles)
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop
@@ -115,6 +129,13 @@ docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume
 # Pack an existing multi-file pyramid without re-rendering
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
 ```
+
+**Admin UI:** Map view → **3D isometric**; Advanced **Isometric tiles** → Lite/Full → Generate.  
+API: `POST /admin/players/map/generate-tiles` with `{ "profile": "lite"|"full", "force"?: bool, "resume"?: bool }`.
+
+Server-wide defaults: `PZ_MAP_BASEMAP=auto|vector|local|proxy` (auto prefers vector; 3D UI still available).
+
+After generation, tiles are **packed into a single SQLite file** (`data/map-tiles/tiles.sqlite`) so the host does not retain millions of loose DZI image files. See [map-tiles.md](map-tiles.md) for full details.
 
 Make / Windows wrappers:
 

@@ -1,4 +1,4 @@
-# Map tiles (optional isometric basemap)
+# Map tiles (3D isometric basemap)
 
 The admin **Player map** (`/admin/players/map`) plots player markers on a basemap. The same basemap config is reused for safe zones, moderation, and the player portal map widget.
 
@@ -6,37 +6,37 @@ The admin **Player map** (`/admin/players/map`) plots player markers on a basema
 
 Out of the box the panel uses a **compact vector pack** baked from vanilla `worldmap.xml` (~1.5 MB, Canvas-rendered). See **[map-vector.md](map-vector.md)**.
 
-- No `pzmap2dzi` run, no tile CDN, no multi-file pyramid
+- No `pzmap2dzi` run, no multi-file pyramid
 - Schematic “in-game world map” look (water, roads, buildings, labels)
 
-## Optional: proxy tiles
+## Map view: Vector vs 3D isometric
 
-Set `PZ_MAP_BASEMAP=proxy` (or fall back when the vector pack is missing) to use tiles from **map.projectzomboid.com** (configurable via `PZ_MAP_PROXY_URL` / `config/zomboid.php` → `map.proxy_*`).
-
-- No local disk usage beyond the panel itself
-- Requires outbound HTTPS from the browser (or users) to the proxy host
-
-## 3D isometric basemap (live + optional local)
-
-Admin → Player map → **Map view** toggle:
+Admin → Player map → **Map view** toggle (stored in browser `localStorage` as `pz-map-view-mode`):
 
 | Mode | What you see | Server load |
 |------|----------------|-------------|
 | **Vector (2D)** | Schematic worldmap (default) | Minimal (static JSON) |
-| **3D isometric** | Game-like isometric tiles | **Live CDN** immediately (`map.projectzomboid.com`); optional local pack |
+| **3D isometric** | Game-like isometric tiles | **Live CDN** immediately; optional local pack |
+
+Backend: `MapConfigBuilder::buildModes()` exposes both configs (`vector` + `isometric`). Isometric = local `tiles.sqlite` when ready, else public proxy so the UI always has something live to render.
 
 ### Live first (no wait)
 
-Switching to **3D isometric** always shows tiles **right away** via the public proxy when local tiles are not ready. Generation never blanks the map.
+Switching to **3D isometric** always shows tiles **right away** via **map.projectzomboid.com** when local tiles are not ready. Optional local generation runs in the background and **never blanks the map**.
+
+CDN isometric is **vanilla** Knox Country. Custom map mods need a **local** generate for accurate art (vector mode already merges `Map=` packs).
 
 ### Efficient local generation (`--profile=lite` default)
 
 When you need offline / modded isometric tiles, generate with the **lite** profile (Admin UI default):
 
-- Ground layer only (`layer_range: [0,0]`)
-- More omitted high-zoom levels (`omit_levels: 5`)
-- 1 worker + nice/ionice (game disk friendly)
-- WebP + packed `tiles.sqlite`
+| Setting | Lite | Full |
+|---------|------|------|
+| Layers | Ground only `[0,0]` | Ground + walls `[0,1]` |
+| `omit_levels` | 5 (fewer high-zoom tiles) | 3 |
+| Workers | 1 (config default) | 1+ (`PZ_MAP_WORKERS`) |
+| Priority | nice + ionice | same |
+| Output | WebP → pack `tiles.sqlite` | same |
 
 ```bash
 # Lite (recommended on a live server)
@@ -44,11 +44,34 @@ docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=
 
 # Full detail (heavier — prefer when idle)
 docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=full
+
+# Compose / Make
+docker compose exec app php artisan zomboid:generate-map-tiles --force --profile=lite
+make exec CMD="php artisan zomboid:generate-map-tiles --force --profile=lite"
 ```
+
+**Admin UI:** Map view → **3D isometric** → open **Isometric tiles (Advanced)** → choose Lite/Full → Generate.  
+API: `POST /admin/players/map/generate-tiles` body `{ "profile": "lite"|"full", "force"?: true, "resume"?: true }`.
 
 After a successful pack, 3D mode automatically prefers **local** tiles over the CDN.
 
-Force server-wide default isometric: `PZ_MAP_BASEMAP=local` or `proxy`.
+### Env / force defaults
+
+| Env | Meaning |
+|-----|---------|
+| `PZ_MAP_BASEMAP=auto` | Prefer vector for default page config (UI still offers both modes) |
+| `PZ_MAP_BASEMAP=vector` | Force vector for `build()` |
+| `PZ_MAP_BASEMAP=local` | Force local tiles when usable |
+| `PZ_MAP_BASEMAP=proxy` | Force public isometric CDN |
+| `PZ_MAP_PROXY_URL` | CDN tile URL template |
+| `PZ_MAP_WORKERS` | Render worker count (default 1) |
+
+## Optional: proxy tiles only
+
+Set `PZ_MAP_BASEMAP=proxy` (or fall back when the vector pack is missing) to use tiles from **map.projectzomboid.com** without offering vector as the server default.
+
+- No local disk usage beyond the panel itself
+- Requires outbound HTTPS from the browser (or users) to the proxy host
 
 ## Optional: local tiles (packed SQLite)
 
@@ -269,12 +292,13 @@ Force with `PZ_MAP_BASEMAP=vector|local|proxy`.
 
 | Piece | Location |
 |-------|----------|
-| Generate + pack command | `app/app/Console/Commands/GenerateMapTiles.php` |
-| SQLite pack / serve store | `app/app/Services/MapTileStore.php` |
-| Prefer local vs proxy config | `app/app/Services/MapConfigBuilder.php` |
-| Admin page + generate button | `app/resources/js/pages/admin/player-map.tsx` |
-| Tile HTTP route | `GET /admin/map-tiles/{level}/{tile}` → `PlayerMapController::tile` |
-| Unit tests | `app/tests/Unit/MapTileStoreTest.php`, `MapConfigBuilderTest.php` |
+| Generate + pack command | `app/Console/Commands/GenerateMapTiles.php` (`--profile=lite\|full`) |
+| Background UI spawn | `app/Services/MapTileGenerator.php` |
+| SQLite pack / serve store | `app/Services/MapTileStore.php` |
+| Dual modes + defaults | `app/Services/MapConfigBuilder.php` → `build()` / `buildModes()` |
+| Admin Map view + generate | `resources/js/pages/admin/player-map.tsx` |
+| Tile HTTP route | `GET /map-tiles/{level}/{tile}` (and admin alias) |
+| Unit tests | `tests/Unit/MapTileStoreTest.php`, `MapConfigBuilderTest.php` |
 
 Pack schema (version `1`):
 
@@ -283,6 +307,7 @@ Pack schema (version `1`):
 
 ### Related docs
 
-- [Command reference](commands.md) — artisan examples via `docker exec` / `make exec`
+- [Command reference](commands.md) — vector bake + isometric generate (docker variants)
+- [Vector basemap](map-vector.md) — default 2D schematic pack
 - [Troubleshooting](troubleshooting.md) — map / disk issues
-- [README — Map tiles](../README.md#map-tiles-admin-player-map) — short operator summary
+- [README — Map basemap](../README.md#map-basemap-admin-player-map) — short operator summary
