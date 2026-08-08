@@ -90,6 +90,14 @@ it('handles empty values', function () {
     expect($data['Password'])->toBe('');
 });
 
+it('round-trips the welcome message markup the game renders', function () {
+    $message = '<RGB:0.2,0.8,1>Welcome!<RGB:1,1,1> <LINE> <LINE> Rules: no griefing. <LINE> კარგ თამაშს!';
+
+    $this->parser->write($this->tempPath, ['ServerWelcomeMessage' => $message]);
+
+    expect($this->parser->read($this->tempPath)['ServerWelcomeMessage'])->toBe($message);
+});
+
 it('throws when config file not found for write', function () {
     $this->parser->write('/nonexistent/path/server.ini', ['MaxPlayers' => '32']);
 })->throws(RuntimeException::class, 'Config file not found');

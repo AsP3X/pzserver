@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useTranslation } from '@/hooks/use-translation';
 import AppLayout from '@/layouts/app-layout';
 import {
@@ -90,6 +91,56 @@ function PasswordInput({
     );
 }
 
+// ── Rich text field (game markup, stored as one INI line) ───────────
+
+const LINE_BREAK_TAG = ' <LINE> ';
+
+/**
+ * server.ini holds these values on a single line, so a typed Enter becomes the
+ * game's own line-break tag instead of a newline the server would reject.
+ */
+function RichTextInput({
+    id,
+    value,
+    onChange,
+    className,
+}: {
+    id: string;
+    value: string;
+    onChange: (value: string) => void;
+    className?: string;
+}) {
+    const ref = useRef<HTMLTextAreaElement>(null);
+
+    function insertLineBreak() {
+        const field = ref.current;
+        if (!field) return;
+
+        const { selectionStart, selectionEnd } = field;
+        onChange(value.slice(0, selectionStart) + LINE_BREAK_TAG + value.slice(selectionEnd));
+
+        const caret = selectionStart + LINE_BREAK_TAG.length;
+        requestAnimationFrame(() => field.setSelectionRange(caret, caret));
+    }
+
+    return (
+        <Textarea
+            id={id}
+            ref={ref}
+            rows={3}
+            value={value}
+            onChange={(e) => onChange(e.target.value.replace(/\r?\n/g, LINE_BREAK_TAG))}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    insertLineBreak();
+                }
+            }}
+            className={className}
+        />
+    );
+}
+
 // ── Smart input renderer ────────────────────────────────────────────
 
 function SettingInput({
@@ -142,6 +193,10 @@ function SettingInput({
 
     if (meta.sensitive) {
         return <PasswordInput id={inputId} value={value} onChange={onChange} className={dirtyClass} />;
+    }
+
+    if (meta.type === 'text') {
+        return <RichTextInput id={inputId} value={value} onChange={onChange} className={dirtyClass} />;
     }
 
     if (meta.type === 'boolean') {
@@ -322,7 +377,10 @@ const ConfigSection = forwardRef<ConfigSectionHandle, ConfigSectionProps>(functi
                         <div className="mt-1 rounded-lg border bg-card p-4">
                             <div className="grid gap-5 sm:grid-cols-2">
                                 {entries.map(({ key, value, meta: settingMeta }) => (
-                                    <div key={key} className="space-y-1.5">
+                                    <div
+                                        key={key}
+                                        className={`space-y-1.5 ${settingMeta?.type === 'text' ? 'sm:col-span-2' : ''}`}
+                                    >
                                         <Label
                                             htmlFor={`cfg-${key}`}
                                             className="text-xs font-medium"

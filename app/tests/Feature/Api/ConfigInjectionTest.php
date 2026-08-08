@@ -84,6 +84,35 @@ it('accepts commas and spaces in server config values', function () {
         ->assertOk();
 });
 
+// ── Welcome message (rich text the game renders on join) ────────────
+
+it('accepts markup and non-ASCII prose in the welcome message', function () {
+    $message = '<RGB:1,0,0>Welcome!<RGB:1,1,1> <LINE> <LINE> კარგ თამაშს... and good luck!';
+
+    $this->patchJson('/api/config/server', [
+        'settings' => ['ServerWelcomeMessage' => $message],
+    ], injectionApiKey())
+        ->assertOk();
+
+    $this->getJson('/api/config/server', injectionApiKey())
+        ->assertOk()
+        ->assertJsonPath('ServerWelcomeMessage', $message);
+});
+
+it('rejects newline injection in the welcome message', function () {
+    $this->patchJson('/api/config/server', [
+        'settings' => ['ServerWelcomeMessage' => "Welcome!\nRCONPassword=hacked"],
+    ], injectionApiKey())
+        ->assertUnprocessable();
+});
+
+it('rejects an oversized welcome message', function () {
+    $this->patchJson('/api/config/server', [
+        'settings' => ['ServerWelcomeMessage' => str_repeat('a', 2001)],
+    ], injectionApiKey())
+        ->assertUnprocessable();
+});
+
 // ── Sandbox Config (Lua) Injection ──────────────────────────────────
 
 it('rejects Lua code injection in sandbox config values', function () {

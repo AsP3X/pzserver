@@ -1,5 +1,5 @@
 export type SettingMeta = {
-    type: 'boolean' | 'number' | 'string' | 'enum' | 'list';
+    type: 'boolean' | 'number' | 'string' | 'text' | 'enum' | 'list';
     group: string;
     description: string;
     default?: string | number | boolean;
@@ -19,6 +19,12 @@ export const SERVER_INI_META: Record<string, SettingMeta> = {
         group: 'General',
         description: 'The name of the server as it appears in the server browser.',
         default: 'servertest',
+    },
+    ServerWelcomeMessage: {
+        type: 'text',
+        group: 'General',
+        description:
+            'Shown in the chat panel the moment a player joins. Supports the game\'s rich text: <LINE> for a line break and <RGB:r,g,b> to colour the text that follows (values are 0-1, so <RGB:1,0,0> is red).',
     },
     Public: {
         type: 'boolean',
