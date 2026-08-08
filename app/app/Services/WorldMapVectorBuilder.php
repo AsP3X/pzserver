@@ -37,6 +37,8 @@ class WorldMapVectorBuilder
         'building-RetailAndCommercial' => ['fill' => '#b8cd54', 'minZ' => -0.75, 'order' => 37],
         // Woodland from worldmap natural=wood (full forest.xml is too large for the pack)
         'natural-wood' => ['fill' => '#bdc5a3', 'minZ' => -3.5, 'order' => 5],
+        // Coarse forest massing from worldmap-forest.xml (one rect per cell — dense & compact)
+        'forest' => ['fill' => '#aeb89a', 'minZ' => -4.0, 'order' => 4],
     ];
 
     /**
@@ -133,6 +135,12 @@ class WorldMapVectorBuilder
             $mergedTranslations = array_merge($mergedTranslations, $this->loadLabelTranslations($labelsPath));
 
             $geometry = $this->parseWorldmapXml($xml, $cellSize);
+
+            // Optional dense woodland massing from sibling worldmap-forest.xml
+            $forestPath = dirname($xml).DIRECTORY_SEPARATOR.'worldmap-forest.xml';
+            if (is_file($forestPath)) {
+                $geometry = $this->mergeForestCellMassing($geometry, $forestPath, $cellSize);
+            }
 
             // Cell replace: overlay pack owns the whole cell when it defines it.
             foreach ($geometry['cells'] as $cellKey => $features) {
@@ -438,6 +446,76 @@ class WorldMapVectorBuilder
         }
 
         return $data;
+    }
+
+    /**
+     * Add one filled cell rectangle per forest cell (dense overview without 100k+ polygons).
+     *
+     * @param  array{
+     *     cells: array<string, list<array{0: string, 1: list<int>}>>,
+     *     bounds: array{0: int, 1: int, 2: int, 3: int},
+     *     feature_count: int,
+     *     point_count: int,
+     *     place_labels: list<array{t: string, x: float, y: float, k: string, s: float}>
+     * }  $geometry
+     * @return array{
+     *     cells: array<string, list<array{0: string, 1: list<int>}>>,
+     *     bounds: array{0: int, 1: int, 2: int, 3: int},
+     *     feature_count: int,
+     *     point_count: int,
+     *     place_labels: list<array{t: string, x: float, y: float, k: string, s: float}>
+     * }
+     */
+    public function mergeForestCellMassing(array $geometry, string $forestXmlPath, int $cellSize = self::DEFAULT_CELL_SIZE): array
+    {
+        $reader = new XMLReader;
+        if (! $reader->open($forestXmlPath, null, LIBXML_NONET | LIBXML_COMPACT)) {
+            return $geometry;
+        }
+
+        $minX = $geometry['bounds'][0];
+        $minY = $geometry['bounds'][1];
+        $maxX = $geometry['bounds'][2];
+        $maxY = $geometry['bounds'][3];
+        $added = 0;
+
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT || $reader->localName !== 'cell') {
+                continue;
+            }
+
+            // Only need presence of any feature in the cell
+            $cellXml = $reader->readOuterXml();
+            if ($cellXml === '' || ! str_contains($cellXml, '<feature')) {
+                continue;
+            }
+
+            $cellX = (int) $reader->getAttribute('x');
+            $cellY = (int) $reader->getAttribute('y');
+            $key = $cellX.','.$cellY;
+            $x0 = $cellX * $cellSize;
+            $y0 = $cellY * $cellSize;
+            $x1 = $x0 + $cellSize;
+            $y1 = $y0 + $cellSize;
+            $ring = [$x0, $y0, $x1, $y0, $x1, $y1, $x0, $y1];
+
+            $geometry['cells'][$key] ??= [];
+            // Prepend so forest sits under roads/buildings after style order is applied
+            array_unshift($geometry['cells'][$key], ['forest', $ring]);
+            $added++;
+            $minX = min($minX, $x0);
+            $minY = min($minY, $y0);
+            $maxX = max($maxX, $x1);
+            $maxY = max($maxY, $y1);
+        }
+
+        $reader->close();
+
+        $geometry['bounds'] = [$minX, $minY, $maxX, $maxY];
+        $geometry['feature_count'] += $added;
+        $geometry['point_count'] += $added * 4;
+
+        return $geometry;
     }
 
     /**

@@ -113,7 +113,8 @@ After adding/removing **map mods**, re-run the bake and hard-refresh the browser
 - **Coordinates:** markers / safe zones stay `x, y` world squares (`lat = -y`, `lng = x`).
 - **Performance:** cell-index culling + single canvas + rAF redraw; DPR capped at 2.
 - **Accuracy:** absolute coords = `cell * 300 + local` from vanilla XML; colors match TIS layer fills.
-- **UI polish:** collapsible map key, Map= pack chips, live X/Y cursor (vector mode).
+- **UI polish:** collapsible map key, Map= pack chips, live X/Y cursor, fit Home/World/Players, measure tool, dark paper mode.
+- **Forest:** when `worldmap-forest.xml` sits beside `worldmap.xml`, bake one soft green rect per forest cell (dense overview without 100k polygons).
 
 ## Optional isometric tiles
 

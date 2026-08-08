@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 /** Vanilla world-map fill colors (ISMapDefinitions.lua / WorldMapVectorBuilder). */
 export const VECTOR_LEGEND_ITEMS = [
     { id: 'water', color: '#3b8d95' },
+    { id: 'forest', color: '#aeb89a' },
     { id: 'wood', color: '#bdc5a3' },
     { id: 'road', color: '#867d71' },
     { id: 'trail', color: '#b97a57' },

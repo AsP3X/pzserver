@@ -79,6 +79,41 @@ it('writes JSON without stats metadata', function () {
     }
 });
 
+it('merges forest cell massing from worldmap-forest.xml', function () {
+    $forest = sys_get_temp_dir().'/pz_forest_'.getmypid().'.xml';
+    file_put_contents($forest, <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<world version="1.0">
+ <cell x="10" y="10">
+  <feature>
+   <geometry type="Polygon">
+    <coordinates>
+     <point x="0" y="0"/>
+     <point x="10" y="0"/>
+     <point x="10" y="10"/>
+     <point x="0" y="10"/>
+    </coordinates>
+   </geometry>
+   <properties>
+    <property name="natural" value="forest"/>
+   </properties>
+  </feature>
+ </cell>
+</world>
+XML);
+
+    try {
+        $base = $this->builder->parseWorldmapXml($this->fixtureDir.'/sample-worldmap.xml');
+        $merged = $this->builder->mergeForestCellMassing($base, $forest);
+
+        expect($merged['cells'])->toHaveKey('10,10');
+        $layers = collect($merged['cells']['10,10'])->pluck(0)->all();
+        expect($layers)->toContain('forest');
+    } finally {
+        @unlink($forest);
+    }
+});
+
 it('merges mod + vanilla maps with first Map= entry winning cell overlaps', function () {
     $data = $this->builder->buildFromSources([
         [

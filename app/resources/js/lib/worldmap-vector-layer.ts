@@ -40,12 +40,23 @@ export class WorldMapVectorLayer extends L.Layer {
 
     private redrawScheduled = false;
 
+    private darkMode = false;
+
     constructor(data: WorldMapVectorData, options?: L.LayerOptions) {
         super(options);
         this.data = data;
         this.cellSize = data.cellSize || 300;
         this.sortedStyles = Object.entries(data.styles).sort((a, b) => a[1].order - b[1].order);
         this.cellIndex = new Map(Object.entries(data.cells));
+    }
+
+    /** Dark UI: deeper paper + slightly lifted fills for contrast. */
+    setDarkMode(dark: boolean): void {
+        if (this.darkMode === dark) {
+            return;
+        }
+        this.darkMode = dark;
+        this.scheduleRedraw();
     }
 
     onAdd(map: L.Map): this {
@@ -130,10 +141,8 @@ export class WorldMapVectorLayer extends L.Layer {
         L.DomUtil.setPosition(canvas, topLeft);
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const bg = this.data.bg
-            ? `rgb(${this.data.bg[0]}, ${this.data.bg[1]}, ${this.data.bg[2]})`
-            : DEFAULT_BG;
-        ctx.fillStyle = bg;
+        const paper = this.paperColor();
+        ctx.fillStyle = paper;
         ctx.fillRect(0, 0, size.x, size.y);
 
         const bounds = map.getBounds();
@@ -195,20 +204,26 @@ export class WorldMapVectorLayer extends L.Layer {
                 this.pathRing(ctx, map, ring, topLeft);
             }
 
+            const fill = this.tintFill(style.fill);
             const isRoad = layerId.startsWith('road-') || layerId === 'railway';
             if (isRoad) {
                 // Roads in worldmap.xml are often thin polygons; fill + light stroke
-                ctx.fillStyle = style.fill;
+                ctx.fillStyle = fill;
                 ctx.fill();
-                ctx.strokeStyle = style.fill;
+                ctx.strokeStyle = fill;
                 ctx.lineWidth = layerId === 'road-trail' ? 0.6 : layerId === 'railway' ? 0.8 : 0.5;
                 ctx.stroke();
             } else {
-                ctx.fillStyle = style.fill;
+                ctx.fillStyle = fill;
+                // Forest cell massing: soft opacity so towns still read on top
+                if (layerId === 'forest') {
+                    ctx.globalAlpha = this.darkMode ? 0.55 : 0.65;
+                }
                 ctx.fill();
+                ctx.globalAlpha = 1;
                 // Subtle building outline at higher zoom for readability
                 if (layerId.startsWith('building') && zoom >= 1) {
-                    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+                    ctx.strokeStyle = this.darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.18)';
                     ctx.lineWidth = 0.5;
                     ctx.stroke();
                 }
@@ -344,6 +359,31 @@ export class WorldMapVectorLayer extends L.Layer {
                 }
             }
         }
+    }
+
+    private paperColor(): string {
+        if (this.darkMode) {
+            return 'rgb(42, 44, 40)';
+        }
+        const bg = this.data.bg;
+        if (bg) {
+            return `rgb(${bg[0]}, ${bg[1]}, ${bg[2]})`;
+        }
+
+        return DEFAULT_BG;
+    }
+
+    /** Lift fills slightly on dark paper so roads/buildings stay readable. */
+    private tintFill(hex: string): string {
+        if (!this.darkMode || !hex.startsWith('#') || hex.length < 7) {
+            return hex;
+        }
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        const lift = (c: number) => Math.min(255, Math.round(c * 0.75 + 55));
+
+        return `rgb(${lift(r)}, ${lift(g)}, ${lift(b)})`;
     }
 }
 

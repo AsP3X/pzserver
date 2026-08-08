@@ -2,6 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import VectorMapLegend from '@/components/vector-map-legend';
+import { useAppearance } from '@/hooks/use-appearance';
 import { useTranslation } from '@/hooks/use-translation';
 import type { DziInfo, MapConfig, PlayerMarker } from '@/types/server';
 import {
@@ -253,12 +254,19 @@ export default function PzMap({
     onMapReady,
 }: PzMapProps) {
     const { t } = useTranslation();
+    const { resolvedAppearance } = useAppearance();
     const containerRef = useRef<HTMLDivElement>(null);
     const mapRef = useRef<L.Map | null>(null);
+    const vectorLayerRef = useRef<WorldMapVectorLayer | null>(null);
     const markersLayerRef = useRef<L.LayerGroup | null>(null);
     const zonesLayerRef = useRef<L.LayerGroup | null>(null);
     const eventsLayerRef = useRef<L.LayerGroup | null>(null);
+    const measureLayerRef = useRef<L.LayerGroup | null>(null);
     const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+    const [measuring, setMeasuring] = useState(false);
+    const [measurePoints, setMeasurePoints] = useState<Array<{ x: number; y: number }>>([]);
+    const measuringRef = useRef(false);
+    measuringRef.current = measuring;
     const drawStateRef = useRef<{
         drawing: boolean;
         startLatLng: L.LatLng | null;
@@ -337,7 +345,9 @@ export default function PzMap({
                         return; // unmounted
                     }
                     const layer = new WorldMapVectorLayer(data);
+                    layer.setDarkMode(document.documentElement.classList.contains('dark'));
                     layer.addTo(map);
+                    vectorLayerRef.current = layer;
 
                     if (!mapConfig.bounds && data.bounds) {
                         const [minX, minY, maxX, maxY] = data.bounds;
@@ -376,9 +386,26 @@ export default function PzMap({
         const eventsLayer = L.layerGroup().addTo(map);
         eventsLayerRef.current = eventsLayer;
 
+        const measureLayer = L.layerGroup().addTo(map);
+        measureLayerRef.current = measureLayer;
+
         mapRef.current = map;
 
         onMapReady?.(map);
+
+        map.on('click', (e: L.LeafletMouseEvent) => {
+            if (!measuringRef.current) {
+                return;
+            }
+            const pz = latLngToPz(e.latlng);
+            setMeasurePoints((prev) => {
+                if (prev.length >= 2) {
+                    return [{ x: Math.round(pz.x), y: Math.round(pz.y) }];
+                }
+
+                return [...prev, { x: Math.round(pz.x), y: Math.round(pz.y) }];
+            });
+        });
 
         // Drawing event handlers
         map.on('mousedown', (e: L.LeafletMouseEvent) => {
@@ -434,11 +461,49 @@ export default function PzMap({
         return () => {
             map.remove();
             mapRef.current = null;
+            vectorLayerRef.current = null;
             markersLayerRef.current = null;
             zonesLayerRef.current = null;
             eventsLayerRef.current = null;
+            measureLayerRef.current = null;
         };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Dark paper mode for vector basemap
+    useEffect(() => {
+        vectorLayerRef.current?.setDarkMode(resolvedAppearance === 'dark');
+    }, [resolvedAppearance]);
+
+    // Measure line overlay
+    useEffect(() => {
+        const layer = measureLayerRef.current;
+        if (!layer) {
+            return;
+        }
+        layer.clearLayers();
+        if (measurePoints.length === 0) {
+            return;
+        }
+        measurePoints.forEach((p) => {
+            L.circleMarker([-p.y, p.x], {
+                radius: 5,
+                color: '#0ea5e9',
+                fillColor: '#38bdf8',
+                fillOpacity: 0.9,
+                weight: 2,
+            }).addTo(layer);
+        });
+        if (measurePoints.length === 2) {
+            const [a, b] = measurePoints;
+            L.polyline(
+                [
+                    [-a.y, a.x],
+                    [-b.y, b.x],
+                ],
+                { color: '#0ea5e9', weight: 2, dashArray: '6 4' },
+            ).addTo(layer);
+        }
+    }, [measurePoints]);
 
     // Update cursor for drawing mode
     useEffect(() => {
@@ -613,10 +678,17 @@ export default function PzMap({
     }, [mapConfig.center.x, mapConfig.center.y, mapConfig.defaultZoom]);
 
     const packs = mapConfig.maps?.filter((p) => p.name) ?? [];
+    const measureDistance =
+        measurePoints.length === 2
+            ? Math.hypot(measurePoints[1].x - measurePoints[0].x, measurePoints[1].y - measurePoints[0].y)
+            : null;
 
     return (
         <div className={`relative isolate h-full w-full ${className}`}>
-            <div ref={containerRef} className="h-full w-full dark:brightness-[0.92] dark:contrast-[1.05]" />
+            <div
+                ref={containerRef}
+                className={`h-full w-full ${measuring ? 'cursor-crosshair' : ''}`}
+            />
 
             {packsEnabled && packs.length > 0 && (
                 <div className="pointer-events-none absolute top-2 left-2 z-[500] flex max-w-[min(100%,20rem)] flex-wrap gap-1">
@@ -662,6 +734,34 @@ export default function PzMap({
                             {t('map.fit_players')}
                         </button>
                     )}
+                    {useVector && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setMeasuring((v) => !v);
+                                setMeasurePoints([]);
+                            }}
+                            className={`rounded border px-2 py-1 text-[11px] font-medium shadow-sm backdrop-blur-sm ${
+                                measuring
+                                    ? 'border-sky-500/50 bg-sky-500/15 text-sky-600 dark:text-sky-300'
+                                    : 'border-border/70 bg-background/90 hover:bg-muted'
+                            }`}
+                            title={t('map.measure')}
+                        >
+                            {t('map.measure')}
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {measuring && (
+                <div className="pointer-events-none absolute top-2 left-1/2 z-[500] -translate-x-1/2 rounded border border-sky-500/40 bg-background/95 px-2 py-1 text-[11px] shadow-sm backdrop-blur-sm">
+                    {measureDistance !== null
+                        ? t('map.measure_result', {
+                              n: String(Math.round(measureDistance)),
+                              m: String(Math.round(measureDistance)),
+                          })
+                        : t('map.measure_hint')}
                 </div>
             )}
 
