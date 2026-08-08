@@ -489,6 +489,7 @@
     "admin.player_map.vector_bake": "ვექტორული basemap-ის თავიდან აგება",
     "admin.player_map.vector_bake_ok": "ვექტორული basemap თავიდან აიგო.",
     "admin.player_map.vector_bake_failed": "ვექტორული bake ჩავარდა.",
+    "admin.player_map.vector_bake_failed_detail": "ვექტორული bake ჩავარდა — :detail",
     "admin.player_map.vector_bake_network_error": "ქსელის შეცდომა ვექტორული basemap-ის bake-ისას.",
     "admin.player_map.generate_tiles": "ლოკალური ფრაგმენტების გენერირება",
     "admin.player_map.members": ":count წევრი",

@@ -489,6 +489,7 @@
     "admin.player_map.vector_bake": "Rebuild vector basemap",
     "admin.player_map.vector_bake_ok": "Vector basemap rebuilt.",
     "admin.player_map.vector_bake_failed": "Vector bake failed.",
+    "admin.player_map.vector_bake_failed_detail": "Vector bake failed — :detail",
     "admin.player_map.vector_bake_network_error": "Network error while baking vector basemap.",
     "admin.player_map.generate_tiles": "Generate local tiles",
     "admin.player_map.members": ":count members",

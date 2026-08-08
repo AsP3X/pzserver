@@ -219,28 +219,62 @@ export default function PlayerMap({
                     'X-Requested-With': 'XMLHttpRequest',
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({ scan_workshop: scanWorkshop }),
+                body: JSON.stringify({
+                    scan_workshop: scanWorkshop,
+                    include_forest: true,
+                }),
             });
-            const json = await res.json().catch(() => ({}));
-            setBakeMessage(
+
+            const raw = await res.text();
+            let json: Record<string, unknown> = {};
+            try {
+                json = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+            } catch {
+                // Non-JSON (HTML 500/419/proxy timeout) — surface a useful snippet
+                const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 240);
+                setBakeMessage(
+                    t('admin.player_map.vector_bake_failed_detail', {
+                        detail: `HTTP ${res.status}${snippet ? `: ${snippet}` : ''}`,
+                    }),
+                );
+                setBakeLoading(false);
+
+                return;
+            }
+
+            const serverMessage =
                 typeof json.message === 'string'
                     ? json.message
-                    : res.ok
-                      ? t('admin.player_map.vector_bake_ok')
-                      : t('admin.player_map.vector_bake_failed'),
-            );
-            router.reload({
-                only: [
-                    'hasTiles',
-                    'tileSource',
-                    'mapConfig',
-                    'vectorSources',
-                    'vectorAsset',
-                    'vectorBakeResult',
-                ],
-            });
-        } catch {
-            setBakeMessage(t('admin.player_map.vector_bake_network_error'));
+                    : typeof json.error === 'string'
+                      ? json.error
+                      : null;
+            const ok = res.ok && json.ok !== false;
+
+            if (ok) {
+                setBakeMessage(serverMessage || t('admin.player_map.vector_bake_ok'));
+                router.reload({
+                    only: [
+                        'hasTiles',
+                        'tileSource',
+                        'mapConfig',
+                        'mapModes',
+                        'vectorSources',
+                        'vectorAsset',
+                        'vectorBakeResult',
+                    ],
+                });
+            } else {
+                // Keep the real error on screen (do not reload — that cleared the message before)
+                setBakeMessage(
+                    serverMessage
+                    || t('admin.player_map.vector_bake_failed_detail', {
+                        detail: `HTTP ${res.status}`,
+                    }),
+                );
+            }
+        } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            setBakeMessage(`${t('admin.player_map.vector_bake_network_error')} (${detail})`);
         }
         setBakeLoading(false);
     }

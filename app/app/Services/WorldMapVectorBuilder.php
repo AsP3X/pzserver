@@ -98,6 +98,7 @@ class WorldMapVectorBuilder
         array $sources,
         string $source = 'merged',
         int $cellSize = self::DEFAULT_CELL_SIZE,
+        bool $includeForest = true,
     ): array {
         if ($sources === []) {
             throw new InvalidArgumentException('No worldmap sources provided');
@@ -137,9 +138,16 @@ class WorldMapVectorBuilder
             $geometry = $this->parseWorldmapXml($xml, $cellSize);
 
             // Optional dense woodland massing from sibling worldmap-forest.xml
-            $forestPath = dirname($xml).DIRECTORY_SEPARATOR.'worldmap-forest.xml';
-            if (is_file($forestPath)) {
-                $geometry = $this->mergeForestCellMassing($geometry, $forestPath, $cellSize);
+            // (~60MB file — never fail the whole bake if forest merge breaks)
+            if ($includeForest) {
+                $forestPath = dirname($xml).DIRECTORY_SEPARATOR.'worldmap-forest.xml';
+                if (is_file($forestPath)) {
+                    try {
+                        $geometry = $this->mergeForestCellMassing($geometry, $forestPath, $cellSize);
+                    } catch (\Throwable) {
+                        // keep geometry without forest massing
+                    }
+                }
             }
 
             // Cell replace: overlay pack owns the whole cell when it defines it.

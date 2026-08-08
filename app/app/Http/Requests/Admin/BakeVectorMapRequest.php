@@ -13,6 +13,7 @@ class BakeVectorMapRequest extends FormRequest
     {
         return [
             'scan_workshop' => ['sometimes', 'boolean'],
+            'include_forest' => ['sometimes', 'boolean'],
         ];
     }
 }

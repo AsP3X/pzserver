@@ -63,7 +63,7 @@ class WorldMapVectorBakeService
      *     finished_at?: string
      * }
      */
-    public function bake(bool $scanWorkshop = false): array
+    public function bake(bool $scanWorkshop = false, bool $includeForest = true): array
     {
         $sources = $this->locator->locateForServer(
             includeOrphanWorkshopMaps: $scanWorkshop,
@@ -72,19 +72,26 @@ class WorldMapVectorBakeService
         if ($sources === []) {
             $result = [
                 'ok' => false,
-                'message' => 'No worldmap.xml sources found. Ensure the game install is mounted (/pz-server) and Map= folders exist.',
+                'message' => 'No worldmap.xml sources found. Ensure the game install is mounted (/pz-server) and Map= folders exist. Check Map= in server.ini and that /pz-server is readable.',
                 'finished_at' => now()->toIso8601String(),
             ];
             $this->writeLastResult($result);
+            $this->appendLog('ERROR no sources scan_workshop='.($scanWorkshop ? '1' : '0'));
 
             return $result;
         }
 
         $output = $this->outputPath();
+        $this->ensureWritableDirectory(dirname($output));
 
         try {
             @set_time_limit(300);
-            $data = $this->builder->buildFromSources($sources, 'merged');
+            @ini_set('memory_limit', '512M');
+            $data = $this->builder->buildFromSources(
+                $sources,
+                'merged',
+                includeForest: $includeForest,
+            );
             $this->builder->writeJson($data, $output);
             // Best-effort mirror into public/ for static hosting / deploys (may fail if bind-mounted root-owned)
             $this->mirrorToPublic($data);
@@ -93,6 +100,8 @@ class WorldMapVectorBakeService
             $result = [
                 'ok' => false,
                 'message' => 'Bake failed: '.$e->getMessage().$hint,
+                'error' => $e->getMessage(),
+                'output' => $output,
                 'finished_at' => now()->toIso8601String(),
             ];
             $this->writeLastResult($result);
@@ -234,13 +243,33 @@ class WorldMapVectorBakeService
         }
     }
 
+    private function ensureWritableDirectory(string $dir): void
+    {
+        if (! is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        if (! is_dir($dir)) {
+            throw new \RuntimeException("Cannot create bake directory: {$dir}");
+        }
+        if (! is_writable($dir)) {
+            throw new \RuntimeException(
+                "Bake directory is not writable: {$dir}. In Docker run: "
+                .'docker exec -u root pz-app chown -R www-data:www-data /var/www/html/storage/app/map-vector '
+                .'&& docker exec -u root pz-app chmod -R 775 /var/www/html/storage/app/map-vector'
+            );
+        }
+    }
+
     private function permissionHint(string $path, string $message): string
     {
-        if (! str_contains(strtolower($message), 'permission') && ! str_contains(strtolower($message), 'failed to write')) {
+        $lower = strtolower($message);
+        if (! str_contains($lower, 'permission')
+            && ! str_contains($lower, 'failed to write')
+            && ! str_contains($lower, 'not writable')) {
             return '';
         }
 
-        return ' (path: '.$path.'; runtime bakes use storage/app/map-vector — ensure the app container can write storage/)';
+        return ' [path='.$path.']. Fix: docker exec -u root pz-app chown -R www-data:www-data storage/app/map-vector storage/logs && docker exec -u root pz-app chmod -R 775 storage/app/map-vector';
     }
 
     /**

@@ -151,21 +151,45 @@ class PlayerMapController extends Controller
     public function bakeVector(BakeVectorMapRequest $request): JsonResponse
     {
         $scanWorkshop = (bool) $request->boolean('scan_workshop');
-        $result = $this->vectorBake->bake(scanWorkshop: $scanWorkshop);
+        $includeForest = $request->has('include_forest')
+            ? (bool) $request->boolean('include_forest')
+            : true;
 
-        $this->auditLogger->log(
-            actor: $request->user()?->name ?? 'admin',
-            action: 'map.vector_bake',
-            target: 'vector-basemap',
-            details: [
-                'ok' => $result['ok'],
-                'scan_workshop' => $scanWorkshop,
-                'source' => $result['source'] ?? null,
-                'bytes' => $result['bytes'] ?? null,
-                'maps' => $result['maps'] ?? null,
-            ],
-            ip: $request->ip(),
-        );
+        try {
+            $result = $this->vectorBake->bake(
+                scanWorkshop: $scanWorkshop,
+                includeForest: $includeForest,
+            );
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'ok' => false,
+                'message' => 'Bake failed: '.$e->getMessage(),
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+
+        try {
+            $this->auditLogger->log(
+                actor: $request->user()?->name ?? 'admin',
+                action: 'map.vector_bake',
+                target: 'vector-basemap',
+                details: [
+                    'ok' => $result['ok'],
+                    'scan_workshop' => $scanWorkshop,
+                    'include_forest' => $includeForest,
+                    'source' => $result['source'] ?? null,
+                    'bytes' => $result['bytes'] ?? null,
+                    'maps' => $result['maps'] ?? null,
+                    'message' => $result['message'] ?? null,
+                ],
+                ip: $request->ip(),
+            );
+        } catch (\Throwable $e) {
+            // Never hide bake outcome because audit logging failed
+            report($e);
+        }
 
         return response()->json($result, $result['ok'] ? 200 : 422);
     }
