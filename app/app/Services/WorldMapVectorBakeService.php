@@ -93,8 +93,9 @@ class WorldMapVectorBakeService
                 includeForest: $includeForest,
             );
             $this->builder->writeJson($data, $output);
-            // Best-effort mirror into public/ for static hosting / deploys (may fail if bind-mounted root-owned)
-            $this->mirrorToPublic($data);
+            // Never mirror into public/ automatically — unit/feature tests use tiny fixtures and
+            // would overwrite the packaged Knox Country basemap (e.g. only "Testville" left).
+            // Runtime serves storage via /map-vector/data; public/ remains a deploy seed only.
         } catch (\Throwable $e) {
             $hint = $this->permissionHint($output, $e->getMessage());
             $result = [
@@ -223,24 +224,6 @@ class WorldMapVectorBakeService
     private function logPath(): string
     {
         return storage_path('logs/map-vector-bake.log');
-    }
-
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    private function mirrorToPublic(array $data): void
-    {
-        $public = public_path('map-vector/vanilla/map.json');
-        if ($public === $this->outputPath()) {
-            return;
-        }
-
-        try {
-            $this->builder->writeJson($data, $public);
-        } catch (\Throwable $e) {
-            // Common on bind-mounted ./app as host user: www-data cannot overwrite public/
-            $this->appendLog('WARN public mirror skipped: '.$e->getMessage());
-        }
     }
 
     private function ensureWritableDirectory(string $dir): void

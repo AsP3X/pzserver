@@ -76,25 +76,47 @@ class WorldMapSourceLocator
 
         $serverPath = rtrim($serverPath ?: (string) config('zomboid.game_server_path', '/pz-server'), '/');
 
+        $fallback = null;
+
         foreach ($this->candidateMapDirs($folder, $serverPath) as $dir => $origin) {
             $xml = $dir.DIRECTORY_SEPARATOR.'worldmap.xml';
-            if (! is_file($xml)) {
+            if (! is_file($xml) || ! is_readable($xml)) {
                 continue;
             }
 
             $annotations = $dir.DIRECTORY_SEPARATOR.'worldmap-annotations.lua';
             $labels = $this->discoverLabelsNear($dir, $serverPath);
-
-            return [
+            $resolved = [
                 'name' => $folder,
                 'xml' => $xml,
                 'annotations' => is_file($annotations) ? $annotations : null,
                 'labels' => $labels,
                 'origin' => $origin,
             ];
+
+            // Vanilla Knox Country is multi‑MB. Prefer larger worldmap.xml over tiny stubs
+            // (test fixtures / accidental overwrites that only contain "Testville").
+            $size = (int) filesize($xml);
+            if ($this->looksLikeVanillaBaseFolder($folder) && $size < 50_000) {
+                $fallback ??= $resolved;
+
+                continue;
+            }
+
+            return $resolved;
         }
 
-        return null;
+        return $fallback;
+    }
+
+    /**
+     * Vanilla Knox Country base map folder is multi-megabyte; tiny worldmap.xml is never valid.
+     */
+    private function looksLikeVanillaBaseFolder(string $folder): bool
+    {
+        $normalized = strtolower(trim($folder));
+
+        return $normalized === 'muldraugh, ky' || $normalized === 'muldraugh,ky';
     }
 
     /**

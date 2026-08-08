@@ -21,7 +21,7 @@ For a **game-like 3D isometric** basemap (live CDN + optional local generate), u
 | Path | Role |
 |------|------|
 | `storage/app/map-vector/vanilla/map.json` | **Runtime bake** (Admin UI / artisan default) — writable by `www-data` |
-| `public/map-vector/vanilla/map.json` | Packaged seed (read fallback; optional mirror after bake) |
+| `public/map-vector/vanilla/map.json` | Packaged seed only (read fallback). Runtime bakes do **not** overwrite this (prevents tiny test maps from replacing Knox Country). |
 
 Served by Laravel at **`/map-vector/data`** (not a static nginx file), so bakes are never stuck behind a host-owned bind mount.
 
