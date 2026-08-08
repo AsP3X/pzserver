@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PlayerStat;
 use App\Services\GameTimeService;
 use App\Services\OnlinePlayersReader;
+use App\Services\PlayerStatsService;
 use App\Services\PzIdentityResolver;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -23,11 +24,19 @@ class PlayerCharacterController extends Controller
         private readonly PzIdentityResolver $identity,
         private readonly OnlinePlayersReader $onlinePlayersReader,
         private readonly GameTimeService $gameTime,
+        private readonly PlayerStatsService $playerStats,
     ) {}
 
     public function __invoke(Request $request): Response
     {
         $pzUsername = $this->identity->resolve($request->user());
+
+        /**
+         * The page polls, so pick up whatever the mod has exported since the
+         * last visit rather than waiting on the ten-minute scheduled sync.
+         */
+        $this->playerStats->syncIfChanged();
+
         $stats = $pzUsername === null ? null : PlayerStat::query()->find($pzUsername);
 
         return Inertia::render('portal/character', [
@@ -47,6 +56,8 @@ class PlayerCharacterController extends Controller
                 'is_dead' => $stats->is_dead,
                 'updated_at' => $stats->updated_at?->toIso8601String(),
             ],
+            /** Wall-clock age of the export behind all of the above. */
+            'snapshotAt' => $this->playerStats->lastExportedAt()?->toIso8601String(),
             'day_length_minutes' => $this->gameTime->realMinutesPerInGameDay(),
         ]);
     }

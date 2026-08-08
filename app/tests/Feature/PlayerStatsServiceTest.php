@@ -232,3 +232,109 @@ test('sync records an empty trait list distinctly from an absent one', function 
 
     expect(PlayerStat::query()->find('Cara')->traits)->toBe([]);
 });
+
+// ── syncIfChanged() ─────────────────────────────────────────────────
+
+/**
+ * Write an export naming one player, with an explicit mtime so a test can
+ * control whether the file looks newer than the last import.
+ */
+function writeStatsExport(string $path, string $username, int $kills, int $mtime): void
+{
+    file_put_contents($path, json_encode([
+        'timestamp' => '2026-08-08T14:30:00',
+        'player_count' => 1,
+        'players' => [
+            ['username' => $username, 'zombie_kills' => $kills, 'hours_survived' => 1.0, 'skills' => [], 'is_dead' => false],
+        ],
+    ]));
+
+    touch($path, $mtime);
+    clearstatcache(true, $path);
+}
+
+test('syncIfChanged imports an export it has not seen', function () {
+    writeStatsExport($this->filePath, 'Alice', 10, 1_760_000_000);
+
+    expect((new PlayerStatsService($this->filePath))->syncIfChanged())->toBe(1)
+        ->and(PlayerStat::query()->find('Alice')->zombie_kills)->toBe(10);
+});
+
+test('syncIfChanged skips an export that has not been rewritten', function () {
+    writeStatsExport($this->filePath, 'Alice', 10, 1_760_000_000);
+
+    $service = new PlayerStatsService($this->filePath);
+    $service->syncIfChanged();
+
+    expect($service->syncIfChanged())->toBe(0);
+});
+
+test('syncIfChanged picks the export back up once the mod rewrites it', function () {
+    writeStatsExport($this->filePath, 'Alice', 10, 1_760_000_000);
+
+    $service = new PlayerStatsService($this->filePath);
+    $service->syncIfChanged();
+
+    writeStatsExport($this->filePath, 'Alice', 99, 1_760_000_030);
+
+    expect($service->syncIfChanged())->toBe(1)
+        ->and(PlayerStat::query()->find('Alice')->zombie_kills)->toBe(99);
+});
+
+test('syncIfChanged returns 0 when the mod has never exported', function () {
+    expect((new PlayerStatsService($this->filePath))->syncIfChanged())->toBe(0);
+});
+
+// ── lastExportedAt() ────────────────────────────────────────────────
+
+test('lastExportedAt reports when the mod last handed over players', function () {
+    writeStatsExport($this->filePath, 'Alice', 10, 1_760_000_000);
+
+    $service = new PlayerStatsService($this->filePath);
+    $service->syncIfChanged();
+
+    expect($service->lastExportedAt()?->getTimestamp())->toBe(1_760_000_000);
+});
+
+test('lastExportedAt is null before anything has been imported', function () {
+    writeStatsExport($this->filePath, 'Alice', 10, 1_760_000_000);
+
+    expect((new PlayerStatsService($this->filePath))->lastExportedAt())->toBeNull();
+});
+
+test('lastExportedAt is null when the mod has never exported', function () {
+    $service = new PlayerStatsService($this->filePath);
+    $service->syncIfChanged();
+
+    expect($service->lastExportedAt())->toBeNull();
+});
+
+/**
+ * The repair service drops an empty export in place of a missing one, and a
+ * stopped mod leaves its last file behind. Neither is the bridge reporting in,
+ * so neither may move the freshness clock.
+ */
+test('lastExportedAt ignores an export carrying no players', function () {
+    writeStatsExport($this->filePath, 'Alice', 10, 1_760_000_000);
+
+    $service = new PlayerStatsService($this->filePath);
+    $service->syncIfChanged();
+
+    file_put_contents($this->filePath, json_encode(['players' => [], 'updated_at' => '2026-08-08T12:00:00+00:00']));
+    touch($this->filePath, 1_760_009_999);
+    clearstatcache(true, $this->filePath);
+
+    expect($service->syncIfChanged())->toBe(0)
+        ->and($service->lastExportedAt()?->getTimestamp())->toBe(1_760_000_000);
+});
+
+test('lastExportedAt ignores an export that is a zero-byte stub', function () {
+    file_put_contents($this->filePath, '');
+    touch($this->filePath, 1_760_000_000);
+    clearstatcache(true, $this->filePath);
+
+    $service = new PlayerStatsService($this->filePath);
+
+    expect($service->syncIfChanged())->toBe(0)
+        ->and($service->lastExportedAt())->toBeNull();
+});

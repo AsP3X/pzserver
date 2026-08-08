@@ -1,6 +1,7 @@
-import { Head } from '@inertiajs/react';
+import { Head, usePoll } from '@inertiajs/react';
 import { Activity, Clock, Droplet, HeartPulse, Skull, Snowflake, Swords, UserX } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { LiveSnapshotNotice } from '@/components/live-snapshot-notice';
 import { categoriseSkills, SkillBar } from '@/components/skill-list';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,6 +42,8 @@ type Props = {
     hasPzAccount: boolean;
     isOnline: boolean;
     character: Character | null;
+    /** When the mod last wrote the export, in real time. Null if it never has. */
+    snapshotAt: string | null;
     day_length_minutes: number;
 };
 
@@ -82,9 +85,18 @@ function healthColour(health: number): string {
     return 'bg-red-500';
 }
 
-export default function PortalCharacter({ username, hasPzAccount, isOnline, character, day_length_minutes }: Props) {
+export default function PortalCharacter({
+    username,
+    hasPzAccount,
+    isOnline,
+    character,
+    snapshotAt,
+    day_length_minutes,
+}: Props) {
     const { t } = useTranslation();
     const [hoursMode, setHoursMode] = useState<HoursMode>('ingame');
+
+    usePoll(5000, { only: ['character', 'isOnline', 'snapshotAt'] });
 
     /**
      * The stored preference lives in localStorage, which the SSR pass cannot
@@ -104,6 +116,14 @@ export default function PortalCharacter({ username, hasPzAccount, isOnline, char
     ];
 
     const vitals = character?.vitals ?? null;
+
+    /**
+     * While the player is in the game the mod re-exports them every cycle, so
+     * the export's age is their data's age. Once they log out they drop out of
+     * the export while it keeps moving for everyone still playing — then the
+     * row's own last change is the only honest answer.
+     */
+    const freshAt = (isOnline ? snapshotAt : null) ?? character?.updated_at ?? null;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -139,6 +159,19 @@ export default function PortalCharacter({ username, hasPzAccount, isOnline, char
                     />
                 ) : (
                     <>
+                        {freshAt && (
+                            <LiveSnapshotNotice
+                                isLive={isOnline}
+                                liveLabel={t('portal.character.live', {
+                                    time: formatRelativeTime(freshAt, t),
+                                })}
+                                staleTitle={t('portal.character.stale_title')}
+                                staleDescription={t('portal.character.stale_desc', {
+                                    time: formatRelativeTime(freshAt, t),
+                                })}
+                            />
+                        )}
+
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                             <StatTile
                                 icon={<Swords className="text-muted-foreground size-5" />}
@@ -253,9 +286,9 @@ export default function PortalCharacter({ username, hasPzAccount, isOnline, char
                             <CardHeader>
                                 <CardTitle>{t('portal.character.skills')}</CardTitle>
                                 <CardDescription>
-                                    {character.updated_at
+                                    {freshAt
                                         ? t('portal.character.skills_desc', {
-                                              time: formatRelativeTime(character.updated_at, t),
+                                              time: formatRelativeTime(freshAt, t),
                                           })
                                         : t('portal.character.traits_desc')}
                                 </CardDescription>

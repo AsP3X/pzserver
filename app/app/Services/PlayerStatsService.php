@@ -4,10 +4,18 @@ namespace App\Services;
 
 use App\Models\GameEvent;
 use App\Models\PlayerStat;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PlayerStatsService
 {
+    /** Holds the mtime of the export we last read, whatever was in it. */
+    private const SYNCED_MTIME_KEY = 'player_stats.synced_mtime';
+
+    /** Holds the mtime of the last export that actually carried players. */
+    private const IMPORTED_MTIME_KEY = 'player_stats.imported_mtime';
+
     private string $statsPath;
 
     public function __construct(?string $statsPath = null)
@@ -52,6 +60,54 @@ class PlayerStatsService
         }
 
         return $count;
+    }
+
+    /**
+     * Import the export, but only when the mod has rewritten it since last time.
+     *
+     * The character page polls every few seconds while KR_Progress exports on
+     * the ten-in-game-minute hook — roughly every 25 real seconds, and not at
+     * all on a paused server. Gating on the file's mtime keeps the polls with
+     * nothing new to read down to a stat() call instead of one upsert per
+     * player online.
+     *
+     * @return int Number of player records upserted; zero when nothing changed
+     */
+    public function syncIfChanged(): int
+    {
+        $modifiedAt = $this->exportMtime();
+
+        if ($modifiedAt === null || Cache::get(self::SYNCED_MTIME_KEY) === $modifiedAt) {
+            return 0;
+        }
+
+        $count = $this->sync();
+
+        Cache::forever(self::SYNCED_MTIME_KEY, $modifiedAt);
+
+        if ($count > 0) {
+            Cache::forever(self::IMPORTED_MTIME_KEY, $modifiedAt);
+        }
+
+        return $count;
+    }
+
+    /**
+     * When the mod last handed us player data, in real time.
+     *
+     * Deliberately not the export's mtime. LuaBridgeRepairService writes an
+     * empty placeholder over a missing export, and a stopped mod leaves a file
+     * behind that someone else can still touch — both would read as a bridge
+     * that had just reported in. Only an import that carried players counts.
+     *
+     * The timestamp inside the file is no use either: it comes off the in-game
+     * calendar, so it reads 1993 and stops whenever the world does.
+     */
+    public function lastExportedAt(): ?CarbonImmutable
+    {
+        $modifiedAt = Cache::get(self::IMPORTED_MTIME_KEY);
+
+        return is_int($modifiedAt) ? CarbonImmutable::createFromTimestamp($modifiedAt) : null;
     }
 
     /**
@@ -316,6 +372,20 @@ class PlayerStatsService
                 'total_spent' => round((float) $row->total_spent, 2),
             ])
             ->all();
+    }
+
+    /**
+     * Last-modified time of the stats export, or null when it is not readable.
+     */
+    private function exportMtime(): ?int
+    {
+        if (! file_exists($this->statsPath)) {
+            return null;
+        }
+
+        $modifiedAt = @filemtime($this->statsPath);
+
+        return $modifiedAt === false ? null : $modifiedAt;
     }
 
     /**

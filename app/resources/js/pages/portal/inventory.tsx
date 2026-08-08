@@ -1,8 +1,9 @@
 import { Head, router, usePoll } from '@inertiajs/react';
-import { Backpack, RefreshCw, TriangleAlert, UserX } from 'lucide-react';
+import { Backpack, UserX } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { InventoryStats } from '@/components/inventory/inventory-stats';
 import { InventoryTable } from '@/components/inventory/inventory-table';
+import { LiveSnapshotNotice } from '@/components/live-snapshot-notice';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/use-translation';
@@ -95,26 +96,16 @@ export default function PortalInventory({ username, inventory, isOnline, hasPzAc
                     />
                 ) : (
                     <>
-                        {isOnline ? (
-                            <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
-                                <RefreshCw className="size-3 animate-spin" />
-                                {t('portal.inventory.live', {
-                                    time: formatRelativeTime(inventory.timestamp, t),
-                                })}
-                            </p>
-                        ) : (
-                            <div className="flex items-start gap-3 rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-3 text-sm">
-                                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-yellow-600 dark:text-yellow-500" />
-                                <div>
-                                    <p className="font-medium">{t('portal.inventory.stale_title')}</p>
-                                    <p className="text-muted-foreground">
-                                        {t('portal.inventory.stale_desc', {
-                                            time: formatRelativeTime(inventory.timestamp, t),
-                                        })}
-                                    </p>
-                                </div>
-                            </div>
-                        )}
+                        <LiveSnapshotNotice
+                            isLive={isOnline}
+                            liveLabel={t('portal.inventory.live', {
+                                time: formatRelativeTime(inventory.timestamp, t),
+                            })}
+                            staleTitle={t('portal.inventory.stale_title')}
+                            staleDescription={t('portal.inventory.stale_desc', {
+                                time: formatRelativeTime(inventory.timestamp, t),
+                            })}
+                        />
 
                         <InventoryStats inventory={inventory} stackedItems={stackedItems} />
 
