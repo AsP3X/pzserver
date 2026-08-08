@@ -1,6 +1,8 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import VectorMapLegend from '@/components/vector-map-legend';
+import { useTranslation } from '@/hooks/use-translation';
 import type { DziInfo, MapConfig, PlayerMarker } from '@/types/server';
 import {
     createWorldSquareCrs,
@@ -43,6 +45,12 @@ type PzMapProps = {
     hasTiles: boolean;
     className?: string;
     interactive?: boolean;
+    /** Show vanilla-style color legend (vector basemaps). */
+    showLegend?: boolean;
+    /** Show baked Map= pack chips (vector basemaps). */
+    showPacks?: boolean;
+    /** Live cursor world-square readout. */
+    showCoordinates?: boolean;
     onMarkerClick?: (marker: PlayerMarker) => void;
     onMarkerAction?: (marker: PlayerMarker, action: MarkerAction) => void;
     zones?: ZoneOverlay[];
@@ -227,6 +235,9 @@ export default function PzMap({
     hasTiles,
     className = '',
     interactive = true,
+    showLegend,
+    showPacks,
+    showCoordinates,
     onMarkerClick,
     onMarkerAction,
     zones,
@@ -238,16 +249,23 @@ export default function PzMap({
     onEventMarkerClick,
     onMapReady,
 }: PzMapProps) {
+    const { t } = useTranslation();
     const containerRef = useRef<HTMLDivElement>(null);
     const mapRef = useRef<L.Map | null>(null);
     const markersLayerRef = useRef<L.LayerGroup | null>(null);
     const zonesLayerRef = useRef<L.LayerGroup | null>(null);
     const eventsLayerRef = useRef<L.LayerGroup | null>(null);
+    const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
     const drawStateRef = useRef<{
         drawing: boolean;
         startLatLng: L.LatLng | null;
         previewRect: L.Rectangle | null;
     }>({ drawing: false, startLatLng: null, previewRect: null });
+
+    const useVector = isVectorBasemap(mapConfig, hasTiles);
+    const legendEnabled = showLegend ?? useVector;
+    const packsEnabled = showPacks ?? useVector;
+    const coordsEnabled = showCoordinates ?? useVector;
 
     // Stable refs for callbacks so event handlers always see latest values
     const onZoneDrawnRef = useRef(onZoneDrawn);
@@ -259,9 +277,9 @@ export default function PzMap({
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
 
-        const useVector = isVectorBasemap(mapConfig, hasTiles);
+        const vectorMode = isVectorBasemap(mapConfig, hasTiles);
         const dzi = mapConfig.dzi;
-        const crs = useVector
+        const crs = vectorMode
             ? createWorldSquareCrs()
             : dzi
               ? createPzCRS(dzi)
@@ -272,8 +290,8 @@ export default function PzMap({
             crs,
             minZoom: mapConfig.minZoom,
             maxZoom: mapConfig.maxZoom,
-            zoomSnap: useVector ? 0.25 : 1,
-            zoomDelta: useVector ? 0.5 : 1,
+            zoomSnap: vectorMode ? 0.25 : 1,
+            zoomDelta: vectorMode ? 0.5 : 1,
             zoomControl: interactive,
             dragging: interactive,
             scrollWheelZoom: interactive,
@@ -288,7 +306,13 @@ export default function PzMap({
         const center = L.latLng(-mapConfig.center.y, mapConfig.center.x);
         map.setView(center, mapConfig.defaultZoom);
 
-        if (useVector && mapConfig.vectorUrl) {
+        map.on('mousemove', (e: L.LeafletMouseEvent) => {
+            const pz = latLngToPz(e.latlng);
+            setCursor({ x: Math.round(pz.x), y: Math.round(pz.y) });
+        });
+        map.on('mouseout', () => setCursor(null));
+
+        if (vectorMode && mapConfig.vectorUrl) {
             const vectorUrl = mapConfig.vectorUrl;
             const paper = '#dbd7c0';
             // Immediate paper background while JSON loads
@@ -548,7 +572,39 @@ export default function PzMap({
         });
     }, [eventMarkers, onEventMarkerClick]);
 
-    return <div ref={containerRef} className={`isolate h-full w-full ${className}`} />;
+    const packs = mapConfig.maps?.filter((p) => p.name) ?? [];
+
+    return (
+        <div className={`relative isolate h-full w-full ${className}`}>
+            <div ref={containerRef} className="h-full w-full" />
+
+            {packsEnabled && packs.length > 0 && (
+                <div className="pointer-events-none absolute top-2 left-2 z-[500] flex max-w-[min(100%,20rem)] flex-wrap gap-1">
+                    {packs.map((pack) => (
+                        <span
+                            key={`${pack.name}-${pack.origin}`}
+                            className="pointer-events-none rounded border border-border/70 bg-background/90 px-1.5 py-0.5 text-[10px] font-medium shadow-sm backdrop-blur-sm"
+                            title={pack.origin || undefined}
+                        >
+                            {pack.name}
+                        </span>
+                    ))}
+                </div>
+            )}
+
+            {legendEnabled && (
+                <div className="absolute bottom-2 left-2 z-[500] max-w-[14rem]">
+                    <VectorMapLegend defaultOpen={false} />
+                </div>
+            )}
+
+            {coordsEnabled && cursor && (
+                <div className="pointer-events-none absolute right-2 bottom-2 z-[500] rounded border border-border/70 bg-background/90 px-2 py-1 font-mono text-[11px] shadow-sm backdrop-blur-sm">
+                    {t('map.coords', { x: String(cursor.x), y: String(cursor.y) })}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function addCoordinateGrid(map: L.Map) {

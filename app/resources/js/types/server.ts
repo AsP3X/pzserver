@@ -309,6 +309,11 @@ export type DziInfo = {
     isometric: boolean;
 };
 
+export type MapPackInfo = {
+    name: string;
+    origin: string;
+};
+
 export type MapConfig = {
     tileUrl: string | null;
     tileSize: number;
@@ -319,6 +324,10 @@ export type MapConfig = {
     dzi: DziInfo | null;
     /** Basemap source: vector | local | proxy | none */
     source?: string;
+    /** Bake source tag (e.g. merged:Mod+Muldraugh) when available */
+    sourceTag?: string | null;
+    /** Map packs baked into the vector asset (Map= order) */
+    maps?: MapPackInfo[] | null;
     /** URL to compact worldmap vector JSON (when source=vector) */
     vectorUrl?: string | null;
     /** World-square bounds [minX, minY, maxX, maxY] for vector basemap */

@@ -104,7 +104,7 @@ After adding/removing **map mods**, re-run the bake and hard-refresh the browser
 | `PZ_MAP_VECTOR_PATH` | (public path) | Filesystem path; if set, **only** that file is used |
 | `PZ_MAP_VECTOR_MIN_ZOOM` | `-4` | Leaflet world-square zoom (1 unit = 1 px at zoom 0) |
 | `PZ_MAP_VECTOR_MAX_ZOOM` | `4` | |
-| `PZ_MAP_VECTOR_DEFAULT_ZOOM` | `-1.5` | City-scale default |
+| `PZ_MAP_VECTOR_DEFAULT_ZOOM` | `-1.25` | Town-scale default (Muldraugh center) |
 | `PZ_WORLDMAP_XML` | — | Optional path for the bake command |
 
 ## Rendering notes
@@ -113,6 +113,7 @@ After adding/removing **map mods**, re-run the bake and hard-refresh the browser
 - **Coordinates:** markers / safe zones stay `x, y` world squares (`lat = -y`, `lng = x`).
 - **Performance:** cell-index culling + single canvas + rAF redraw; DPR capped at 2.
 - **Accuracy:** absolute coords = `cell * 300 + local` from vanilla XML; colors match TIS layer fills.
+- **UI polish:** collapsible map key, Map= pack chips, live X/Y cursor (vector mode).
 
 ## Optional isometric tiles
 

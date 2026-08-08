@@ -14,6 +14,11 @@ beforeEach(function () {
     $this->vectorPath = $this->vectorDir.'/map.json';
     file_put_contents($this->vectorPath, json_encode([
         'v' => 1,
+        'source' => 'merged:Cool Town+Muldraugh, KY',
+        'maps' => [
+            ['name' => 'Cool Town', 'origin' => 'workshop:1'],
+            ['name' => 'Muldraugh, KY', 'origin' => 'server-media'],
+        ],
         'bounds' => [0, 0, 19800, 15696],
         'cells' => new stdClass,
         'styles' => new stdClass,
@@ -38,7 +43,7 @@ beforeEach(function () {
         'zomboid.map.vector_url' => '/map-vector/vanilla/map.json',
         'zomboid.map.vector_min_zoom' => -4,
         'zomboid.map.vector_max_zoom' => 4,
-        'zomboid.map.vector_default_zoom' => -1.5,
+        'zomboid.map.vector_default_zoom' => -1.25,
         'zomboid.map.proxy_url' => 'https://example.test/{z}/{x}_{y}.jpg',
         'zomboid.map.proxy_tile_size' => 1024,
         'zomboid.map.proxy_dzi' => [
@@ -83,6 +88,10 @@ it('prefers vector basemap in auto mode', function () {
         ->and($config['dzi'])->toBeNull()
         ->and($config['bounds'])->toBe([0, 0, 19800, 15696])
         ->and($config['minZoom'])->toBe(-4.0)
+        ->and($config['defaultZoom'])->toBe(-1.25)
+        ->and($config['sourceTag'])->toBe('merged:Cool Town+Muldraugh, KY')
+        ->and($config['maps'])->toHaveCount(2)
+        ->and($config['maps'][0]['name'])->toBe('Cool Town')
         ->and($this->builder->hasVectorBasemap())->toBeTrue();
 });
 

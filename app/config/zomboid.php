@@ -83,7 +83,7 @@ return [
         'vector_path' => env('PZ_MAP_VECTOR_PATH'), // null = public/map-vector/vanilla/map.json
         'vector_min_zoom' => (float) env('PZ_MAP_VECTOR_MIN_ZOOM', -4),
         'vector_max_zoom' => (float) env('PZ_MAP_VECTOR_MAX_ZOOM', 4),
-        'vector_default_zoom' => (float) env('PZ_MAP_VECTOR_DEFAULT_ZOOM', -1.5),
+        'vector_default_zoom' => (float) env('PZ_MAP_VECTOR_DEFAULT_ZOOM', -1.25),
         // Optional path to worldmap.xml for `php artisan zomboid:build-worldmap-vector`
         'worldmap_xml' => env('PZ_WORLDMAP_XML'),
         // Extra media/ roots searched for Map= folders (in addition to game server + Workshop)

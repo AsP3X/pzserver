@@ -34,7 +34,8 @@ class WorldMapVectorBuilder
         'building-Medical' => ['fill' => '#e58097', 'minZ' => 0.0, 'order' => 35],
         'building-RestaurantsAndEntertainment' => ['fill' => '#f5e13c', 'minZ' => 0.0, 'order' => 36],
         'building-RetailAndCommercial' => ['fill' => '#b8cd54', 'minZ' => 0.0, 'order' => 37],
-        'natural-wood' => ['fill' => '#bdc5a3', 'minZ' => -2.0, 'order' => 5],
+        // Show woodland earlier so mid-zoom still has green massing (worldmap natural=wood only; not full forest.xml)
+        'natural-wood' => ['fill' => '#bdc5a3', 'minZ' => -3.5, 'order' => 5],
     ];
 
     /**

@@ -119,13 +119,16 @@ class MapConfigBuilder
             'tileSize' => (int) config('zomboid.map.tile_size', 256),
             'minZoom' => (float) config('zomboid.map.vector_min_zoom', -4),
             'maxZoom' => (float) config('zomboid.map.vector_max_zoom', 4),
-            'defaultZoom' => (float) config('zomboid.map.vector_default_zoom', -1.5),
+            // Slightly closer than whole-map overview so towns are readable by default
+            'defaultZoom' => (float) config('zomboid.map.vector_default_zoom', -1.25),
             'center' => [
                 'x' => config('zomboid.map.center_x'),
                 'y' => config('zomboid.map.center_y'),
             ],
             'dzi' => null,
             'source' => 'vector',
+            'sourceTag' => $meta['source'] ?? null,
+            'maps' => $meta['maps'] ?? null,
             'local_ready' => false,
             'tiles_path' => $this->tileStore->rootPath(),
             'vectorUrl' => $url,
@@ -160,6 +163,8 @@ class MapConfigBuilder
             ],
             'dzi' => $localDzi,
             'source' => 'local',
+            'sourceTag' => null,
+            'maps' => null,
             'local_ready' => true,
             'tiles_path' => $this->tileStore->rootPath(),
             'vectorUrl' => null,
@@ -200,6 +205,8 @@ class MapConfigBuilder
                 'isometric' => true,
             ],
             'source' => 'proxy',
+            'sourceTag' => null,
+            'maps' => null,
             'local_ready' => false,
             'tiles_path' => $this->tileStore->rootPath(),
             'vectorUrl' => null,
@@ -225,6 +232,8 @@ class MapConfigBuilder
             ],
             'dzi' => null,
             'source' => 'none',
+            'sourceTag' => null,
+            'maps' => null,
             'local_ready' => false,
             'tiles_path' => $tilesPath,
             'vectorUrl' => null,
@@ -257,26 +266,60 @@ class MapConfigBuilder
     }
 
     /**
-     * @return array{bounds?: array{0: int, 1: int, 2: int, 3: int}}
+     * @return array{
+     *     bounds?: array{0: int, 1: int, 2: int, 3: int},
+     *     source?: string,
+     *     maps?: list<array{name: string, origin: string}>
+     * }
      */
     private function readVectorMeta(string $path): array
     {
-        // Only parse the start of the file for bounds — full JSON is for the browser.
+        // Header is small (source, maps, bounds) before the large "cells" payload.
         $fh = fopen($path, 'rb');
         if ($fh === false) {
             return [];
         }
 
-        $chunk = fread($fh, 4096) ?: '';
+        $chunk = fread($fh, 65536) ?: '';
         fclose($fh);
 
+        $meta = [];
+
         if (preg_match('/"bounds"\s*:\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]/', $chunk, $m)) {
-            return [
-                'bounds' => [(int) $m[1], (int) $m[2], (int) $m[3], (int) $m[4]],
-            ];
+            $meta['bounds'] = [(int) $m[1], (int) $m[2], (int) $m[3], (int) $m[4]];
         }
 
-        return [];
+        if (preg_match('/"source"\s*:\s*"([^"]+)"/', $chunk, $m)) {
+            $meta['source'] = $m[1];
+        }
+
+        // "maps":[{"name":"…","origin":"…"},…]
+        if (preg_match('/"maps"\s*:\s*(\[[^\]]*\])/', $chunk, $m)) {
+            try {
+                /** @var list<array{name?: string, origin?: string}>|null $maps */
+                $maps = json_decode($m[1], true, 16, JSON_THROW_ON_ERROR);
+                if (is_array($maps)) {
+                    $meta['maps'] = array_values(array_filter(array_map(
+                        static function (array $row): ?array {
+                            $name = isset($row['name']) ? (string) $row['name'] : '';
+                            if ($name === '') {
+                                return null;
+                            }
+
+                            return [
+                                'name' => $name,
+                                'origin' => isset($row['origin']) ? (string) $row['origin'] : '',
+                            ];
+                        },
+                        $maps,
+                    )));
+                }
+            } catch (\JsonException) {
+                // ignore malformed header fragment
+            }
+        }
+
+        return $meta;
     }
 
     /**
