@@ -1,5 +1,5 @@
 import { Head, router, usePoll } from '@inertiajs/react';
-import { AlertTriangle, Circle, CloudLightning, Loader2, Sun } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Circle, CloudLightning, Loader2, Sun } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import PlayerActionDialogs from '@/components/player-action-dialogs';
 import PzMap from '@/components/pz-map';
@@ -8,6 +8,7 @@ import type { ZoneOverlay } from '@/components/pz-map';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import AppLayout from '@/layouts/app-layout';
 import { fetchAction } from '@/lib/fetch-action';
 import type { BreadcrumbItem } from '@/types';
@@ -133,6 +134,10 @@ export default function PlayerMap({
     const [scanWorkshop, setScanWorkshop] = useState(false);
 
     const isGenerating = Boolean(tilesGenerating || tileProgress?.generating);
+    // Isometric tiles are advanced: expand when actively used or generating
+    const [isoOpen, setIsoOpen] = useState(
+        () => isGenerating || localTilesReady || tileSource === 'local' || tileSource === 'proxy' || canResume,
+    );
 
     usePoll(isGenerating ? 3000 : 5000, {
         only: [
@@ -449,113 +454,135 @@ export default function PlayerMap({
                     </CardContent>
                 </Card>
 
-                {/* Optional isometric tile controls */}
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base">{t('admin.player_map.tiles_panel_title')}</CardTitle>
-                        <p className="text-muted-foreground text-sm">
-                            {tileSource === 'vector'
-                                ? t('admin.player_map.tiles_panel_help_vector')
-                                : t('admin.player_map.tiles_panel_help')}
-                        </p>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                            {isGenerating ? (
+                {/* Advanced: optional photoreal isometric tiles (not needed for vector default) */}
+                <Collapsible open={isoOpen || isGenerating} onOpenChange={setIsoOpen}>
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <CollapsibleTrigger asChild>
                                 <button
                                     type="button"
-                                    disabled={stopLoading}
-                                    onClick={() => stopTiles()}
-                                    className="inline-flex items-center rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                                    className="flex w-full items-start justify-between gap-3 text-left"
                                 >
-                                    {stopLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-                                    {t('admin.player_map.stop_generation')}
+                                    <div className="space-y-1">
+                                        <CardTitle className="text-base">
+                                            {t('admin.player_map.tiles_panel_title')}
+                                            <Badge variant="secondary" className="ml-2 align-middle text-[10px] font-normal">
+                                                {t('admin.player_map.tiles_advanced_badge')}
+                                            </Badge>
+                                        </CardTitle>
+                                        <p className="text-muted-foreground text-sm font-normal">
+                                            {t('admin.player_map.tiles_panel_help_advanced')}
+                                        </p>
+                                    </div>
+                                    <ChevronDown
+                                        className={`text-muted-foreground mt-1 size-4 shrink-0 transition-transform ${isoOpen || isGenerating ? 'rotate-180' : ''}`}
+                                    />
                                 </button>
-                            ) : (
-                                <>
-                                    {canResume && (
+                            </CollapsibleTrigger>
+                        </CardHeader>
+                        <CollapsibleContent>
+                            <CardContent className="space-y-3 pt-0">
+                                <p className="text-muted-foreground text-xs">
+                                    {t('admin.player_map.tiles_panel_env_hint')}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {isGenerating ? (
                                         <button
                                             type="button"
-                                            disabled={genLoading}
-                                            onClick={() => generateTiles({ resume: true })}
-                                            className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                                            disabled={stopLoading}
+                                            onClick={() => stopTiles()}
+                                            className="inline-flex items-center rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
                                         >
-                                            {genLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-                                            {t('admin.player_map.resume_generation')}
+                                            {stopLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                            {t('admin.player_map.stop_generation')}
                                         </button>
-                                    )}
-                                    <button
-                                        type="button"
-                                        disabled={genLoading}
-                                        onClick={() => generateTiles({})}
-                                        className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-                                    >
-                                        {genLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-                                        {localTilesReady
-                                            ? t('admin.player_map.regenerate_tiles')
-                                            : t('admin.player_map.generate_tiles')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={genLoading}
-                                        onClick={() => {
-                                            if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
-                                                return;
-                                            }
-                                            generateTiles({ force: true });
-                                        }}
-                                        className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
-                                    >
-                                        {t('admin.player_map.force_regenerate')}
-                                    </button>
-                                </>
-                            )}
-                        </div>
-
-                        <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
-                            <div className="flex items-center gap-2 text-sm font-medium">
-                                {isGenerating && <Loader2 className="size-4 animate-spin text-primary" />}
-                                <span>{progressMessage}</span>
-                                {tileProgress?.step && tileProgress?.steps ? (
-                                    <span className="text-muted-foreground text-xs font-normal">
-                                        ({tileProgress.step}/{tileProgress.steps})
-                                    </span>
-                                ) : null}
-                            </div>
-                            {isGenerating && (
-                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                                    {progressPercent > 0 ? (
-                                        <div
-                                            className="h-full rounded-full bg-primary transition-all duration-500"
-                                            style={{ width: `${Math.max(progressPercent, 2)}%` }}
-                                        />
                                     ) : (
-                                        <div className="h-full w-full animate-pulse rounded-full bg-primary/30" />
+                                        <>
+                                            {canResume && (
+                                                <button
+                                                    type="button"
+                                                    disabled={genLoading}
+                                                    onClick={() => generateTiles({ resume: true })}
+                                                    className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                                                >
+                                                    {genLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                                    {t('admin.player_map.resume_generation')}
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                disabled={genLoading}
+                                                onClick={() => generateTiles({})}
+                                                className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                                            >
+                                                {genLoading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+                                                {localTilesReady
+                                                    ? t('admin.player_map.regenerate_tiles')
+                                                    : t('admin.player_map.generate_tiles')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={genLoading}
+                                                onClick={() => {
+                                                    if (!window.confirm(t('admin.player_map.confirm_force_regenerate'))) {
+                                                        return;
+                                                    }
+                                                    generateTiles({ force: true });
+                                                }}
+                                                className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                                            >
+                                                {t('admin.player_map.force_regenerate')}
+                                            </button>
+                                        </>
                                     )}
                                 </div>
-                            )}
-                            {tileProgress && tileProgress.total > 0 && (
-                                <p className="text-muted-foreground mt-1.5 text-xs">
-                                    {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()} (
-                                    {tileProgress.percent}%)
-                                    {tileProgress.tiles_on_disk
-                                        ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
-                                        : ''}
-                                </p>
-                            )}
-                            {tileProgress?.stage === 'failed' && (
-                                <p className="mt-1.5 text-xs text-red-400">{t('admin.player_map.tiles_failed_hint')}</p>
-                            )}
-                            {!isGenerating && !tileProgress && (
-                                <p className="text-muted-foreground mt-1 text-xs">{t('admin.player_map.tiles_panel_idle')}</p>
-                            )}
-                        </div>
 
-                        {genMessage && (
-                            <div className="rounded-md border border-border bg-background px-3 py-2 text-sm">{genMessage}</div>
-                        )}
-                    </CardContent>
-                </Card>
+                                <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
+                                    <div className="flex items-center gap-2 text-sm font-medium">
+                                        {isGenerating && <Loader2 className="size-4 animate-spin text-primary" />}
+                                        <span>{progressMessage}</span>
+                                        {tileProgress?.step && tileProgress?.steps ? (
+                                            <span className="text-muted-foreground text-xs font-normal">
+                                                ({tileProgress.step}/{tileProgress.steps})
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    {isGenerating && (
+                                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                                            {progressPercent > 0 ? (
+                                                <div
+                                                    className="h-full rounded-full bg-primary transition-all duration-500"
+                                                    style={{ width: `${Math.max(progressPercent, 2)}%` }}
+                                                />
+                                            ) : (
+                                                <div className="h-full w-full animate-pulse rounded-full bg-primary/30" />
+                                            )}
+                                        </div>
+                                    )}
+                                    {tileProgress && tileProgress.total > 0 && (
+                                        <p className="text-muted-foreground mt-1.5 text-xs">
+                                            {tileProgress.completed.toLocaleString()} / {tileProgress.total.toLocaleString()} (
+                                            {tileProgress.percent}%)
+                                            {tileProgress.tiles_on_disk
+                                                ? ` · ${tileProgress.tiles_on_disk.toLocaleString()} files`
+                                                : ''}
+                                        </p>
+                                    )}
+                                    {tileProgress?.stage === 'failed' && (
+                                        <p className="mt-1.5 text-xs text-red-400">{t('admin.player_map.tiles_failed_hint')}</p>
+                                    )}
+                                    {!isGenerating && !tileProgress && (
+                                        <p className="text-muted-foreground mt-1 text-xs">{t('admin.player_map.tiles_panel_idle')}</p>
+                                    )}
+                                </div>
+
+                                {genMessage && (
+                                    <div className="rounded-md border border-border bg-background px-3 py-2 text-sm">{genMessage}</div>
+                                )}
+                            </CardContent>
+                        </CollapsibleContent>
+                    </Card>
+                </Collapsible>
 
                 {serverStatus === 'offline' && (
                     <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">

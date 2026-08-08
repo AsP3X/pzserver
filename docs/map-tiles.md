@@ -16,9 +16,11 @@ Set `PZ_MAP_BASEMAP=proxy` (or fall back when the vector pack is missing) to use
 - No local disk usage beyond the panel itself
 - Requires outbound HTTPS from the browser (or users) to the proxy host
 
-## Optional: local isometric tiles
+## Advanced: local isometric tiles
 
-Local generation is **optional** and only needed if you want photorealistic isometric basemaps, custom/mod maps rendered as images, or offline tiles without the vector pack.
+Local generation is an **advanced** option (Admin → Player map → **Isometric tiles** collapsible). Prefer the **vector** basemap for day-to-day use. Use isometric tiles only if you want photorealistic art, custom/mod maps as images, or offline tiles without the vector pack.
+
+Force isometric after a successful generate: `PZ_MAP_BASEMAP=local` (or `proxy` for the public CDN).
 
 ## Optional: local tiles (packed SQLite)
 

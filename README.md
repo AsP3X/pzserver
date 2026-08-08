@@ -146,9 +146,9 @@ make exec CMD="php artisan zomboid:build-worldmap-vector"
 
 Force isometric proxy or local tiles with `PZ_MAP_BASEMAP=proxy` or `PZ_MAP_BASEMAP=local`.
 
-### Optional local isometric tiles
+### Advanced: local isometric tiles
 
-You can generate **local** isometric tiles from the game install with `pzmap2dzi` (Admin → Player map → **Generate local tiles**, or artisan). Generation is **opt-in** and heavy (CPU/RAM/disk); it is **not** scheduled or run on container start.
+Optional photorealistic tiles via `pzmap2dzi` (Admin → Player map → **Isometric tiles** / advanced, or artisan). **Opt-in** and heavy (CPU/RAM/disk); not required when the vector basemap is active. Force with `PZ_MAP_BASEMAP=local` after generating.
 
 **Important storage design:** raw DZI output is a pyramid of hundreds of thousands to **millions** of small image files. That makes deletes, host backups, and filesystem ops extremely slow. After render, this stack **packs all tiles into a single SQLite database** and deletes the loose pyramid:
 
