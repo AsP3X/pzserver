@@ -76,7 +76,7 @@ class DailyRewardService
                 ];
             }
 
-            RewardClaim::query()->create([
+            $claim = RewardClaim::query()->create([
                 'user_id' => $user->id,
                 'reward_key' => self::REWARD_KEY,
                 'coins' => $coins,
@@ -85,13 +85,19 @@ class DailyRewardService
             ]);
 
             $wallet = $this->walletService->getOrCreateWallet($user);
+            // reference_id is a UUID column; keep claim details in metadata instead.
             $this->walletService->credit(
                 $wallet,
                 (float) $coins,
                 TransactionSource::System,
                 'Daily login reward',
-                'reward',
-                'daily_'.$user->id.'_'.$today,
+                null,
+                null,
+                [
+                    'reward_key' => self::REWARD_KEY,
+                    'claim_date' => $today,
+                    'reward_claim_id' => $claim->id,
+                ],
             );
 
             return [
