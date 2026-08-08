@@ -82,21 +82,35 @@ echo "[entrypoint] Steam branch: $GAME_VERSION"
 # half-installed tree (start-server.sh present, ProjectZomboid64 missing).
 # Public must use no -beta flag; only non-public branches pass -beta.
 # ---------------------------------------------------------------------------
+BASE_GAME_DIR="/home/steam/ZomboidDedicatedServer"
 STEAM_INSTALL_FILE="/home/steam/install_server.scmd"
-if [ -f "$STEAM_INSTALL_FILE" ]; then
-    if [ "$GAME_VERSION" = "public" ] || [ -z "$GAME_VERSION" ]; then
-        sed -i 's|app_update 380870.*|app_update 380870 validate|' "$STEAM_INSTALL_FILE"
-        echo "[entrypoint] SteamCMD: public branch (no -beta flag)"
-    else
-        sed -i "s|app_update 380870.*|app_update 380870 -beta ${GAME_VERSION} validate|" "$STEAM_INSTALL_FILE"
-        echo "[entrypoint] SteamCMD: branch -beta ${GAME_VERSION}"
+
+write_steam_install_script() {
+    local with_validate="${1:-validate}"
+    local app_line="app_update 380870"
+    if [ "$GAME_VERSION" != "public" ] && [ -n "$GAME_VERSION" ]; then
+        app_line="app_update 380870 -beta ${GAME_VERSION}"
     fi
-fi
+    if [ "$with_validate" = "validate" ]; then
+        app_line="${app_line} validate"
+    fi
+
+    cat > "$STEAM_INSTALL_FILE" <<EOF
+@ShutdownOnFailedCommand 0
+@NoPromptForPassword 1
+force_install_dir ${BASE_GAME_DIR}
+login anonymous
+${app_line}
+quit
+EOF
+    echo "[entrypoint] SteamCMD script: ${app_line}"
+}
+
+write_steam_install_script validate
 
 # Base image apply_preinstall_config rewrites install_server.scmd to always use
-# `-beta $GAME_VERSION`. Replace that sed so our public/branch line sticks.
+# `-beta $GAME_VERSION`. Neutralize that sed so our script sticks.
 if [ -f /home/steam/run_server.sh ] && ! grep -q 'PZ_SKIP_BETA_REWRITE' /home/steam/run_server.sh 2>/dev/null; then
-    # Match the exact line from renegademaster run_server.sh apply_preinstall_config
     sed -i \
         's|sed -i "s/beta \.\* /beta $GAME_VERSION /g" "$STEAM_INSTALL_FILE"|true # PZ_SKIP_BETA_REWRITE|' \
         /home/steam/run_server.sh
@@ -107,57 +121,113 @@ if [ -f /home/steam/run_server.sh ] && ! grep -q 'PZ_SKIP_BETA_REWRITE' /home/st
     fi
 fi
 
-# Refuse to start with a broken install (avoids restart loops after SteamCMD 0x6).
+# Pure bash binary guard (image python is incomplete — no ntpath — so no python here).
+cat > /home/steam/ensure_game_binary.sh << 'EOF'
+#!/bin/bash
+# PZ_BINARY_GUARD
+BASE="${BASE_GAME_DIR:-/home/steam/ZomboidDedicatedServer}"
+if [[ ! -e "$BASE/ProjectZomboid64" && ! -e "$BASE/ProjectZomboid64.real" ]]; then
+    printf '\n### FATAL: ProjectZomboid64 binary missing after SteamCMD.\n'
+    printf '### SteamCMD likely failed (state 0x6 = content servers / corrupt install).\n'
+    printf '### On the host, wipe the game install volume (NOT Saves) and restart:\n'
+    printf '###   docker stop pz-game-server && rm -rf data/server/* && docker start pz-game-server\n'
+    printf '### Container staying up for debugging: docker logs pz-game-server\n'
+    sleep infinity
+    exit 1
+fi
+EOF
+chmod +x /home/steam/ensure_game_binary.sh
+
 if [ -f /home/steam/run_server.sh ] && ! grep -q 'PZ_BINARY_GUARD' /home/steam/run_server.sh 2>/dev/null; then
-    # Insert a guard function and call it at the top of start_server().
-    # Use a marker so we only patch once per container filesystem.
-    python3 - <<'PY' || true
-from pathlib import Path
-path = Path("/home/steam/run_server.sh")
-text = path.read_text()
-if "PZ_BINARY_GUARD" in text:
-    raise SystemExit(0)
-guard_fn = '''
-# PZ_BINARY_GUARD — installed by amd64-entrypoint.sh
-function ensure_game_binary() {
-    if [[ ! -e "$BASE_GAME_DIR/ProjectZomboid64" && ! -e "$BASE_GAME_DIR/ProjectZomboid64.real" ]]; then
-        printf "\\n### FATAL: ProjectZomboid64 binary missing after SteamCMD.\\n"
-        printf "### SteamCMD likely failed (state 0x6 = content servers / corrupt install / bad -beta).\\n"
-        printf "### Fix: clear game install volume (keep Saves/) or force-update after fixing network/disk.\\n"
-        printf "### Container staying up for debugging: docker logs pz-game-server\\n"
-        sleep infinity
-        exit 1
+    # Inject at the top of start_server() — GNU sed.
+    sed -i 's|^function start_server() {$|function start_server() {\n    # PZ_BINARY_GUARD\n    bash /home/steam/ensure_game_binary.sh|' \
+        /home/steam/run_server.sh
+    if grep -q 'PZ_BINARY_GUARD' /home/steam/run_server.sh 2>/dev/null; then
+        echo "[entrypoint] Patched run_server.sh with ProjectZomboid64 binary guard"
+    else
+        echo "[entrypoint] WARNING: binary guard patch failed"
     fi
+fi
+
+game_binary_present() {
+    [ -e "$BASE_GAME_DIR/ProjectZomboid64" ] || [ -e "$BASE_GAME_DIR/ProjectZomboid64.real" ]
 }
 
-'''
-# Insert function before start_server definition
-text = text.replace(
-    "# Start the Server\nfunction start_server() {",
-    "# Start the Server\n" + guard_fn + "function start_server() {\n    ensure_game_binary",
-    1,
-)
-if "PZ_BINARY_GUARD" not in text:
-    # Fallback: insert before first start_server call pattern
-    text = text.replace(
-        "function start_server() {",
-        guard_fn + "function start_server() {\n    ensure_game_binary",
-        1,
-    )
-path.write_text(text)
-print("[entrypoint] Patched run_server.sh with ProjectZomboid64 binary guard")
-PY
-fi
+# Incomplete install (scripts/json without binary) makes SteamCMD validate fail
+# immediately with state 0x6. Wipe the game install volume so the next app_update
+# can do a clean download. Saves/config live in /home/steam/Zomboid — untouched.
+clean_incomplete_install() {
+    echo "[entrypoint] Incomplete install detected (ProjectZomboid64 missing) — cleaning ${BASE_GAME_DIR}"
+    if [ ! -d "$BASE_GAME_DIR" ]; then
+        mkdir -p "$BASE_GAME_DIR"
+        return 0
+    fi
+    # Prefer targeted wipe of Steam state + known broken tree.
+    find "$BASE_GAME_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || \
+        rm -rf "${BASE_GAME_DIR:?}/"* 2>/dev/null || true
+    mkdir -p "$BASE_GAME_DIR"
+    echo "[entrypoint] Cleaned game install dir for fresh SteamCMD download"
+}
 
 FORCE_FILE="/home/steam/Zomboid/.force_update"
 if [ -f "$FORCE_FILE" ]; then
-    echo "[entrypoint] Force update flag detected — clearing Steam appmanifest (keeps saves)"
+    echo "[entrypoint] Force update flag detected — clearing install for re-download (keeps saves)"
     rm -f "$FORCE_FILE"
-    # Prefer re-download via manifest wipe over deleting the binary first.
-    # Deleting ProjectZomboid64 before a failed SteamCMD leaves the server unstartable.
-    rm -f /home/steam/ZomboidDedicatedServer/steamapps/appmanifest_380870.acf
-    rm -rf /home/steam/ZomboidDedicatedServer/steamapps/downloading \
-           /home/steam/ZomboidDedicatedServer/steamapps/temp 2>/dev/null || true
+    clean_incomplete_install
+elif ! game_binary_present; then
+    # Half-install from a previous failed SteamCMD (0x6) — clean before retry.
+    if [ -f "$BASE_GAME_DIR/start-server.sh" ] \
+        || [ -f "$BASE_GAME_DIR/ProjectZomboid64.json" ] \
+        || [ -d "$BASE_GAME_DIR/steamapps" ]; then
+        clean_incomplete_install
+    fi
+fi
+
+# Pre-install with retries when the binary is missing. The base image always
+# prints "Server updated" even when SteamCMD fails; doing the download here
+# with real retries gives a clean install before run_server.sh starts.
+if ! game_binary_present; then
+    echo "[entrypoint] Game binary missing — running SteamCMD install (retries)..."
+    STEAMCMD_BIN="$(command -v steamcmd.sh || true)"
+    if [ -z "$STEAMCMD_BIN" ] && [ -x /home/root/.local/steamcmd/steamcmd.sh ]; then
+        STEAMCMD_BIN=/home/root/.local/steamcmd/steamcmd.sh
+    fi
+    if [ -n "$STEAMCMD_BIN" ]; then
+        for attempt in 1 2 3; do
+            # Attempt 1-2: validate. Attempt 3: no validate (sometimes unblocks 0x6).
+            if [ "$attempt" -eq 3 ]; then
+                write_steam_install_script novalidate
+            else
+                write_steam_install_script validate
+            fi
+            echo "[entrypoint] SteamCMD attempt ${attempt}/3..."
+            if "$STEAMCMD_BIN" +runscript "$STEAM_INSTALL_FILE"; then
+                :
+            fi
+            if game_binary_present; then
+                echo "[entrypoint] SteamCMD install OK (ProjectZomboid64 present)"
+                break
+            fi
+            echo "[entrypoint] SteamCMD attempt ${attempt}/3 did not produce ProjectZomboid64"
+            if [ "$attempt" -lt 3 ]; then
+                clean_incomplete_install
+                sleep 5
+            fi
+        done
+        # Restore validate script for any later base-image update pass
+        write_steam_install_script validate
+    else
+        echo "[entrypoint] WARNING: steamcmd.sh not found — relying on base image update"
+    fi
+
+    if ! game_binary_present; then
+        echo "[entrypoint] FATAL: SteamCMD could not install Project Zomboid after 3 attempts."
+        echo "[entrypoint] Common causes: no disk space, network/CDN block, Steam outage."
+        echo "[entrypoint] Check: df -h ; docker logs pz-game-server"
+        echo "[entrypoint] Container staying up for debugging."
+        sleep infinity
+        exit 1
+    fi
 fi
 
 unset MOD_NAMES
