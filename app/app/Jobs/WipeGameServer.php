@@ -66,8 +66,10 @@ class WipeGameServer implements ShouldQueue
             Log::error('Docker stop failed during wipe', ['error' => $e->getMessage()]);
         }
 
-        // 3. Wipe world/player data; keep SandboxVars + spawn + server.ini
-        $wipe = $wipeService->wipeSaveData();
+        // 3. Wipe world saves + website player accounts; keep SandboxVars/spawns + staff
+        $wipe = $wipeService->wipeAll();
+        $fs = $wipe['filesystem'];
+        $web = $wipe['website'];
 
         AuditLogger::record(
             actor: 'system',
@@ -76,23 +78,27 @@ class WipeGameServer implements ShouldQueue
             details: [
                 'source' => 'scheduled_job',
                 'ok' => $wipe['ok'],
-                'server_name' => $wipe['server_name'],
-                'deleted_count' => count($wipe['deleted']),
-                'preserved' => array_map('basename', $wipe['preserved']),
-                'errors' => $wipe['errors'],
+                'server_name' => $fs['server_name'] ?? null,
+                'filesystem_deleted' => count($fs['deleted'] ?? []),
+                'preserved' => array_map('basename', $fs['preserved'] ?? []),
+                'filesystem_errors' => $fs['errors'] ?? [],
+                'players_deleted' => $web['players_deleted'] ?? 0,
+                'website_counts' => $web['counts'] ?? [],
+                'website_errors' => $web['errors'] ?? [],
             ],
             ip: $this->ip,
         );
 
         if (! $wipe['ok']) {
             Log::error('World wipe completed with errors', [
-                'errors' => $wipe['errors'],
-                'deleted' => $wipe['deleted'],
+                'filesystem' => $fs,
+                'website' => $web,
             ]);
         } else {
             Log::info('World wipe successful', [
-                'deleted_count' => count($wipe['deleted']),
-                'preserved' => $wipe['preserved'],
+                'filesystem_deleted' => count($fs['deleted'] ?? []),
+                'players_deleted' => $web['players_deleted'] ?? 0,
+                'preserved' => $fs['preserved'] ?? [],
             ]);
         }
 

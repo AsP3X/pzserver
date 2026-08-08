@@ -2,11 +2,16 @@
 
 namespace App\Services;
 
+use App\Enums\UserRole;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Schema;
 
 /**
- * Wipe Project Zomboid world/player save data while preserving server configuration.
+ * Wipe Project Zomboid world/player save data + website player accounts,
+ * while preserving server sandbox/spawn config and staff/site/shop catalog.
  *
  * Kept (PZ "how the world behaves"):
  * - Server/{name}.ini
@@ -15,14 +20,37 @@ use Illuminate\Support\Facades\Process;
  * - Server/{name}_spawnregions.lua
  * - Server/.mod_state* / .config_state* (mod + Map= persistence)
  *
- * Cleared (world + characters + accounts that would restore the old world):
- * - Saves/Multiplayer/*  (map chunks, players.db, vehicles, zpop, …)
- * - db/{name}.db (+ shm/wal)  (whitelist / account DB for that server)
- * - backups/startup, backups/version  (PZ auto-restores worlds from these)
- * - Lua bridge live state (inventory exports, positions, queues)
+ * Kept (website):
+ * - staff users (super_admin, admin, moderator)
+ * - shop catalog, site settings, translations, news, backups metadata, audit logs
+ *
+ * Cleared (world + characters + website players):
+ * - Saves/Multiplayer/*, db/{name}.db, PZ auto-restore backups, Lua bridge state
+ * - users with role=player and related wallets/vaults/purchases/whitelist/stats/events
  */
 class WorldWipeService
 {
+    /**
+     * Full wipe: filesystem saves + website player data.
+     *
+     * @return array{
+     *     ok: bool,
+     *     filesystem: array<string, mixed>,
+     *     website: array<string, mixed>
+     * }
+     */
+    public function wipeAll(): array
+    {
+        $filesystem = $this->wipeSaveData();
+        $website = $this->wipeWebsitePlayerData();
+
+        return [
+            'ok' => $filesystem['ok'] && $website['ok'],
+            'filesystem' => $filesystem,
+            'website' => $website,
+        ];
+    }
+
     /**
      * @return array{
      *     ok: bool,
@@ -170,6 +198,147 @@ class WorldWipeService
     }
 
     /**
+     * Delete website player accounts and all related player data.
+     * Keeps staff accounts and non-player site configuration (shop catalog, settings, etc.).
+     *
+     * @return array{
+     *     ok: bool,
+     *     players_deleted: int,
+     *     counts: array<string, int>,
+     *     errors: list<string>
+     * }
+     */
+    public function wipeWebsitePlayerData(): array
+    {
+        $counts = [];
+        $errors = [];
+        $playersDeleted = 0;
+
+        try {
+            DB::transaction(function () use (&$counts, &$playersDeleted): void {
+                $playerIds = User::query()
+                    ->where('role', UserRole::Player)
+                    ->pluck('id')
+                    ->map(fn ($id): int => (int) $id)
+                    ->all();
+
+                // Username-keyed / world-tied tables (no user FK)
+                $counts['game_events'] = $this->truncateIfExists('game_events');
+                $counts['player_stats'] = $this->truncateIfExists('player_stats');
+                $counts['pvp_violations'] = $this->truncateIfExists('pvp_violations');
+                $counts['vehicle_key_holders'] = $this->truncateIfExists('vehicle_key_holders');
+
+                if ($playerIds === []) {
+                    // Still clear orphan whitelist rows not linked to staff
+                    $counts['whitelist_entries'] = $this->deleteWhereInOrNullUser('whitelist_entries', []);
+                    $playersDeleted = 0;
+
+                    return;
+                }
+
+                // Shop: deliveries → purchases (null wallet TX first — restrictOnDelete)
+                if (Schema::hasTable('shop_purchases')) {
+                    $purchaseIds = DB::table('shop_purchases')->whereIn('user_id', $playerIds)->pluck('id')->all();
+                    if ($purchaseIds !== [] && Schema::hasTable('shop_deliveries')) {
+                        $counts['shop_deliveries'] = DB::table('shop_deliveries')
+                            ->whereIn('shop_purchase_id', $purchaseIds)
+                            ->delete();
+                    }
+                    if (Schema::hasColumn('shop_purchases', 'wallet_transaction_id')) {
+                        DB::table('shop_purchases')
+                            ->whereIn('user_id', $playerIds)
+                            ->update(['wallet_transaction_id' => null]);
+                    }
+                    $counts['shop_purchases'] = DB::table('shop_purchases')->whereIn('user_id', $playerIds)->delete();
+                }
+
+                // Vaults (items/transactions cascade via FK when vault deleted — do children first if needed)
+                if (Schema::hasTable('vaults')) {
+                    $vaultIds = DB::table('vaults')->whereIn('user_id', $playerIds)->pluck('id')->all();
+                    if ($vaultIds !== []) {
+                        if (Schema::hasTable('vault_transactions')) {
+                            // null wallet_transaction_id if restricted
+                            if (Schema::hasColumn('vault_transactions', 'wallet_transaction_id')) {
+                                DB::table('vault_transactions')
+                                    ->whereIn('vault_id', $vaultIds)
+                                    ->update(['wallet_transaction_id' => null]);
+                            }
+                            $counts['vault_transactions'] = DB::table('vault_transactions')
+                                ->whereIn('vault_id', $vaultIds)
+                                ->delete();
+                        }
+                        if (Schema::hasTable('vault_items')) {
+                            $counts['vault_items'] = DB::table('vault_items')
+                                ->whereIn('vault_id', $vaultIds)
+                                ->delete();
+                        }
+                        $counts['vaults'] = DB::table('vaults')->whereIn('user_id', $playerIds)->delete();
+                    }
+                }
+
+                // Wallets
+                if (Schema::hasTable('wallets')) {
+                    $walletIds = DB::table('wallets')->whereIn('user_id', $playerIds)->pluck('id')->all();
+                    if ($walletIds !== [] && Schema::hasTable('wallet_transactions')) {
+                        $counts['wallet_transactions'] = DB::table('wallet_transactions')
+                            ->whereIn('wallet_id', $walletIds)
+                            ->delete();
+                    }
+                    $counts['wallets'] = DB::table('wallets')->whereIn('user_id', $playerIds)->delete();
+                }
+
+                if (Schema::hasTable('money_deposits')) {
+                    $counts['money_deposits'] = DB::table('money_deposits')->whereIn('user_id', $playerIds)->delete();
+                }
+                if (Schema::hasTable('reward_claims')) {
+                    $counts['reward_claims'] = DB::table('reward_claims')->whereIn('user_id', $playerIds)->delete();
+                }
+                if (Schema::hasTable('player_reports')) {
+                    $counts['player_reports'] = DB::table('player_reports')->whereIn('user_id', $playerIds)->delete();
+                }
+                if (Schema::hasTable('whitelist_entries')) {
+                    $counts['whitelist_entries'] = DB::table('whitelist_entries')
+                        ->where(function ($q) use ($playerIds): void {
+                            $q->whereIn('user_id', $playerIds)->orWhereNull('user_id');
+                        })
+                        ->delete();
+                }
+                if (Schema::hasTable('personal_access_tokens')) {
+                    $counts['personal_access_tokens'] = DB::table('personal_access_tokens')
+                        ->where('tokenable_type', User::class)
+                        ->whereIn('tokenable_id', $playerIds)
+                        ->delete();
+                }
+                if (Schema::hasTable('sessions')) {
+                    $counts['sessions'] = DB::table('sessions')->whereIn('user_id', $playerIds)->delete();
+                }
+
+                $playersDeleted = User::query()->whereIn('id', $playerIds)->delete();
+                $counts['users'] = $playersDeleted;
+            });
+        } catch (\Throwable $e) {
+            Log::error('Website player wipe failed', ['error' => $e->getMessage()]);
+            $errors[] = $e->getMessage();
+        }
+
+        $ok = $errors === [];
+
+        Log::info('Website player wipe completed', [
+            'ok' => $ok,
+            'players_deleted' => $playersDeleted,
+            'counts' => $counts,
+            'errors' => $errors,
+        ]);
+
+        return [
+            'ok' => $ok,
+            'players_deleted' => $playersDeleted,
+            'counts' => $counts,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
      * Config files that must survive a wipe.
      *
      * @return list<string>
@@ -199,6 +368,34 @@ class WorldWipeService
         }
 
         return $found;
+    }
+
+    private function truncateIfExists(string $table): int
+    {
+        if (! Schema::hasTable($table)) {
+            return 0;
+        }
+
+        return DB::table($table)->delete();
+    }
+
+    /**
+     * @param  list<int|string>  $userIds
+     */
+    private function deleteWhereInOrNullUser(string $table, array $userIds): int
+    {
+        if (! Schema::hasTable($table)) {
+            return 0;
+        }
+
+        return DB::table($table)
+            ->where(function ($q) use ($userIds): void {
+                if ($userIds !== []) {
+                    $q->whereIn('user_id', $userIds);
+                }
+                $q->orWhereNull('user_id');
+            })
+            ->delete();
     }
 
     /**
