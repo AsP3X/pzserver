@@ -1,7 +1,8 @@
 MAKEFLAGS += --no-print-directory
 
+# macOS reports arm64; Linux ARM reports aarch64. Both need the ARM64 game image.
 ARCH := $(shell uname -m)
-ifeq ($(ARCH),aarch64)
+ifeq ($(filter $(ARCH),aarch64 arm64),$(ARCH))
 	ARCH_FILE := docker-compose.arm64.yml
 else
 	ARCH_FILE := docker-compose.amd64.yml
