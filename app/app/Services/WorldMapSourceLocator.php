@@ -258,15 +258,18 @@ class WorldMapSourceLocator
             $roots['/game-media'] = 'game-media';
         }
 
-        $home = $_SERVER['HOME'] ?? null;
-        if (is_string($home) && $home !== '') {
-            $mac = $home.'/Library/Application Support/Steam/steamapps/common/ProjectZomboid/Project Zomboid.app/Contents/Java/media';
-            if (is_dir($mac)) {
-                $roots[$mac] = 'local-steam';
-            }
-            $linux = $home.'/.steam/steam/steamapps/common/ProjectZomboid/media';
-            if (is_dir($linux)) {
-                $roots[$linux] = 'local-steam';
+        // Dev-only host Steam paths — never in automated tests (pollutes Map= resolution)
+        if (! app()->environment('testing')) {
+            $home = $_SERVER['HOME'] ?? null;
+            if (is_string($home) && $home !== '') {
+                $mac = $home.'/Library/Application Support/Steam/steamapps/common/ProjectZomboid/Project Zomboid.app/Contents/Java/media';
+                if (is_dir($mac)) {
+                    $roots[$mac] = 'local-steam';
+                }
+                $linux = $home.'/.steam/steam/steamapps/common/ProjectZomboid/media';
+                if (is_dir($linux)) {
+                    $roots[$linux] = 'local-steam';
+                }
             }
         }
 

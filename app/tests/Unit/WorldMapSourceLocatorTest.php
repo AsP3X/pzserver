@@ -11,7 +11,11 @@ beforeEach(function () {
     mkdir($this->server.'/media/maps/Muldraugh, KY', 0755, true);
     mkdir($this->data.'/Server', 0755, true);
 
-    file_put_contents($this->server.'/media/maps/Muldraugh, KY/worldmap.xml', '<world/>');
+    // Must exceed the 50KB vanilla stub threshold so server-media wins over host Steam install
+    file_put_contents(
+        $this->server.'/media/maps/Muldraugh, KY/worldmap.xml',
+        str_repeat("<!-- pad -->\n", 4000).'<world version="1.0"></world>',
+    );
     file_put_contents(
         $this->server.'/media/maps/Muldraugh, KY/worldmap-annotations.lua',
         'return function() end',
