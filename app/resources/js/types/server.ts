@@ -414,7 +414,10 @@ export type StackedItem = {
     totalCount: number;
     condition: number | null;
     equipped: boolean;
+    /** Display names of the holding containers; two same-named bags collide. */
     containers: string[];
+    /** Ids of those same containers, which same-named bags do not share. */
+    containerIds: string[];
     /** Ids of the containers these items open, when they are bags. */
     opens: string[];
 };
@@ -431,6 +434,8 @@ export type ContainerGroup = {
     depth: number;
     worn: boolean;
     capacity: number | null;
+    /** Weight of the contents, against `capacity`. Null on an older bridge. */
+    weight: number | null;
     items: StackedItem[];
 };
 

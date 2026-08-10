@@ -4,6 +4,12 @@ import type { ContainerGroup, InventoryContainer, InventoryItem, StackedItem } f
 export const MAIN_CONTAINER = 'inventory';
 
 /**
+ * Tab id for the everything-at-once view. Empty rather than a name so it can
+ * never collide with a container id coming off the bridge.
+ */
+export const ALL_ITEMS = '';
+
+/**
  * Collapse raw inventory entries into one row per item type.
  * Counts are summed, the worst condition wins, and every container
  * the item was found in is recorded.
@@ -25,6 +31,9 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
             if (!existing.containers.includes(item.container)) {
                 existing.containers.push(item.container);
             }
+            if (!existing.containerIds.includes(item.container_id)) {
+                existing.containerIds.push(item.container_id);
+            }
             if (item.contains) {
                 existing.opens.push(item.contains);
             }
@@ -38,6 +47,7 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
                 condition: item.condition,
                 equipped: item.equipped,
                 containers: [item.container],
+                containerIds: [item.container_id],
                 opens: item.contains ? [item.contains] : [],
             });
         }
@@ -71,6 +81,7 @@ export function groupItemsByContainer(
                       depth: 0,
                       worn: false,
                       capacity: null,
+                      weight: null,
                       items: stackItems(items),
                   },
               ];
@@ -104,6 +115,7 @@ export function groupItemsByContainer(
             depth: container.depth,
             worn: container.worn ?? false,
             capacity: container.capacity ?? null,
+            weight: container.weight ?? null,
             items: stackItems(byContainer.get(container.id) ?? []),
         };
     });

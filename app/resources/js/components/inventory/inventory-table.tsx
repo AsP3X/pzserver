@@ -1,6 +1,9 @@
-import { Backpack, List, Package, Search, Swords } from 'lucide-react';
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Package, Scale, Search, Swords } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { ConditionBar } from '@/components/inventory/condition-bar';
+import { ContainerTabs } from '@/components/inventory/container-tabs';
+import type { ContainerTab } from '@/components/inventory/container-tabs';
 import { ItemIcon } from '@/components/inventory/item-icon';
 import { SortableHeader } from '@/components/sortable-header';
 import { Badge } from '@/components/ui/badge';
@@ -8,17 +11,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useTableSort } from '@/hooks/use-table-sort';
 import { useTranslation } from '@/hooks/use-translation';
-import { MAIN_CONTAINER } from '@/lib/inventory';
+import { ALL_ITEMS, MAIN_CONTAINER } from '@/lib/inventory';
 import type { ContainerGroup, StackedItem } from '@/types/server';
 
 type SortKey = 'name' | 'category' | 'condition' | 'totalCount';
 
 type Props = {
     items: StackedItem[];
-    /** Per-container breakdown; enables the "by container" view when given. */
+    /** Per-container breakdown; enables the container tabs when given. */
     groups?: ContainerGroup[];
     /** Optional per-row controls rendered in a trailing Actions column. */
     rowActions?: (item: StackedItem) => ReactNode;
@@ -26,159 +28,179 @@ type Props = {
 
 const ITEMS_PER_PAGE = 20;
 
-/** Pixels each nesting level is pushed in, so a bag's contents read as its own. */
-const INDENT_STEP = 20;
-
 /**
- * Searchable, sortable, paginated table of stacked inventory items.
- * Groups rows by the container holding them when `groups` is supplied.
+ * Searchable, sortable table of stacked inventory items.
+ *
+ * When `groups` is supplied the containers become tabs and the table shows one
+ * container at a time. That is the point of the tabs: a bag's contents used to
+ * be sliced across pages of a single long list, so reading what was in a
+ * backpack meant paging back and forth. Now a bag is one tab and almost always
+ * one page.
+ *
+ * Search still runs across everything — each tab's badge counts its own matches
+ * while a filter is active, so the strip answers "which bag is it in".
+ *
  * Read-only unless a `rowActions` renderer is supplied.
  */
 export function InventoryTable({ items, groups, rowActions }: Props) {
     const { t } = useTranslation();
     const [filter, setFilter] = useState('');
     const [page, setPage] = useState(1);
-    const [grouped, setGrouped] = useState(true);
+    const [activeTab, setActiveTab] = useState<string>(ALL_ITEMS);
     const { sortKey, sortDir, toggleSort } = useTableSort<SortKey>('name', 'asc');
 
-    const groupsAvailable = groups !== undefined && groups.length > 1;
-    const showGroups = groupsAvailable && grouped;
+    const tabsAvailable = groups !== undefined && groups.length > 1;
 
-    /**
-     * Every group's rows filtered and sorted, empty groups dropped. The flat
-     * view is modelled as a single unnamed group so both views share one path.
-     */
-    const visibleGroups = useMemo(() => {
+    const matches = useMemo(() => {
         const query = filter.toLowerCase();
-        const source: ContainerGroup[] = showGroups
-            ? (groups ?? [])
-            : [{ id: '', container: '', label: '', depth: 0, worn: false, capacity: null, items }];
 
-        return source
-            .map((group) => ({
-                ...group,
-                items: group.items
-                    .filter(
-                        (item) =>
-                            item.name.toLowerCase().includes(query) ||
-                            item.full_type.toLowerCase().includes(query) ||
-                            item.category.toLowerCase().includes(query),
-                    )
-                    .sort((a, b) => {
-                        /** Items with no durability sit out the condition sort entirely. */
-                        if (sortKey === 'condition' && (a.condition === null || b.condition === null)) {
-                            if (a.condition === b.condition) return a.name.localeCompare(b.name);
-                            return a.condition === null ? 1 : -1;
-                        }
+        return (row: StackedItem) =>
+            row.name.toLowerCase().includes(query) ||
+            row.full_type.toLowerCase().includes(query) ||
+            row.category.toLowerCase().includes(query);
+    }, [filter]);
 
-                        let cmp = 0;
-                        if (sortKey === 'name') cmp = a.name.localeCompare(b.name);
-                        else if (sortKey === 'category')
-                            cmp = a.category.localeCompare(b.category) || a.name.localeCompare(b.name);
-                        else if (sortKey === 'condition') cmp = (a.condition ?? 0) - (b.condition ?? 0);
-                        else if (sortKey === 'totalCount') cmp = a.totalCount - b.totalCount;
-                        return sortDir === 'desc' ? -cmp : cmp;
-                    }),
-            }))
-            /** An empty bag is worth showing as empty, but never as a search hit. */
-            .filter((group) => group.items.length > 0 || (showGroups && query === ''));
-    }, [groups, items, showGroups, filter, sortKey, sortDir]);
+    const sortRows = useMemo(() => {
+        return (rows: StackedItem[]) =>
+            [...rows].sort((a, b) => {
+                /** Items with no durability sit out the condition sort entirely. */
+                if (sortKey === 'condition' && (a.condition === null || b.condition === null)) {
+                    if (a.condition === b.condition) return a.name.localeCompare(b.name);
+                    return a.condition === null ? 1 : -1;
+                }
 
-    const totalRows = useMemo(
-        () => visibleGroups.reduce((sum, group) => sum + group.items.length, 0),
-        [visibleGroups],
-    );
+                let cmp = 0;
+                if (sortKey === 'name') cmp = a.name.localeCompare(b.name);
+                else if (sortKey === 'category')
+                    cmp = a.category.localeCompare(b.category) || a.name.localeCompare(b.name);
+                else if (sortKey === 'condition') cmp = (a.condition ?? 0) - (b.condition ?? 0);
+                else if (sortKey === 'totalCount') cmp = a.totalCount - b.totalCount;
+                return sortDir === 'desc' ? -cmp : cmp;
+            });
+    }, [sortKey, sortDir]);
 
-    /** Unfiltered row count for the active view — a type held in two bags is two rows. */
-    const availableRows = useMemo(
-        () => (showGroups ? (groups ?? []).reduce((sum, group) => sum + group.items.length, 0) : items.length),
-        [groups, items, showGroups],
-    );
-
-    const lastPage = Math.max(1, Math.ceil(totalRows / ITEMS_PER_PAGE));
-    const currentPage = Math.min(page, lastPage);
-
-    /** Slice item rows across group boundaries, keeping each page's headers. */
-    const pagedGroups = useMemo(() => {
-        const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        const end = start + ITEMS_PER_PAGE;
-        const result: ContainerGroup[] = [];
-        let offset = 0;
-
-        for (const group of visibleGroups) {
-            const groupEnd = offset + group.items.length;
-
-            /** An empty bag has no rows to straddle a page, so it rides on its own offset. */
-            const onThisPage =
-                group.items.length === 0 ? offset >= start && offset < end : groupEnd > start && offset < end;
-
-            if (onThisPage) {
-                result.push({
-                    ...group,
-                    items: group.items.slice(Math.max(0, start - offset), Math.max(0, end - offset)),
-                });
-            }
-            offset = groupEnd;
+    /** Match counts per tab, which is what the strip's badges report. */
+    const tabs = useMemo<ContainerTab[]>(() => {
+        if (!tabsAvailable) {
+            return [];
         }
 
-        return result;
-    }, [visibleGroups, currentPage]);
+        return [
+            {
+                id: ALL_ITEMS,
+                label: t('inventory.all_items'),
+                depth: 0,
+                worn: false,
+                count: items.filter(matches).length,
+            },
+            ...(groups ?? []).map((group) => ({
+                id: group.id,
+                label: group.label,
+                depth: group.depth,
+                worn: group.worn,
+                count: group.items.filter(matches).length,
+            })),
+        ];
+    }, [tabsAvailable, groups, items, matches, t]);
 
-    const columnCount = 5 + (rowActions ? 1 : 0);
+    /** The container behind the active tab, or null on "all items". */
+    const activeGroup = useMemo(
+        () => (activeTab === ALL_ITEMS ? null : ((groups ?? []).find((g) => g.id === activeTab) ?? null)),
+        [groups, activeTab],
+    );
+
+    const visibleRows = useMemo(
+        () => sortRows((activeGroup ? activeGroup.items : items).filter(matches)),
+        [activeGroup, items, matches, sortRows],
+    );
+
+    /** Unfiltered rows in the active tab, for the "showing x of y" line. */
+    const availableRows = activeGroup ? activeGroup.items.length : items.length;
+
+    const lastPage = Math.max(1, Math.ceil(visibleRows.length / ITEMS_PER_PAGE));
+    const currentPage = Math.min(page, lastPage);
+    const pageRows = useMemo(
+        () => visibleRows.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
+        [visibleRows, currentPage],
+    );
+
+    /** Jump to the tab for a bag listed in the current one. */
+    function openContainer(id: string) {
+        setActiveTab(id);
+        setPage(1);
+    }
+
+    function labelFor(id: string): string {
+        if (id === MAIN_CONTAINER) {
+            return t('inventory.main_container');
+        }
+
+        return (groups ?? []).find((group) => group.id === id)?.label ?? id;
+    }
 
     return (
         <Card>
             <CardHeader>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <CardTitle>{t('inventory.items')}</CardTitle>
-                        <CardDescription>
-                            {t('inventory.items_count', {
-                                filtered: String(totalRows),
-                                total: String(availableRows),
-                            })}
+                        <CardTitle>
+                            {activeGroup ? labelFor(activeGroup.id) : t('inventory.items')}
+                        </CardTitle>
+                        <CardDescription className="flex flex-wrap items-center gap-x-3">
+                            <span>
+                                {t('inventory.items_count', {
+                                    filtered: String(visibleRows.length),
+                                    total: String(availableRows),
+                                })}
+                            </span>
+                            {activeGroup?.capacity != null && (
+                                <span className="flex items-center gap-1">
+                                    <Scale className="size-3.5" />
+                                    {t('inventory.capacity_usage', {
+                                        weight: (activeGroup.weight ?? 0).toFixed(1),
+                                        capacity: String(activeGroup.capacity),
+                                    })}
+                                </span>
+                            )}
                         </CardDescription>
                     </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        {groupsAvailable && (
-                            <ToggleGroup
-                                type="single"
-                                variant="outline"
-                                size="sm"
-                                value={grouped ? 'grouped' : 'flat'}
-                                onValueChange={(value) => {
-                                    if (!value) return;
-                                    setGrouped(value === 'grouped');
-                                    setPage(1);
-                                }}
-                            >
-                                <ToggleGroupItem value="grouped" aria-label={t('inventory.group_by_container')}>
-                                    <Backpack className="size-4" />
-                                    <span className="hidden sm:inline">{t('inventory.group_by_container')}</span>
-                                </ToggleGroupItem>
-                                <ToggleGroupItem value="flat" aria-label={t('inventory.flat_list')}>
-                                    <List className="size-4" />
-                                    <span className="hidden sm:inline">{t('inventory.flat_list')}</span>
-                                </ToggleGroupItem>
-                            </ToggleGroup>
-                        )}
-                        <div className="relative">
-                            <Search className="text-muted-foreground absolute left-2.5 top-2.5 size-4" />
-                            <Input
-                                placeholder={t('inventory.filter_items')}
-                                value={filter}
-                                onChange={(e) => {
-                                    setFilter(e.target.value);
-                                    setPage(1);
-                                }}
-                                className="pl-9 sm:w-[200px]"
-                            />
-                        </div>
+                    <div className="relative">
+                        <Search className="text-muted-foreground absolute left-2.5 top-2.5 size-4" />
+                        <Input
+                            placeholder={t('inventory.filter_items')}
+                            value={filter}
+                            onChange={(e) => {
+                                setFilter(e.target.value);
+                                setPage(1);
+                            }}
+                            className="pl-9 sm:w-[200px]"
+                        />
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
-                {totalRows > 0 ? (
+
+            {tabsAvailable && (
+                <div className="px-6">
+                    <ContainerTabs
+                        tabs={tabs}
+                        activeId={activeTab}
+                        onSelect={(id) => {
+                            setActiveTab(id);
+                            setPage(1);
+                        }}
+                        filtering={filter !== ''}
+                    />
+                </div>
+            )}
+
+            <CardContent
+                className="overflow-x-auto"
+                id="container-tabpanel"
+                role={tabsAvailable ? 'tabpanel' : undefined}
+                aria-labelledby={tabsAvailable ? `container-tab-${activeTab || 'all'}` : undefined}
+                tabIndex={tabsAvailable ? 0 : undefined}
+            >
+                {pageRows.length > 0 ? (
                     <>
                         <Table>
                             <TableHeader>
@@ -200,96 +222,71 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {pagedGroups.map((group) => (
-                                    <Fragment key={group.id}>
-                                        {showGroups && (
-                                            <TableRow className="bg-muted/50 hover:bg-muted/50">
-                                                <TableCell colSpan={columnCount} className="py-2">
-                                                    <div
-                                                        className="flex items-center gap-2"
-                                                        style={{ paddingLeft: group.depth * INDENT_STEP }}
-                                                    >
-                                                        {group.id === MAIN_CONTAINER || group.worn ? (
-                                                            <Backpack className="text-muted-foreground size-4" />
-                                                        ) : (
-                                                            <Package className="text-muted-foreground size-4" />
-                                                        )}
-                                                        <span className="text-sm font-semibold">
-                                                            {group.id === MAIN_CONTAINER
-                                                                ? t('inventory.main_container')
-                                                                : group.label}
-                                                        </span>
-                                                        <Badge variant="secondary" className="text-xs">
-                                                            {group.items.length === 0
-                                                                ? t('inventory.container_empty')
-                                                                : t('inventory.container_items', {
-                                                                      count: String(group.items.length),
-                                                                  })}
-                                                        </Badge>
-                                                    </div>
-                                                </TableCell>
-                                            </TableRow>
-                                        )}
-                                        {group.items.map((item) => (
-                                            <TableRow key={`${group.id}-${item.full_type}`}>
-                                                <TableCell>
-                                                    <div
-                                                        className="flex items-center gap-2"
-                                                        style={{
-                                                            paddingLeft: showGroups
-                                                                ? group.depth * INDENT_STEP + 8
-                                                                : undefined,
-                                                        }}
-                                                    >
-                                                        {showGroups && <span className="bg-border h-8 w-px shrink-0" />}
-                                                        <ItemIcon src={item.icon} name={item.name} size={32} />
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="flex min-w-0 flex-col">
-                                                        <span className="text-sm font-medium">{item.name}</span>
-                                                        <span className="text-muted-foreground text-xs">{item.full_type}</span>
-                                                        {item.equipped && (
-                                                            <span className="text-muted-foreground flex items-center gap-1 text-xs">
-                                                                <Swords className="size-3" />
-                                                                {t('common.equipped')}
-                                                            </span>
-                                                        )}
-                                                        {showGroups && item.opens.length > 0 && (
-                                                            <span className="text-muted-foreground flex items-center gap-1 text-xs">
+                                {pageRows.map((item) => (
+                                    <TableRow key={`${activeTab}-${item.full_type}`}>
+                                        <TableCell>
+                                            <ItemIcon src={item.icon} name={item.name} size={32} />
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex min-w-0 flex-col gap-0.5">
+                                                <span className="text-sm font-medium">{item.name}</span>
+                                                <span className="text-muted-foreground text-xs">{item.full_type}</span>
+                                                {item.equipped && (
+                                                    <span className="text-muted-foreground flex items-center gap-1 text-xs">
+                                                        <Swords className="size-3" />
+                                                        {t('common.equipped')}
+                                                    </span>
+                                                )}
+                                                {tabsAvailable && item.opens.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1 pt-0.5">
+                                                        {item.opens.map((id) => (
+                                                            <Button
+                                                                key={id}
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-6 gap-1 px-2 text-xs"
+                                                                onClick={() => openContainer(id)}
+                                                            >
                                                                 <Package className="size-3" />
-                                                                {t('inventory.contents_below')}
-                                                            </span>
-                                                        )}
-                                                        {!showGroups && item.containers.length > 0 && (
-                                                            <span className="text-muted-foreground flex items-center gap-1 text-xs">
-                                                                <Package className="size-3" />
-                                                                {item.containers
-                                                                    .map((container) =>
-                                                                        container === MAIN_CONTAINER
-                                                                            ? t('inventory.main_container')
-                                                                            : container,
-                                                                    )
-                                                                    .join(', ')}
-                                                            </span>
-                                                        )}
+                                                                {t('inventory.open_container', {
+                                                                    name: labelFor(id),
+                                                                })}
+                                                            </Button>
+                                                        ))}
                                                     </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline" className="text-xs">
-                                                        {item.category}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-center">
-                                                    <span className="font-medium tabular-nums">{item.totalCount}</span>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <ConditionBar condition={item.condition} />
-                                                </TableCell>
-                                                {rowActions && <TableCell>{rowActions(item)}</TableCell>}
-                                            </TableRow>
-                                        ))}
-                                    </Fragment>
+                                                )}
+                                                {/* On "all items" a row can span several bags, so say which. */}
+                                                {activeTab === ALL_ITEMS && tabsAvailable && item.containerIds.length > 0 && (
+                                                    <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                                        {item.containerIds.map((id) => (
+                                                            <Button
+                                                                key={id}
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="text-muted-foreground h-6 gap-1 px-1.5 text-xs"
+                                                                onClick={() => openContainer(id)}
+                                                            >
+                                                                <Package className="size-3" />
+                                                                {labelFor(id)}
+                                                            </Button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <Badge variant="outline" className="text-xs">
+                                                {item.category}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-center">
+                                            <span className="font-medium tabular-nums">{item.totalCount}</span>
+                                        </TableCell>
+                                        <TableCell>
+                                            <ConditionBar condition={item.condition} />
+                                        </TableCell>
+                                        {rowActions && <TableCell>{rowActions(item)}</TableCell>}
+                                    </TableRow>
                                 ))}
                             </TableBody>
                         </Table>
@@ -299,8 +296,8 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                                 <p className="text-muted-foreground text-sm">
                                     {t('inventory.pagination_range', {
                                         start: String((currentPage - 1) * ITEMS_PER_PAGE + 1),
-                                        end: String(Math.min(currentPage * ITEMS_PER_PAGE, totalRows)),
-                                        total: String(totalRows),
+                                        end: String(Math.min(currentPage * ITEMS_PER_PAGE, visibleRows.length)),
+                                        total: String(visibleRows.length),
                                     })}
                                 </p>
                                 <div className="flex items-center gap-1">
@@ -326,7 +323,11 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                     </>
                 ) : (
                     <p className="text-muted-foreground py-8 text-center">
-                        {filter ? t('inventory.no_items_filter') : t('inventory.no_items_empty')}
+                        {filter
+                            ? t('inventory.no_items_filter')
+                            : activeGroup
+                              ? t('inventory.container_is_empty')
+                              : t('inventory.no_items_empty')}
                     </p>
                 )}
             </CardContent>
