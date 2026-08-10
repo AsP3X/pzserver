@@ -55,13 +55,20 @@ return Application::configure(basePath: dirname(__DIR__))
                     ->setStatusCode($response->getStatusCode());
             }
 
+            /**
+             * A rejected CSRF token means the session behind it is gone, so
+             * "try again" was advice that could not work — the retry carries
+             * the same dead token. Point at the reload instead.
+             */
             if ($response->getStatusCode() === 419) {
                 if ($request->expectsJson()) {
-                    return response()->json(['error' => 'The page expired, please try again.'], 419);
+                    return response()->json([
+                        'error' => 'Your session expired. Reload the page to sign in again.',
+                    ], 419);
                 }
 
                 return back()->with([
-                    'error' => 'The page expired, please try again.',
+                    'error' => 'Your session expired. Reload the page to sign in again.',
                 ]);
             }
 
