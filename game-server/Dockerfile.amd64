@@ -20,5 +20,8 @@ RUN chmod +x /home/steam/amd64-entrypoint.sh \
 # KnoxRelay is still bind-mounted at runtime for easy Lua updates, but we
 # also seed a copy into the image so the stack works without the mount.
 COPY mods/KnoxRelay /home/steam/Zomboid/mods/KnoxRelay
+# PZServerPulse is staged outside the bind-mounted Zomboid/ so configure-server.sh
+# can copy it into the live mods directory at runtime (same pattern as Workshop mods).
+COPY mods/PZServerPulse /opt/pzserver-pulse
 
 ENTRYPOINT ["/bin/bash", "/home/steam/amd64-entrypoint.sh"]

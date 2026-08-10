@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package workshop-package-pzsp update-version update \
 	admin-expose admin-hide expose hide info
 
 # ── First-run setup ──────────────────────────────────────────────────
@@ -254,6 +254,11 @@ db-restore:
 # ── Workshop ────────────────────────────────────────────────────────
 workshop-package:
 	bash scripts/workshop-package.sh
+
+# PZServerPulse ships inside the game-server image, so publishing it is
+# optional — this only builds the upload tree for the Steam Workshop.
+workshop-package-pzsp:
+	bash scripts/workshop-package-pzsp.sh
 
 # ── Update from git ─────────────────────────────────────────────────
 # Pulls the latest code, rebuilds, runs migrations, rebuilds frontend

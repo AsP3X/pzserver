@@ -325,6 +325,30 @@ if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
     done < <(find "$WORKSHOP_CACHE_ROOT" -maxdepth 3 -mindepth 3 -type d -path "*/mods/*")
 fi
 
+# Seed PZServerPulse from the image into the live mods directory.
+# The image stages it at /opt/pzserver-pulse (outside the bind mount) so it
+# survives the Zomboid/ volume shadow. Copy it in on every boot so Lua
+# updates in the image are picked up after a rebuild.
+PZSP_SRC="${PZSP_SOURCE_DIR:-/opt/pzserver-pulse}"
+PZSP_DST="${ZOMBOID_MODS_DIR}/PZServerPulse"
+if [ -d "$PZSP_SRC" ]; then
+    if [ -L "$PZSP_DST" ] || [ -e "$PZSP_DST" ]; then
+        rm -rf "$PZSP_DST"
+    fi
+    if cp -r "$PZSP_SRC" "$PZSP_DST"; then
+        echo "[configure-server] Seeded PZServerPulse from ${PZSP_SRC} into Zomboid/mods/"
+        # Seeding only puts the mod on disk; PZ loads what `Mods=` lists. An
+        # upgrade from before PZServerPulse existed keeps its old PZ_MOD_IDS,
+        # so say why the dashboard stays empty instead of failing silently.
+        if ! grep -m1 "^Mods=" "$INI_FILE" 2>/dev/null | grep -q "PZServerPulse"; then
+            echo "[configure-server] WARNING: PZServerPulse is seeded but not in Mods= —" \
+                 "add it to PZ_MOD_IDS (e.g. PZ_MOD_IDS=KnoxRelay;PZServerPulse) to enable the live dashboard"
+        fi
+    else
+        echo "[configure-server] WARNING: failed to seed PZServerPulse"
+    fi
+fi
+
 # Disable Lua checksum.
 # Without this, PZ checksums mod Lua files and clients that don't have matching
 # checksums get errors. This does NOT disable anti-cheat (Steam VAC).
@@ -364,8 +388,11 @@ fi
 LUA_DIR="${PZ_CONFIG_DIR}/Lua"
 mkdir -p "${LUA_DIR}/inventory" 2>/dev/null \
     || echo "[configure-server] WARNING: Cannot create ${LUA_DIR}/inventory"
+mkdir -p "${LUA_DIR}/PZServerPulse" 2>/dev/null \
+    || echo "[configure-server] WARNING: Cannot create ${LUA_DIR}/PZServerPulse"
 chmod 777 "${LUA_DIR}" 2>/dev/null || true
 chmod 777 "${LUA_DIR}/inventory" 2>/dev/null || true
+chmod 777 "${LUA_DIR}/PZServerPulse" 2>/dev/null || true
 # Touch placeholder files so mounts exist and stay writable
 for f in export_requests.json player_stats.json players_live.json game_state.json \
          items_catalog.json delivery_queue.json delivery_results.json \

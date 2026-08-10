@@ -63,6 +63,7 @@ node_modules/
 
 # Workshop build artifacts
 workshop/KnoxRelay/Contents/mods/KnoxRelay/42/media/
+workshop/PZServerPulse/Contents/mods/PZServerPulse/42/media/
 
 # Test / Coverage
 /app/.phpunit.result.cache

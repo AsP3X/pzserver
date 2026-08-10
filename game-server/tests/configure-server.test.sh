@@ -328,6 +328,83 @@ assert_missing_arm64_mod_downloads_to_install_dir() {
 }
 assert_missing_arm64_mod_downloads_to_install_dir
 
+# --- PZServerPulse seeding --------------------------------------------------
+
+# PZServerPulse ships in the image rather than the Workshop, staged outside the
+# bind-mounted Zomboid/ so the volume cannot shadow it. It must land in
+# Zomboid/mods/ on every boot, and replace whatever a previous boot left there,
+# otherwise a rebuilt image keeps serving the old Lua.
+assert_pulse_is_seeded_fresh_each_boot() {
+    local desc home cfg args src
+    home="$(mktemp -d)"
+    cfg="$(mktemp -d)"
+    args="$(mktemp)"
+    src="$(mktemp -d)/pzserver-pulse"
+    install_marker "$home/pzserver"
+    mkdir -p "$src/42/media/lua/server"
+    printf 'name=PZServerPulse\nid=PZServerPulse\n' > "$src/42/mod.info"
+    printf 'SP_Bridge.VERSION = "2.0"\n' > "$src/42/media/lua/server/SP_Bridge.lua"
+
+    # A stale copy from an earlier boot, which the seed must overwrite.
+    mkdir -p "$cfg/mods/PZServerPulse/42/media/lua/server"
+    printf 'SP_Bridge.VERSION = "1.0"\n' > "$cfg/mods/PZServerPulse/42/media/lua/server/SP_Bridge.lua"
+
+    PZSP_SOURCE_DIR="$src" run_configure "$home" "$cfg" "$args" > /dev/null
+
+    desc="PZServerPulse is seeded into Zomboid/mods/"
+    if [ -f "$cfg/mods/PZServerPulse/42/mod.info" ]; then
+        ok "$desc"
+    else
+        ng "$desc" "no mod.info at $cfg/mods/PZServerPulse/42/"
+    fi
+
+    desc="a rebuilt image replaces the previous boot's Lua"
+    if grep -q '"2.0"' "$cfg/mods/PZServerPulse/42/media/lua/server/SP_Bridge.lua" 2>/dev/null; then
+        ok "$desc"
+    else
+        ng "$desc" "stale SP_Bridge.lua survived the seed"
+    fi
+
+    rm -rf "$home" "$cfg" "$args" "$(dirname "$src")"
+}
+assert_pulse_is_seeded_fresh_each_boot
+
+# Seeding the mod is not the same as loading it: PZ only loads what `Mods=`
+# lists. A server upgrading from before PZServerPulse existed keeps its old
+# PZ_MOD_IDS, and the dashboard would sit empty with nothing explaining why.
+assert_pulse_warns_when_not_enabled() {
+    local desc home args src out cfg_off cfg_on
+    home="$(mktemp -d)"
+    args="$(mktemp)"
+    src="$(mktemp -d)/pzserver-pulse"
+    # Each run needs its own config dir: the first boot writes .mod_state, which
+    # then outranks PZ_MOD_IDS on every boot after it.
+    cfg_off="$(mktemp -d)"
+    cfg_on="$(mktemp -d)"
+    install_marker "$home/pzserver"
+    mkdir -p "$src/42"
+    printf 'name=PZServerPulse\nid=PZServerPulse\n' > "$src/42/mod.info"
+
+    out="$(PZSP_SOURCE_DIR="$src" PZ_MOD_IDS=KnoxRelay run_configure "$home" "$cfg_off" "$args")"
+
+    desc="seeding PZServerPulse without enabling it warns"
+    case "$out" in
+        *"PZServerPulse is seeded but not in Mods="*) ok "$desc" ;;
+        *) ng "$desc" "no warning in output" ;;
+    esac
+
+    out="$(PZSP_SOURCE_DIR="$src" PZ_MOD_IDS="KnoxRelay;PZServerPulse" run_configure "$home" "$cfg_on" "$args")"
+
+    desc="no warning once PZServerPulse is in Mods="
+    case "$out" in
+        *"PZServerPulse is seeded but not in Mods="*) ng "$desc" "warned anyway" ;;
+        *) ok "$desc" ;;
+    esac
+
+    rm -rf "$home" "$cfg_off" "$cfg_on" "$args" "$(dirname "$src")"
+}
+assert_pulse_warns_when_not_enabled
+
 echo "----------------------------------------"
 echo "Passed: ${pass}, Failed: ${fail}"
 [ "$fail" -eq 0 ]
