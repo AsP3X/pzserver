@@ -16,12 +16,18 @@ use Carbon\CarbonImmutable;
 class CharacterVitalsReader
 {
     /**
-     * The bridge version that first exported character vitals.
+     * The bridge version that first exported character vitals correctly.
      *
      * Servers on an older Knox Relay write no heartbeats at all, and the page
      * needs to tell that apart from a player who simply has not logged in yet.
+     *
+     * 1.8 rather than 1.7, which did write heartbeats: it called Build 41
+     * accessors that Build 42 had moved, and because every collector swallows
+     * its errors the file was full of defaults — every body part at 100% with
+     * no wounds, a flat 37°C, no moodles. Showing that is worse than showing
+     * nothing, so 1.7 is treated as not having the feature.
      */
-    private const MINIMUM_MOD_VERSION = '1.7';
+    private const MINIMUM_MOD_VERSION = '1.8';
 
     private string $vitalsDir;
 

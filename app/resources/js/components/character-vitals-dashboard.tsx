@@ -1,6 +1,5 @@
 import {
     Apple,
-    Backpack,
     Beef,
     ChefHat,
     Crosshair,
@@ -31,11 +30,6 @@ type BodyPartHealth = {
     wounds: string[];
 };
 
-type BodyPartProtection = {
-    bite: number;
-    scratch: number;
-};
-
 type BodyPartTemp = {
     skin: number;
     insulation: number;
@@ -55,12 +49,6 @@ type ClothingItem = {
     scratch: number;
 };
 
-type QuickloadSlot = {
-    index: number;
-    /** Absent, not null, for an empty slot: KR_Codec omits nil-valued keys. */
-    item?: string;
-};
-
 type Wound = {
     part: string;
     type: string;
@@ -78,7 +66,6 @@ type VitalsInfo = {
     profession?: string;
     traits?: string[];
     weight?: number;
-    favourite_weapon?: string;
     kills?: number;
     hours_survived?: number;
 };
@@ -86,10 +73,6 @@ type VitalsInfo = {
 type VitalsHealth = {
     overall?: number;
     parts?: Record<string, BodyPartHealth>;
-};
-
-type VitalsProtection = {
-    parts?: Record<string, BodyPartProtection>;
 };
 
 type VitalsTemperature = {
@@ -111,7 +94,7 @@ type VitalsMoodles = {
     wetness?: number;
     drunk?: number;
     temperature?: number;
-    sick?: boolean;
+    sickness?: number;
     has_cold?: boolean;
     food_sickness?: number;
 };
@@ -135,12 +118,10 @@ export type VitalsHeartbeat = {
     info?: VitalsInfo;
     skills?: Record<string, SkillXp>;
     health?: VitalsHealth;
-    protection?: VitalsProtection;
     temperature?: VitalsTemperature;
     moodles?: VitalsMoodles;
     weapon?: VitalsWeapon;
     clothing?: { items?: ClothingItem[] };
-    quickload?: { slots?: QuickloadSlot[] };
     encumbrance?: VitalsEncumbrance;
     wounds?: Wound[];
     recipes?: Recipe[];
@@ -148,8 +129,15 @@ export type VitalsHeartbeat = {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+/**
+ * The BodyPartType members, in enum order. Head-down rather than the enum's own
+ * hands-first order, because that is how a person reads a body. Anything the
+ * heartbeat does not carry is filtered out at render, so a build with a
+ * different set degrades to what it does have.
+ */
 const BODY_PARTS = [
-    'Head', 'Neck', 'Torso',
+    'Head', 'Neck',
+    'Torso_Upper', 'Torso_Lower',
     'UpperArm_L', 'UpperArm_R',
     'ForeArm_L', 'ForeArm_R',
     'Hand_L', 'Hand_R',
@@ -251,7 +239,6 @@ function InfoPanel({ info }: { info: VitalsInfo }) {
             <CardContent className="space-y-2">
                 {info.profession && <StatRow icon={<Swords className="size-3.5" />} label={t('portal.character.profession')} value={info.profession} />}
                 {info.weight !== undefined && <StatRow icon={<Weight className="size-3.5" />} label={t('portal.character.vitals.weight')} value={info.weight.toFixed(1)} suffix=" kg" />}
-                {info.favourite_weapon && <StatRow icon={<Crosshair className="size-3.5" />} label={t('portal.character.vitals.favorite_weapon')} value={info.favourite_weapon} />}
                 {info.traits && info.traits.length > 0 && (
                     <div className="flex flex-wrap gap-1 pt-1">
                         {info.traits.map((trait) => <Badge key={trait} variant="outline" className="text-xs">{trait}</Badge>)}
@@ -342,32 +329,6 @@ function HealthPanel({ health }: { health: VitalsHealth }) {
     );
 }
 
-function ProtectionPanel({ protection }: { protection: VitalsProtection }) {
-    const { t } = useTranslation();
-    if (!protection.parts) return null;
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{t('portal.character.vitals.protection')}</CardTitle>
-                <CardDescription>{t('portal.character.vitals.protection_desc')}</CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="grid grid-cols-1 gap-1.5">
-                    {BODY_PARTS.filter((p) => protection.parts![p]).map((part) => {
-                        const p = protection.parts![part];
-                        return (
-                            <div key={part} className="flex items-center justify-between gap-2 text-xs">
-                                <span className="text-muted-foreground w-24 truncate">{humanPart(part)}</span>
-                                <DefencePair bite={p.bite} scratch={p.scratch} />
-                            </div>
-                        );
-                    })}
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
-
 function TemperaturePanel({ temperature }: { temperature: VitalsTemperature }) {
     const { t } = useTranslation();
     return (
@@ -431,7 +392,7 @@ function MoodlesPanel({ moodles }: { moodles: VitalsMoodles }) {
                 <CardDescription>{t('portal.character.vitals.moodles_desc')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-                {moodles.sick && <Badge variant="destructive" className="gap-1"><Snowflake className="size-3" />{t('portal.character.vitals.sick')}</Badge>}
+                {(moodles.sickness ?? 0) > 0 && <Badge variant="destructive" className="gap-1"><Snowflake className="size-3" />{t('portal.character.vitals.sick')}</Badge>}
                 {moodles.has_cold && <Badge variant="secondary" className="gap-1"><Snowflake className="size-3" />{t('portal.character.has_cold')}</Badge>}
                 {rows.map((row) => (
                     <div key={row.label} className="space-y-1">
@@ -537,49 +498,6 @@ function EncumbrancePanel({ encumbrance }: { encumbrance: VitalsEncumbrance }) {
     );
 }
 
-function QuickloadPanel({ quickload }: { quickload: { slots?: QuickloadSlot[] } }) {
-    const { t } = useTranslation();
-    const slots = quickload.slots ?? [];
-
-    /**
-     * Every slot comes back empty on builds without the quickload API, and a
-     * row of five blanks says nothing worth the space.
-     */
-    if (!slots.some((slot) => slot.item)) {
-        return null;
-    }
-
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{t('portal.character.vitals.quickload')}</CardTitle>
-                <CardDescription>{t('portal.character.vitals.quickload_desc')}</CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="space-y-1.5">
-                    {slots.map((slot) => (
-                        <div key={slot.index} className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground flex items-center gap-1.5">
-                                <Backpack className="size-3" />
-                                {t('portal.character.vitals.slot', { index: String(slot.index) })}
-                            </span>
-                            <span className={slot.item ? 'truncate' : 'text-muted-foreground italic'}>
-                                {slot.item ?? t('portal.character.vitals.slot_empty')}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
-
-/**
- * Worst first: anything untreated outranks anything treated, then the more
- * severe of the two. Severity arrives as whatever the game's enum stringifies
- * to, so a value this does not recognise sorts last within its group rather
- * than jumping the queue.
- */
 const SEVERITY_ORDER = ['severe', 'deep', 'moderate', 'minor'];
 
 function severityRank(severity: string): number {
@@ -695,13 +613,11 @@ export function CharacterVitalsDashboard({ heartbeat, heartbeatAvailable, heartb
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 {heartbeat.info && <InfoPanel info={heartbeat.info} />}
                 {heartbeat.health && <HealthPanel health={heartbeat.health} />}
-                {heartbeat.protection && <ProtectionPanel protection={heartbeat.protection} />}
                 {heartbeat.temperature && <TemperaturePanel temperature={heartbeat.temperature} />}
                 {heartbeat.moodles && <MoodlesPanel moodles={heartbeat.moodles} />}
                 {heartbeat.weapon && <WeaponPanel weapon={heartbeat.weapon} />}
                 {heartbeat.clothing && <ClothingPanel clothing={heartbeat.clothing} />}
                 {heartbeat.encumbrance && <EncumbrancePanel encumbrance={heartbeat.encumbrance} />}
-                {heartbeat.quickload && <QuickloadPanel quickload={heartbeat.quickload} />}
                 {heartbeat.wounds && <WoundsPanel wounds={heartbeat.wounds} />}
                 {heartbeat.recipes && <RecipesPanel recipes={heartbeat.recipes} />}
             </div>

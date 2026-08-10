@@ -7,6 +7,17 @@
 -- before: an encoder that mishandles an empty table breaks every heartbeat for
 -- a player with no wounds.
 --
+-- The stubs below are deliberately strict. Version 1.7 shipped calling Build 41
+-- accessors that Build 42 had moved — BodyDamage onto BodyPartType enums, the
+-- Stats getters onto Stats.get(CharacterStat) — and every one of those calls
+-- raised at runtime, was swallowed by KR_Vitals' own pcall guard, and returned
+-- a default. The export looked healthy and was almost entirely fabricated. The
+-- old stubs accepted whatever they were handed, so the suite passed throughout.
+--
+-- So: anything the engine type-checks, these stubs type-check too, and a method
+-- the engine does not have is a method these do not define. A collector that
+-- reaches for the wrong API now fails here instead of on a live server.
+--
 -- KR_Progress is exercised too. It shares the perk walk with KR_Vitals but must
 -- keep exporting plain name -> level, since player_stats.json feeds the DB.
 --
@@ -31,7 +42,7 @@ package.preload["KR_Codec"] = function() return Codec end
 local written = {}
 package.preload["KR_Bridge"] = function()
     return {
-        VERSION = "1.7",
+        VERSION = "1.8",
         wallStamp = function() return "2026-08-10T12:00:00" end,
         worldStamp = function() return "1993-07-09T12:00:00" end,
         writeText = function(path, body)
@@ -61,6 +72,50 @@ local function list(items)
     }
 end
 
+-- BodyPartType, in the engine's own order. Note there is no "Torso": Build 42
+-- splits the trunk into Torso_Upper and Torso_Lower.
+local PART_NAMES = {
+    "Hand_L", "Hand_R", "ForeArm_L", "ForeArm_R", "UpperArm_L", "UpperArm_R",
+    "Torso_Upper", "Torso_Lower", "Head", "Neck", "Groin",
+    "UpperLeg_L", "UpperLeg_R", "LowerLeg_L", "LowerLeg_R", "Foot_L", "Foot_R",
+}
+
+local partTypes = {}
+BodyPartType = {}
+for index, name in ipairs(PART_NAMES) do
+    local partType = { isBodyPartType = true, name = name, index = index - 1 }
+    partTypes[index] = partType
+    BodyPartType[name] = partType
+end
+BodyPartType.MAX = { isBodyPartType = true, name = "MAX", index = #PART_NAMES }
+BodyPartType.FromIndex = function(i) return partTypes[i + 1] end
+BodyPartType.ToIndex = function(t) return t.index end
+BodyPartType.ToString = function(t) return t.name end
+
+--- What the engine does when a String arrives where a BodyPartType belongs.
+local function assertPartType(value)
+    if type(value) ~= "table" or not value.isBodyPartType then
+        error("expected argument of type BodyPartType, got " .. type(value), 0)
+    end
+    return value
+end
+
+-- CharacterStat, the Build 42 replacement for the per-stat getters.
+CharacterStat = {}
+for _, name in ipairs({
+    "ANGER", "BOREDOM", "DISCOMFORT", "ENDURANCE", "FATIGUE", "FITNESS", "HUNGER",
+    "IDLENESS", "INTOXICATION", "MORALE", "PAIN", "PANIC", "POISON", "SANITY",
+    "SICKNESS", "STRESS", "TEMPERATURE", "THIRST", "UNHAPPINESS", "WETNESS",
+}) do
+    CharacterStat[name] = { isCharacterStat = true, name = name }
+end
+
+local STAT_VALUES = {
+    HUNGER = 0.253, THIRST = 0.1, FATIGUE = 0, ENDURANCE = 0.9, STRESS = 0,
+    PANIC = 0, BOREDOM = 0, UNHAPPINESS = 0, PAIN = 0.05, WETNESS = 0,
+    INTOXICATION = 0, TEMPERATURE = 37, SICKNESS = 0, POISON = 0,
+}
+
 local PERKS = {
     { getName = function() return "Strength" end },
     { getName = function() return "Carpentry" end },
@@ -71,29 +126,53 @@ CharacterTraitDefinition = nil
 
 local LEVELS = { Strength = 5, Carpentry = 2, Cooking = 0 }
 
-local function bodyDamage(wounds)
+--- One BodyPart. `injuries` is a set of flag names that read true.
+local function bodyPart(injuries, treated)
+    injuries = injuries or {}
     return {
-        getOverallBodyHealth = function() return 87.5 end,
-        getBodyPartHealth = function(_, part) return part == "Head" and 62.25 or 100 end,
-        getBodyPart = function(_, part)
-            local onPart = wounds[part] or {}
-            return { getWounds = function() return list(onPart) end }
-        end,
-        getBiteDefense = function(_, part) return part == "Torso" and 40 or 0 end,
-        getScratchDefense = function(_, part) return part == "Torso" and 55 or 0 end,
-        getSkinTemperature = function() return 36.6 end,
-        getInsulation = function() return 0.4 end,
-        getCoreTemp = function() return 37.02 end,
-        getBodyHeat = function() return 1.25 end,
-        isHasACold = function() return false end,
+        bitten = function() return injuries.bitten == true end,
+        scratched = function() return injuries.scratched == true end,
+        isDeepWounded = function() return injuries.deep == true end,
+        isCut = function() return injuries.cut == true end,
+        isBurnt = function() return injuries.burnt == true end,
+        isInfectedWound = function() return injuries.infected == true end,
+        getFractureTime = function() return injuries.fracture and 12 or 0 end,
+        bandaged = function() return treated == true end,
+        stitched = function() return false end,
     }
 end
 
-local function wound(kind, severity, treated)
+local function thermalNode(name)
     return {
-        getType = function() return kind end,
-        getSeverity = function() return severity end,
-        isTreated = function() return treated end,
+        getName = function() return name end,
+        getSkinCelcius = function() return name == "Hand_L" and 29.84 or 33.5 end,
+        getInsulation = function() return name == "Torso_Upper" and 0.723 or 0.25 end,
+    }
+end
+
+local function bodyDamage(injuries)
+    return {
+        getOverallBodyHealth = function() return 87.5 end,
+        getBodyPartHealth = function(_, partType)
+            assertPartType(partType)
+            return partType.name == "Head" and 62.25 or 100
+        end,
+        getBodyPart = function(_, partType)
+            assertPartType(partType)
+            local onPart = injuries[partType.name]
+            return bodyPart(onPart, onPart and onPart.treated)
+        end,
+        isHasACold = function() return false end,
+        getThermoregulator = function()
+            return {
+                getCoreTemperature = function() return 37.02 end,
+                getBodyHeatDelta = function() return 1.256 end,
+                getNodeForType = function(_, partType)
+                    assertPartType(partType)
+                    return thermalNode(partType.name)
+                end,
+            }
+        end,
     }
 end
 
@@ -108,7 +187,6 @@ local function fakePlayer(name, opts)
             return { getKnownTraits = function() return list({ "Thickskinned", "Brave" }) end }
         end,
         getNutrition = function() return { getWeight = function() return 81.267 end } end,
-        getFavoriteWeapon = function() return "Axe" end,
         getZombieKills = function() return 412 end,
         getHoursSurvived = function() return 133.48 end,
         getPerkLevel = function(_, perk) return LEVELS[perk.getName()] or 0 end,
@@ -123,23 +201,15 @@ local function fakePlayer(name, opts)
                 end,
             }
         end,
-        getBodyDamage = function() return bodyDamage(opts.wounds or {}) end,
+        getBodyDamage = function() return bodyDamage(opts.injuries or {}) end,
         getStats = function()
             return {
-                getHunger = function() return 0.253 end,
-                getThirst = function() return 0.1 end,
-                getFatigue = function() return 0 end,
-                getEndurance = function() return 0.9 end,
-                getStress = function() return 0 end,
-                getPanic = function() return 0 end,
-                getBoredom = function() return 0 end,
-                getUnhappiness = function() return 0 end,
-                getPain = function() return 0.05 end,
-                getWetness = function() return 0 end,
-                getDrunkenness = function() return 0 end,
-                getBodyTemperature = function() return 37 end,
-                isSick = function() return false end,
-                getFoodSickness = function() return 0 end,
+                get = function(_, stat)
+                    if type(stat) ~= "table" or not stat.isCharacterStat then
+                        error("expected argument of type CharacterStat, got " .. type(stat), 0)
+                    end
+                    return STAT_VALUES[stat.name] or 0
+                end,
             }
         end,
         getPrimaryHandItem = function()
@@ -147,11 +217,13 @@ local function fakePlayer(name, opts)
             return {
                 getName = function() return "Axe" end,
                 getCondition = function() return 74.4 end,
-                getSharpness = function() return 60 end,
+                hasSharpness = function() return true end,
+                getSharpness = function() return 3 end,
+                getMaxSharpness = function() return 5 end,
                 getCurrentAmmoCount = function() return nil end,
                 isRoundChambered = function() return nil end,
                 isJammed = function() return nil end,
-                getAttachments = function() return nil end,
+                getAttachmentsProvided = function() return list({ "Scope" }) end,
             }
         end,
         getWornItems = function()
@@ -171,10 +243,7 @@ local function fakePlayer(name, opts)
             })
         end,
         getInventory = function()
-            return {
-                getQuickloadItem = function(_, i) return i == 0 and { getName = function() return "Bandage" end } or nil end,
-                getCapacityWeight = function() return 8.32 end,
-            }
+            return { getCapacityWeight = function() return 8.32 end }
         end,
         getMaxWeight = function() return 20 end,
         getModData = function() return modData end,
@@ -196,7 +265,10 @@ local Progress = assert(loadfile(MODS .. "KR_Progress.lua"))()
 --------------------------------------------------------------------------
 
 local player = fakePlayer("Bob", {
-    wounds = { Head = { wound("Scratch", "Moderate", false) } },
+    injuries = {
+        Head = { scratched = true },
+        ForeArm_L = { bitten = true, deep = true, treated = true },
+    },
     modData = { KR_LearnedRecipes = { { name = "Make Stew", learned_at = "2026-08-10T11:00:00" } } },
 })
 roster = { player }
@@ -210,41 +282,66 @@ check("info carries the identity fields",
 check("weight is rounded to 2dp", beat.info.weight == 81.27, "got " .. tostring(beat.info.weight))
 check("hours survived is rounded to 1dp", beat.info.hours_survived == 133.5, "got " .. tostring(beat.info.hours_survived))
 check("traits are collected", #beat.info.traits == 2, "got " .. #beat.info.traits)
+check("no favourite weapon is claimed", beat.info.favourite_weapon == nil)
 
 check("untrained perks are omitted", beat.skills.Cooking == nil)
 check("trained perks carry their level", beat.skills.Strength.level == 5 and beat.skills.Carpentry.level == 2)
 check("xp progress is a 0-1 fraction", beat.skills.Strength.xp == 0.5, "got " .. tostring(beat.skills.Strength.xp))
 check("a perk with no xp entry still reports a level", beat.skills.Carpentry.xp == 0, "got " .. tostring(beat.skills.Carpentry.xp))
 
+-- Body parts come from the enum, so the count and the names track the build.
 check("overall health is exported", beat.health.overall == 87.5, "got " .. tostring(beat.health.overall))
-check("all 16 body parts are present", (function()
+check("every body part the enum defines is present", (function()
     local n = 0
     for _ in pairs(beat.health.parts) do n = n + 1 end
     return n
-end)() == 16)
+end)() == #PART_NAMES, "expected " .. #PART_NAMES)
+check("the trunk is split, not a single Torso",
+    beat.health.parts.Torso == nil and beat.health.parts.Torso_Upper ~= nil and beat.health.parts.Torso_Lower ~= nil)
 check("a damaged part reports its own health", beat.health.parts.Head.health == 62.2 or beat.health.parts.Head.health == 62.3,
     "got " .. tostring(beat.health.parts.Head.health))
-check("wound types land on the part", beat.health.parts.Head.wounds[1] == "Scratch")
-check("an undamaged part has an empty wound list", #beat.health.parts.Torso.wounds == 0)
+check("wound kinds land on the part", beat.health.parts.Head.wounds[1] == "Scratch")
+check("a part carries every injury it has", #beat.health.parts.ForeArm_L.wounds == 2,
+    "got " .. #beat.health.parts.ForeArm_L.wounds)
+check("an uninjured part has an empty wound list", #beat.health.parts.Torso_Upper.wounds == 0)
 
-check("the flat wound list is built from the same walk", #beat.wounds == 1, "got " .. #beat.wounds)
-check("the wound carries part, severity and treatment",
-    beat.wounds[1].part == "Head" and beat.wounds[1].severity == "Moderate" and beat.wounds[1].treated == false)
+check("the flat wound list is built from the same walk", #beat.wounds == 3, "got " .. #beat.wounds)
+check("severity comes from the part's health", (function()
+    for _, w in ipairs(beat.wounds) do
+        if w.part == "Head" then return w.severity == "Moderate" end
+    end
+end)(), "Head at 62% should be Moderate")
+check("a bandaged part reports its wounds treated", (function()
+    for _, w in ipairs(beat.wounds) do
+        if w.part == "ForeArm_L" then return w.treated == true end
+    end
+end)())
 
-check("uncovered parts are dropped from protection", beat.protection.parts.Head == nil)
-check("covered parts keep both defences", beat.protection.parts.Torso.bite == 40 and beat.protection.parts.Torso.scratch == 55)
+check("core temperature comes off the thermoregulator", beat.temperature.core == 37, "got " .. tostring(beat.temperature.core))
+check("body heat is the thermoregulator delta", beat.temperature.body_heat == 1.26, "got " .. tostring(beat.temperature.body_heat))
+check("per-part skin temperature is read from its node", beat.temperature.parts.Hand_L.skin == 29.8,
+    "got " .. tostring(beat.temperature.parts.Hand_L.skin))
+check("per-part insulation is read from its node", beat.temperature.parts.Torso_Upper.insulation == 0.72,
+    "got " .. tostring(beat.temperature.parts.Torso_Upper.insulation))
 
-check("core temperature is rounded", beat.temperature.core == 37, "got " .. tostring(beat.temperature.core))
-check("moodles are rounded to 2dp", beat.moodles.hunger == 0.25, "got " .. tostring(beat.moodles.hunger))
+check("moodles are read through CharacterStat", beat.moodles.hunger == 0.25, "got " .. tostring(beat.moodles.hunger))
+check("intoxication maps to drunk", beat.moodles.drunk == 0)
+check("sickness is a level, not a flag", beat.moodles.sickness == 0)
 check("has_cold comes off BodyDamage", beat.moodles.has_cold == false)
 
 check("the equipped weapon is reported", beat.weapon.name == "Axe" and beat.weapon.condition == 74.4)
+check("sharpness is a proportion of the item's maximum", beat.weapon.sharpness == 60,
+    "got " .. tostring(beat.weapon.sharpness))
+check("attachments come from getAttachmentsProvided", beat.weapon.attachments[1] == "Scope")
 check("absent firearm fields are omitted", beat.weapon.ammo == nil and beat.weapon.chamber == nil)
 check("clothing is unwrapped from the worn entry", beat.clothing.items[1].name == "Jacket")
-check("quickload keeps empty slots", #beat.quickload.slots == 5 and beat.quickload.slots[2].item == nil)
-check("quickload reports a filled slot", beat.quickload.slots[1].item == "Bandage")
+check("clothing keeps both defences", beat.clothing.items[1].bite == 40 and beat.clothing.items[1].scratch == 55)
 check("encumbrance is load over capacity", beat.encumbrance.current == 8.3 and beat.encumbrance.capacity == 20)
 check("recipes are read without draining", beat.recipes[1].name == "Make Stew")
+
+-- Panels PZ has no API for must not be invented.
+check("no protection panel is exported", beat.protection == nil)
+check("no quickload panel is exported", beat.quickload == nil)
 
 -- Export through the real codec.
 local count = Vitals.export()
@@ -254,7 +351,6 @@ local body = written["vitals/Bob.json"]
 check("the heartbeat lands at vitals/<username>.json", body ~= nil)
 check("output is a JSON object, not a list", body and body:sub(1, 1) == "{", "starts with " .. tostring(body and body:sub(1, 1)))
 check("no unencodable placeholder leaked in", body and not body:match("%{%[%]"), "found '{[]' in output")
-check("an empty wound list encodes as []", body and body:match('"wounds":%[%]') ~= nil)
 
 -- A player with nothing wrong: every optional collector returns empty.
 local clean = fakePlayer("Ann")
@@ -284,6 +380,13 @@ local flattened = {}
 for name, perk in pairs(levels) do flattened[name] = perk.level end
 check("the shared walk yields plain levels for progress",
     flattened.Strength == 5 and flattened.Carpentry == 2 and flattened.Cooking == nil)
+
+-- The guard that would have caught 1.7: a String where a BodyPartType belongs
+-- must raise, the way the engine does.
+local raised = not pcall(function()
+    return fakePlayer("Cal").getBodyDamage().getBodyPart(nil, "Head")
+end)
+check("passing a part name instead of a BodyPartType raises", raised)
 
 print("----------------------------------------")
 print("Passed: " .. pass .. ", Failed: " .. fail)
