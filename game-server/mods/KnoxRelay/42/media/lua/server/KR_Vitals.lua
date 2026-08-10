@@ -122,7 +122,12 @@ function KR_Vitals.perkProgress(player, perk, level)
         return 0
     end
 
-    return round2((total - thisLevel) / (nextLevel - thisLevel))
+    --- A level reached without the XP behind it — an admin grant, a boost
+    --- trait, a mod — puts this outside 0..1, so clamp rather than export a
+    --- fraction every consumer has to defend against.
+    local progress = (total - thisLevel) / (nextLevel - thisLevel)
+
+    return round2(math.max(0, math.min(1, progress)))
 end
 
 --------------------------------------------------------------------------

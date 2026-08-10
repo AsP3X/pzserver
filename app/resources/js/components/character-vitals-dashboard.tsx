@@ -159,6 +159,11 @@ const BODY_PARTS = [
     'Foot_L', 'Foot_R',
 ];
 
+/** `UpperArm_L` is a body part id, not something to show a player. */
+function humanPart(part: string): string {
+    return part.replace(/_/g, ' ');
+}
+
 function healthColour(value: number): string {
     if (value >= 66) return 'bg-green-500';
     if (value >= 33) return 'bg-yellow-500';
@@ -195,6 +200,32 @@ function ProgressBar({
                 style={{ width: `${pct}%` }}
             />
         </div>
+    );
+}
+
+/**
+ * Bite and scratch side by side, for the protection grid and for each garment.
+ *
+ * Both used to be bare shield icons separated only by colour, with the meaning
+ * hidden in a `title` tooltip — which says nothing at all on a touch screen,
+ * and nothing to anyone who cannot separate the red shield from the yellow one.
+ */
+function DefencePair({ bite, scratch }: { bite: number; scratch: number }) {
+    const { t } = useTranslation();
+
+    return (
+        <span className="flex shrink-0 items-center gap-2.5 tabular-nums">
+            <span title={t('portal.character.vitals.bite_defense')}>
+                <Shield className="mr-0.5 inline size-3 text-red-500" />
+                <span className="text-muted-foreground">{t('portal.character.vitals.bite')} </span>
+                {bite}%
+            </span>
+            <span title={t('portal.character.vitals.scratch_defense')}>
+                <Shield className="mr-0.5 inline size-3 text-yellow-500" />
+                <span className="text-muted-foreground">{t('portal.character.vitals.scratch')} </span>
+                {scratch}%
+            </span>
+        </span>
     );
 }
 
@@ -242,15 +273,27 @@ function SkillsPanel({ skills }: { skills: Record<string, SkillXp> }) {
             </CardHeader>
             <CardContent>
                 <div className="space-y-2">
-                    {entries.map(([name, { level, xp }]) => (
-                        <div key={name} className="flex items-center gap-3">
-                            <span className="w-24 truncate text-xs text-muted-foreground">{name}</span>
-                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                                <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(xp * 100, 100)}%` }} />
+                    {entries.map(([name, { level, xp }]) => {
+                        /**
+                         * Progress is a 0–1 fraction, but a level reached without the
+                         * matching XP behind it — an admin grant, a boost trait, a mod —
+                         * puts it outside that range. Only the bar width used to be
+                         * capped, and only at the top: a negative width is invalid CSS,
+                         * so the bar fell back to its natural size and a character with
+                         * no progress at all drew a *full* one.
+                         */
+                        const progress = Math.round(Math.max(0, Math.min(1, xp)) * 100);
+
+                        return (
+                            <div key={name} className="flex items-center gap-3">
+                                <span className="w-24 truncate text-xs text-muted-foreground">{name}</span>
+                                <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                                    <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
+                                </div>
+                                <span className="w-12 text-right text-xs font-medium tabular-nums">{level} <span className="text-muted-foreground">({progress}%)</span></span>
                             </div>
-                            <span className="w-12 text-right text-xs font-medium tabular-nums">{level} <span className="text-muted-foreground">({Math.round(xp * 100)}%)</span></span>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </CardContent>
         </Card>
@@ -282,8 +325,11 @@ function HealthPanel({ health }: { health: VitalsHealth }) {
                             const hasWounds = p.wounds && p.wounds.length > 0;
                             return (
                                 <div key={part} className="flex items-center justify-between text-xs">
-                                    <span className="text-muted-foreground truncate">{part.replace(/_/g, ' ')}</span>
-                                    <span className={`tabular-nums ${hasWounds ? 'text-red-500 font-medium' : ''}`}>
+                                    <span className="text-muted-foreground truncate">{humanPart(part)}</span>
+                                    <span
+                                        className={`tabular-nums ${hasWounds ? 'text-red-500 font-medium' : ''}`}
+                                        title={hasWounds ? p.wounds.join(', ') : undefined}
+                                    >
                                         {Math.round(p.health)}%{hasWounds && ` (${p.wounds.length})`}
                                     </span>
                                 </div>
@@ -310,12 +356,9 @@ function ProtectionPanel({ protection }: { protection: VitalsProtection }) {
                     {BODY_PARTS.filter((p) => protection.parts![p]).map((part) => {
                         const p = protection.parts![part];
                         return (
-                            <div key={part} className="flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground w-24 truncate">{part.replace(/_/g, ' ')}</span>
-                                <div className="flex gap-3 tabular-nums">
-                                    <span title={t('portal.character.vitals.bite_defense')}><Shield className="inline size-3 text-red-500 mr-0.5" />{p.bite}%</span>
-                                    <span title={t('portal.character.vitals.scratch_defense')}><Shield className="inline size-3 text-yellow-500 mr-0.5" />{p.scratch}%</span>
-                                </div>
+                            <div key={part} className="flex items-center justify-between gap-2 text-xs">
+                                <span className="text-muted-foreground w-24 truncate">{humanPart(part)}</span>
+                                <DefencePair bite={p.bite} scratch={p.scratch} />
                             </div>
                         );
                     })}
@@ -342,8 +385,16 @@ function TemperaturePanel({ temperature }: { temperature: VitalsTemperature }) {
                             const p = temperature.parts![part];
                             return (
                                 <div key={part} className="flex items-center justify-between text-xs">
-                                    <span className="text-muted-foreground truncate">{part.replace(/_/g, ' ')}</span>
-                                    <span className="tabular-nums">{p.skin.toFixed(1)}°C<span className="text-muted-foreground ml-1">({p.insulation.toFixed(1)})</span></span>
+                                    <span className="text-muted-foreground truncate">{humanPart(part)}</span>
+                                    <span className="tabular-nums">
+                                        {p.skin.toFixed(1)}°C
+                                        <span
+                                            className="text-muted-foreground ml-1"
+                                            title={t('portal.character.vitals.insulation')}
+                                        >
+                                            ({p.insulation.toFixed(1)})
+                                        </span>
+                                    </span>
                                 </div>
                             );
                         })}
@@ -449,8 +500,12 @@ function ClothingPanel({ clothing }: { clothing: { items?: ClothingItem[] } }) {
                             <div className="flex items-center gap-3 tabular-nums shrink-0">
                                 <span className="truncate max-w-[120px]">{item.name}</span>
                                 <span className={conditionColour(item.condition)}>{item.condition}%</span>
-                                {item.holes > 0 && <span className="text-red-500">({item.holes})</span>}
-                                <span className="text-muted-foreground"><Shield className="inline size-2.5 text-red-400 mr-0.5" />{item.bite}%</span>
+                                {item.holes > 0 && (
+                                    <span className="text-red-500" title={t('portal.character.vitals.holes')}>
+                                        ({item.holes})
+                                    </span>
+                                )}
+                                <DefencePair bite={item.bite} scratch={item.scratch} />
                             </div>
                         </div>
                     ))}
@@ -519,9 +574,28 @@ function QuickloadPanel({ quickload }: { quickload: { slots?: QuickloadSlot[] } 
     );
 }
 
+/**
+ * Worst first: anything untreated outranks anything treated, then the more
+ * severe of the two. Severity arrives as whatever the game's enum stringifies
+ * to, so a value this does not recognise sorts last within its group rather
+ * than jumping the queue.
+ */
+const SEVERITY_ORDER = ['severe', 'deep', 'moderate', 'minor'];
+
+function severityRank(severity: string): number {
+    const rank = SEVERITY_ORDER.indexOf(severity.toLowerCase());
+
+    return rank === -1 ? SEVERITY_ORDER.length : rank;
+}
+
 function WoundsPanel({ wounds }: { wounds: Wound[] }) {
     const { t } = useTranslation();
     if (wounds.length === 0) return null;
+
+    const triaged = [...wounds].sort(
+        (a, b) =>
+            Number(a.treated) - Number(b.treated) || severityRank(a.severity) - severityRank(b.severity),
+    );
     return (
         <Card>
             <CardHeader>
@@ -530,11 +604,11 @@ function WoundsPanel({ wounds }: { wounds: Wound[] }) {
             </CardHeader>
             <CardContent>
                 <div className="space-y-2">
-                    {wounds.map((wound, i) => (
+                    {triaged.map((wound, i) => (
                         <div key={i} className="flex items-center justify-between text-xs">
                             <div className="flex items-center gap-1.5">
                                 <Droplet className={`size-3 ${wound.treated ? 'text-green-500' : 'text-red-500'}`} />
-                                <span className="font-medium">{wound.part}</span>
+                                <span className="font-medium">{humanPart(wound.part)}</span>
                                 <span className="text-muted-foreground">{wound.type} — {wound.severity}</span>
                             </div>
                             <Badge variant={wound.treated ? 'outline' : 'destructive'} className="text-xs">
