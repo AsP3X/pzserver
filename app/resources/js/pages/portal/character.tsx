@@ -2,6 +2,8 @@ import { Head, usePoll } from '@inertiajs/react';
 import { Activity, Clock, Droplet, HeartPulse, Skull, Snowflake, Swords, UserX } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { LiveSnapshotNotice } from '@/components/live-snapshot-notice';
+import { PzPulseDashboard } from '@/components/pz-pulse-dashboard';
+import type { PulseHeartbeat } from '@/components/pz-pulse-dashboard';
 import { categoriseSkills, SkillBar } from '@/components/skill-list';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,6 +47,11 @@ type Props = {
     /** When the mod last wrote the export, in real time. Null if it never has. */
     snapshotAt: string | null;
     day_length_minutes: number;
+    /** PZServerPulse live heartbeat data, when the mod is installed. */
+    pulse: PulseHeartbeat | null;
+    pulseAvailable: boolean;
+    /** When that heartbeat was written, in real time. Null if it never was. */
+    pulseSyncedAt: string | null;
 };
 
 function StatTile({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
@@ -92,11 +99,16 @@ export default function PortalCharacter({
     character,
     snapshotAt,
     day_length_minutes,
+    pulse,
+    pulseAvailable,
+    pulseSyncedAt,
 }: Props) {
     const { t } = useTranslation();
     const [hoursMode, setHoursMode] = useState<HoursMode>('ingame');
 
-    usePoll(5000, { only: ['character', 'isOnline', 'snapshotAt'] });
+    usePoll(5000, {
+        only: ['character', 'isOnline', 'snapshotAt', 'pulse', 'pulseAvailable', 'pulseSyncedAt'],
+    });
 
     /**
      * The stored preference lives in localStorage, which the SSR pass cannot
@@ -151,165 +163,175 @@ export default function PortalCharacter({
                         title={t('portal.inventory.no_account')}
                         description={t('portal.inventory.no_account_desc')}
                     />
-                ) : !character ? (
-                    <EmptyState
-                        icon={<Activity className="text-muted-foreground size-8" />}
-                        title={t('portal.character.no_data')}
-                        description={t('portal.character.no_data_desc')}
-                    />
                 ) : (
                     <>
-                        {freshAt && (
-                            <LiveSnapshotNotice
-                                isLive={isOnline}
-                                liveLabel={t('portal.character.live', {
-                                    time: formatRelativeTime(freshAt, t),
-                                })}
-                                staleTitle={t('portal.character.stale_title')}
-                                staleDescription={t('portal.character.stale_desc', {
-                                    time: formatRelativeTime(freshAt, t),
-                                })}
+                        {!character ? (
+                            <EmptyState
+                                icon={<Activity className="text-muted-foreground size-8" />}
+                                title={t('portal.character.no_data')}
+                                description={t('portal.character.no_data_desc')}
                             />
-                        )}
+                        ) : (
+                            <>
+                                {freshAt && (
+                                    <LiveSnapshotNotice
+                                        isLive={isOnline}
+                                        liveLabel={t('portal.character.live', {
+                                            time: formatRelativeTime(freshAt, t),
+                                        })}
+                                        staleTitle={t('portal.character.stale_title')}
+                                        staleDescription={t('portal.character.stale_desc', {
+                                            time: formatRelativeTime(freshAt, t),
+                                        })}
+                                    />
+                                )}
 
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                            <StatTile
-                                icon={<Swords className="text-muted-foreground size-5" />}
-                                value={character.zombie_kills.toLocaleString()}
-                                label={t('portal.character.zombie_kills')}
-                            />
-                            <StatTile
-                                icon={<Clock className="text-muted-foreground size-5" />}
-                                value={formatHours(character.hours_survived, hoursMode, day_length_minutes)}
-                                label={t('portal.character.hours_survived')}
-                            />
-                            <StatTile
-                                icon={<Skull className="text-muted-foreground size-5" />}
-                                value={character.profession ?? t('portal.character.no_profession')}
-                                label={t('portal.character.profession')}
-                            />
-                        </div>
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                                    <StatTile
+                                        icon={<Swords className="text-muted-foreground size-5" />}
+                                        value={character.zombie_kills.toLocaleString()}
+                                        label={t('portal.character.zombie_kills')}
+                                    />
+                                    <StatTile
+                                        icon={<Clock className="text-muted-foreground size-5" />}
+                                        value={formatHours(character.hours_survived, hoursMode, day_length_minutes)}
+                                        label={t('portal.character.hours_survived')}
+                                    />
+                                    <StatTile
+                                        icon={<Skull className="text-muted-foreground size-5" />}
+                                        value={character.profession ?? t('portal.character.no_profession')}
+                                        label={t('portal.character.profession')}
+                                    />
+                                </div>
 
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle>{t('portal.character.condition')}</CardTitle>
-                                    <CardDescription>{t('portal.character.condition_desc')}</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    {vitals === null ? (
-                                        <p className="text-muted-foreground text-sm">
-                                            {t('portal.character.needs_newer_mod')}
-                                        </p>
-                                    ) : (
-                                        <>
-                                            {vitals.health !== null && (
-                                                <div className="space-y-1.5">
-                                                    <div className="flex items-center justify-between text-sm">
-                                                        <span className="flex items-center gap-1.5">
-                                                            <HeartPulse className="size-4" />
-                                                            {t('portal.character.health')}
-                                                        </span>
-                                                        <span className="tabular-nums">
-                                                            {Math.round(vitals.health)}%
-                                                        </span>
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>{t('portal.character.condition')}</CardTitle>
+                                            <CardDescription>{t('portal.character.condition_desc')}</CardDescription>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            {vitals === null ? (
+                                                <p className="text-muted-foreground text-sm">
+                                                    {t('portal.character.needs_newer_mod')}
+                                                </p>
+                                            ) : (
+                                                <>
+                                                    {vitals.health !== null && (
+                                                        <div className="space-y-1.5">
+                                                            <div className="flex items-center justify-between text-sm">
+                                                                <span className="flex items-center gap-1.5">
+                                                                    <HeartPulse className="size-4" />
+                                                                    {t('portal.character.health')}
+                                                                </span>
+                                                                <span className="tabular-nums">
+                                                                    {Math.round(vitals.health)}%
+                                                                </span>
+                                                            </div>
+                                                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                                                                <div
+                                                                    className={`h-full rounded-full ${healthColour(vitals.health)}`}
+                                                                    style={{
+                                                                        width: `${Math.max(0, Math.min(100, vitals.health))}%`,
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {vitals.infected && (
+                                                            <Badge variant="destructive" className="gap-1">
+                                                                <Skull className="size-3" />
+                                                                {t('portal.character.infected')}
+                                                            </Badge>
+                                                        )}
+                                                        {vitals.bleeding_parts > 0 && (
+                                                            <Badge variant="destructive" className="gap-1">
+                                                                <Droplet className="size-3" />
+                                                                {t('portal.character.bleeding', {
+                                                                    count: String(vitals.bleeding_parts),
+                                                                })}
+                                                            </Badge>
+                                                        )}
+                                                        {vitals.has_cold && (
+                                                            <Badge variant="secondary" className="gap-1">
+                                                                <Snowflake className="size-3" />
+                                                                {t('portal.character.has_cold')}
+                                                            </Badge>
+                                                        )}
+                                                        {!vitals.infected && vitals.bleeding_parts === 0 && !vitals.has_cold && (
+                                                            <span className="text-muted-foreground text-sm">
+                                                                {t('portal.character.all_well')}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                                                        <div
-                                                            className={`h-full rounded-full ${healthColour(vitals.health)}`}
-                                                            style={{
-                                                                width: `${Math.max(0, Math.min(100, vitals.health))}%`,
-                                                            }}
-                                                        />
-                                                    </div>
+                                                </>
+                                            )}
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>{t('portal.character.traits')}</CardTitle>
+                                            <CardDescription>{t('portal.character.traits_desc')}</CardDescription>
+                                        </CardHeader>
+                                        <CardContent>
+                                            {character.traits === null ? (
+                                                <p className="text-muted-foreground text-sm">
+                                                    {t('portal.character.needs_newer_mod')}
+                                                </p>
+                                            ) : character.traits.length === 0 ? (
+                                                <p className="text-muted-foreground text-sm">{t('portal.character.no_traits')}</p>
+                                            ) : (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {character.traits.map((trait) => (
+                                                        <Badge key={trait.id} variant="outline">
+                                                            {trait.label}
+                                                        </Badge>
+                                                    ))}
                                                 </div>
                                             )}
+                                        </CardContent>
+                                    </Card>
+                                </div>
 
-                                            <div className="flex flex-wrap gap-2">
-                                                {vitals.infected && (
-                                                    <Badge variant="destructive" className="gap-1">
-                                                        <Skull className="size-3" />
-                                                        {t('portal.character.infected')}
-                                                    </Badge>
-                                                )}
-                                                {vitals.bleeding_parts > 0 && (
-                                                    <Badge variant="destructive" className="gap-1">
-                                                        <Droplet className="size-3" />
-                                                        {t('portal.character.bleeding', {
-                                                            count: String(vitals.bleeding_parts),
-                                                        })}
-                                                    </Badge>
-                                                )}
-                                                {vitals.has_cold && (
-                                                    <Badge variant="secondary" className="gap-1">
-                                                        <Snowflake className="size-3" />
-                                                        {t('portal.character.has_cold')}
-                                                    </Badge>
-                                                )}
-                                                {!vitals.infected && vitals.bleeding_parts === 0 && !vitals.has_cold && (
-                                                    <span className="text-muted-foreground text-sm">
-                                                        {t('portal.character.all_well')}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </>
-                                    )}
-                                </CardContent>
-                            </Card>
-
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle>{t('portal.character.traits')}</CardTitle>
-                                    <CardDescription>{t('portal.character.traits_desc')}</CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    {character.traits === null ? (
-                                        <p className="text-muted-foreground text-sm">
-                                            {t('portal.character.needs_newer_mod')}
-                                        </p>
-                                    ) : character.traits.length === 0 ? (
-                                        <p className="text-muted-foreground text-sm">{t('portal.character.no_traits')}</p>
-                                    ) : (
-                                        <div className="flex flex-wrap gap-2">
-                                            {character.traits.map((trait) => (
-                                                <Badge key={trait.id} variant="outline">
-                                                    {trait.label}
-                                                </Badge>
-                                            ))}
-                                        </div>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        </div>
-
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>{t('portal.character.skills')}</CardTitle>
-                                <CardDescription>
-                                    {freshAt
-                                        ? t('portal.character.skills_desc', {
-                                              time: formatRelativeTime(freshAt, t),
-                                          })
-                                        : t('portal.character.traits_desc')}
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                {categorisedSkills.length === 0 ? (
-                                    <p className="text-muted-foreground text-sm">{t('portal.character.no_skills')}</p>
-                                ) : (
-                                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                                        {categorisedSkills.map(({ category, skills }) => (
-                                            <div key={category} className="space-y-2">
-                                                <p className="text-sm font-semibold">{category}</p>
-                                                {skills.map((skill) => (
-                                                    <SkillBar key={skill.name} name={skill.name} level={skill.level} />
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>{t('portal.character.skills')}</CardTitle>
+                                        <CardDescription>
+                                            {freshAt
+                                                ? t('portal.character.skills_desc', {
+                                                      time: formatRelativeTime(freshAt, t),
+                                                  })
+                                                : t('portal.character.traits_desc')}
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        {categorisedSkills.length === 0 ? (
+                                            <p className="text-muted-foreground text-sm">{t('portal.character.no_skills')}</p>
+                                        ) : (
+                                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                                                {categorisedSkills.map(({ category, skills }) => (
+                                                    <div key={category} className="space-y-2">
+                                                        <p className="text-sm font-semibold">{category}</p>
+                                                        {skills.map((skill) => (
+                                                            <SkillBar key={skill.name} name={skill.name} level={skill.level} />
+                                                        ))}
+                                                    </div>
                                                 ))}
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </>
+                        )}
+
+                        <PzPulseDashboard
+                            pulse={pulse}
+                            pulseAvailable={pulseAvailable}
+                            pulseSyncedAt={pulseSyncedAt}
+                        />
                     </>
                 )}
             </div>

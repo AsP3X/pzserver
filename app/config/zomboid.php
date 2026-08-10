@@ -170,6 +170,7 @@ return [
         'world_actions' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/world_actions.json',
         'world_results' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/world_results.json',
         'vehicles' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/vehicles.json',
+        'pzserver_pulse_dir' => env('LUA_BRIDGE_PATH', '/lua-bridge').'/PZServerPulse',
     ],
 
     /*
