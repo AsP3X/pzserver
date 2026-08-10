@@ -339,6 +339,49 @@ if grep -m1 "^Mods=" "$INI_FILE" 2>/dev/null | grep -q "PZServerPulse"; then
          "drop it from PZ_MOD_IDS (PZ_MOD_IDS=KnoxRelay); the live dashboard is part of KnoxRelay now"
 fi
 
+# Seed the image's own Knox Relay when it is newer than what is installed.
+#
+# The Dockerfiles stage the repo's copy at /opt/knox-relay, outside the
+# bind-mounted Zomboid/, because anything COPYed straight into Zomboid/mods/ is
+# hidden the moment that volume mounts. The Workshop mirror above then links
+# whatever SteamCMD last downloaded over Zomboid/mods/KnoxRelay, so a Workshop
+# item lagging the image silently downgrades the bridge. That is not a cosmetic
+# mismatch: the app gates whole pages on the mod_version the bridge reports, so
+# an old copy makes the live character dashboard render nothing at all.
+#
+# Only a strictly newer staged copy wins, so publishing a newer Workshop build
+# still takes precedence and this never pins the server to the image.
+KR_STAGED_DIR="${KR_STAGED_DIR:-/opt/knox-relay}"
+KR_LIVE_DIR="${ZOMBOID_MODS_DIR}/KnoxRelay"
+
+# Echo `modversion=` from a mod's B42 manifest, falling back to the root one.
+mod_version_of() {
+    local info
+    for info in "$1/42/mod.info" "$1/mod.info"; do
+        if [ -f "$info" ]; then
+            sed -n 's/^modversion=//p' "$info" | head -1 | tr -d '\r'
+            return
+        fi
+    done
+}
+
+if [ -d "$KR_STAGED_DIR" ]; then
+    staged_version="$(mod_version_of "$KR_STAGED_DIR")"
+    live_version="$(mod_version_of "$KR_LIVE_DIR")"
+    newest="$(printf '%s\n%s\n' "$live_version" "$staged_version" | sort -V | tail -1)"
+
+    if [ -z "$live_version" ] \
+        || { [ "$newest" = "$staged_version" ] && [ "$live_version" != "$staged_version" ]; }; then
+        rm -rf "$KR_LIVE_DIR"
+        cp -r "$KR_STAGED_DIR" "$KR_LIVE_DIR"
+        echo "[configure-server] Seeded Knox Relay ${staged_version:-?} from the image" \
+             "(replacing ${live_version:-nothing})"
+    else
+        echo "[configure-server] Keeping installed Knox Relay ${live_version}" \
+             "(image stages ${staged_version:-nothing})"
+    fi
+fi
+
 # Disable Lua checksum.
 # Without this, PZ checksums mod Lua files and clients that don't have matching
 # checksums get errors. This does NOT disable anti-cheat (Steam VAC).

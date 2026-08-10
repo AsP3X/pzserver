@@ -20,5 +20,9 @@ RUN chmod +x /home/steam/amd64-entrypoint.sh \
 # KnoxRelay is still bind-mounted at runtime for easy Lua updates, but we
 # also seed a copy into the image so the stack works without the mount.
 COPY mods/KnoxRelay /home/steam/Zomboid/mods/KnoxRelay
+# Zomboid/ is bind-mounted at runtime, which hides the copy above the moment the
+# volume mounts. Stage a second copy outside it so configure-server.sh can seed
+# the live mods directory on every boot.
+COPY mods/KnoxRelay /opt/knox-relay
 
 ENTRYPOINT ["/bin/bash", "/home/steam/amd64-entrypoint.sh"]
