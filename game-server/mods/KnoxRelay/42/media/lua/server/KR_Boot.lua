@@ -7,6 +7,7 @@
 -- counted in those ticks.
 --
 --   every tick   inventory export requests
+--   4 ticks      character vitals heartbeats      (~10 real seconds)
 --   6 ticks      deliveries and money deposits    (~15 real seconds)
 --   12 ticks     player positions                 (~30 real seconds)
 --   48 ticks     safehouse and faction claims      (~2 real minutes)
@@ -37,6 +38,7 @@ local Obituary = require("KR_Obituary")
 local Holdings = require("KR_Holdings")
 local Conductor = require("KR_Conductor")
 local Garage = require("KR_Garage")
+local Vitals = require("KR_Vitals")
 
 local LOG = "[KnoxRelay] "
 
@@ -45,15 +47,21 @@ print(LOG .. "Initializing server-side bridge mod v" .. Bridge.VERSION .. "...")
 local DELIVERY_TICKS = 6
 local DEPOSIT_TICKS = 6
 local POSITION_TICKS = 12
+local VITALS_TICKS = 4
 local HOLDINGS_TICKS = 48
 
 --- Real seconds between world exports. OnTickEvenPaused fires every frame, so
 --- this is what keeps it to a file write rather than a busy loop.
 local WORLD_SECONDS = 10
 
+--- How many recently learned recipes to keep per character. The list rides in
+--- the player's modData and ships in every heartbeat, so it stays short.
+local RECIPE_HISTORY = 20
+
 local sinceDelivery = 0
 local sinceDeposit = 0
 local sincePosition = 0
+local sinceVitals = 0
 local sinceHoldings = 0
 local lastWorldExport = 0
 local framesSinceWorld = 0
@@ -132,6 +140,12 @@ local function onEveryOneMinute()
         Beacon.export()
     end
 
+    sinceVitals = sinceVitals + 1
+    if sinceVitals >= VITALS_TICKS then
+        sinceVitals = 0
+        Vitals.export()
+    end
+
     exportWorld()
 
     sinceHoldings = sinceHoldings + 1
@@ -153,6 +167,39 @@ end
 --- PauseEmpty=true. exportWorld() throttles it to a write every WORLD_SECONDS.
 local function onTickEvenPaused()
     exportWorld()
+end
+
+--- Remember a recipe the moment it is learned.
+---
+--- The game offers no way to ask a character what it has recently learned, so
+--- the list has to be accumulated on the player as the events arrive. It is a
+--- rolling window rather than a queue: KR_Vitals reads it without draining it,
+--- so the page keeps showing the last few rather than only what was learned
+--- since the previous heartbeat.
+local function onRecipeLearned(recipeName, player)
+    if not player then
+        return
+    end
+
+    local modData = player:getModData()
+    if not modData then
+        return
+    end
+
+    local learned = modData[Vitals.RECIPE_KEY]
+    if type(learned) ~= "table" then
+        learned = {}
+        modData[Vitals.RECIPE_KEY] = learned
+    end
+
+    learned[#learned + 1] = {
+        name = recipeName or "unknown",
+        learned_at = Bridge.wallStamp(),
+    }
+
+    while #learned > RECIPE_HISTORY do
+        table.remove(learned, 1)
+    end
 end
 
 --- Progression and the vehicle fleet are the heaviest exports, so they share
@@ -207,9 +254,18 @@ Events.OnServerStarted.Add(onServerStarted)
 -- else still works without the real-time cadence.
 local tickHooked = pcall(function() Events.OnTickEvenPaused.Add(onTickEvenPaused) end)
 
+-- Optional for the same reason. Without it the heartbeat still carries
+-- everything else; only the recently-learned-recipes panel stays empty.
+local recipeHooked = pcall(function() Events.OnRecipeLearned.Add(onRecipeLearned) end)
+
 print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, MoneyDeposit"
-    .. (tickHooked and ", OnTickEvenPaused" or ""))
+    .. (tickHooked and ", OnTickEvenPaused" or "")
+    .. (recipeHooked and ", OnRecipeLearned" or ""))
 
 if not tickHooked then
     print(LOG .. "WARNING: OnTickEvenPaused unavailable — world state will not refresh while the server is paused and empty")
+end
+
+if not recipeHooked then
+    print(LOG .. "WARNING: OnRecipeLearned unavailable — the recent recipes panel will stay empty")
 end

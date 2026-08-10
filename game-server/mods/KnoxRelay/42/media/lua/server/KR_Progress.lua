@@ -13,6 +13,7 @@
 local Codec = require("KR_Codec")
 local Bridge = require("KR_Bridge")
 local Roster = require("KR_Roster")
+local Vitals = require("KR_Vitals")
 
 KR_Progress = {}
 
@@ -21,22 +22,14 @@ local FILE = "player_stats.json"
 
 --- Trained perks as a name -> level map. Untrained perks are left out
 --- entirely rather than reported as zero.
+---
+--- The walk itself belongs to KR_Vitals, which needs the same list with XP
+--- progress attached; this file wants levels alone and drops the rest.
 local function perks(player)
     local trained = {}
 
-    local catalogue = PerkFactory.PerkList
-    if not catalogue then
-        return trained
-    end
-
-    for index = 0, catalogue:size() - 1 do
-        local perk = catalogue:get(index)
-        if perk then
-            local ok, level = pcall(player.getPerkLevel, player, perk)
-            if ok and level and level > 0 then
-                trained[perk:getName() or tostring(perk)] = level
-            end
-        end
+    for name, perk in pairs(Vitals.skills(player)) do
+        trained[name] = perk.level
     end
 
     return trained

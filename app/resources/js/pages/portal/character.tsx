@@ -1,9 +1,9 @@
 import { Head, usePoll } from '@inertiajs/react';
 import { Activity, Clock, Droplet, HeartPulse, Skull, Snowflake, Swords, UserX } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { CharacterVitalsDashboard } from '@/components/character-vitals-dashboard';
+import type { VitalsHeartbeat } from '@/components/character-vitals-dashboard';
 import { LiveSnapshotNotice } from '@/components/live-snapshot-notice';
-import { PzPulseDashboard } from '@/components/pz-pulse-dashboard';
-import type { PulseHeartbeat } from '@/components/pz-pulse-dashboard';
 import { categoriseSkills, SkillBar } from '@/components/skill-list';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,11 +47,11 @@ type Props = {
     /** When the mod last wrote the export, in real time. Null if it never has. */
     snapshotAt: string | null;
     day_length_minutes: number;
-    /** PZServerPulse live heartbeat data, when the mod is installed. */
-    pulse: PulseHeartbeat | null;
-    pulseAvailable: boolean;
+    /** Live vitals heartbeat, when the server bridge is new enough. */
+    heartbeat: VitalsHeartbeat | null;
+    heartbeatAvailable: boolean;
     /** When that heartbeat was written, in real time. Null if it never was. */
-    pulseSyncedAt: string | null;
+    heartbeatSyncedAt: string | null;
 };
 
 function StatTile({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
@@ -99,15 +99,15 @@ export default function PortalCharacter({
     character,
     snapshotAt,
     day_length_minutes,
-    pulse,
-    pulseAvailable,
-    pulseSyncedAt,
+    heartbeat,
+    heartbeatAvailable,
+    heartbeatSyncedAt,
 }: Props) {
     const { t } = useTranslation();
     const [hoursMode, setHoursMode] = useState<HoursMode>('ingame');
 
     usePoll(5000, {
-        only: ['character', 'isOnline', 'snapshotAt', 'pulse', 'pulseAvailable', 'pulseSyncedAt'],
+        only: ['character', 'isOnline', 'snapshotAt', 'heartbeat', 'heartbeatAvailable', 'heartbeatSyncedAt'],
     });
 
     /**
@@ -327,10 +327,10 @@ export default function PortalCharacter({
                             </>
                         )}
 
-                        <PzPulseDashboard
-                            pulse={pulse}
-                            pulseAvailable={pulseAvailable}
-                            pulseSyncedAt={pulseSyncedAt}
+                        <CharacterVitalsDashboard
+                            heartbeat={heartbeat}
+                            heartbeatAvailable={heartbeatAvailable}
+                            heartbeatSyncedAt={heartbeatSyncedAt}
                         />
                     </>
                 )}

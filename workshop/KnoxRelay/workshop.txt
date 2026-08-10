@@ -9,6 +9,7 @@ description=[*]Exports the in-game clock, season and weather
 description=[*]Exports player positions for a live map
 description=[*]Exports per-player inventory snapshots
 description=[*]Exports player progression (kills, hours survived, profession, trained perks)
+description=[*]Exports live character vitals for a dashboard: health and wounds per body part, skills with XP progress, moodles, equipped weapon, worn clothing, temperature, protection and encumbrance
 description=[*]Exports the full item catalogue, including items added by other mods
 description=[*]Processes queued item deliveries and removals, with verified variants that roll back on failure
 description=[*]Converts in-game cash into an external wallet balance, items-first so nobody is charged for a deposit that did not complete

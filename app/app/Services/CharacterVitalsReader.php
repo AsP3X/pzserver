@@ -5,30 +5,31 @@ namespace App\Services;
 use Carbon\CarbonImmutable;
 
 /**
- * Reads the PZServerPulse mod's heartbeat data from the Lua bridge volume.
+ * Reads Knox Relay's live character vitals from the Lua bridge volume.
  *
- * PZServerPulse is a custom server-side mod that exports live character data
- * (health, skills, moodles, equipment, temperature, protection, encumbrance,
- * wounds, recipes) as per-player JSON heartbeat files into
- * Lua/PZServerPulse/<username>.json on the game server, which the app
- * container mounts at /lua-bridge/PZServerPulse/.
+ * KR_Vitals writes a per-player heartbeat every ten real seconds — health and
+ * wounds per body part, skills with XP, moodles, equipped weapon, worn
+ * clothing, temperature, protection, encumbrance, quickload and recently
+ * learned recipes — into Lua/vitals/<username>.json on the game server, which
+ * the app container mounts at /lua-bridge/vitals/.
  */
-class PzServerPulseService
+class CharacterVitalsReader
 {
     /**
-     * Written to the Lua root by SP_Bridge.probe() on OnServerStarted.
+     * The bridge version that first exported character vitals.
      *
-     * It is the only file that proves the mod itself booted: the heartbeat
-     * directory is created by configure-server.sh on every start whether or
-     * not PZServerPulse is in `Mods=`, so its existence proves nothing.
+     * Servers on an older Knox Relay write no heartbeats at all, and the page
+     * needs to tell that apart from a player who simply has not logged in yet.
      */
-    private const SELF_TEST_FILE = 'sp_bridge_selftest.txt';
+    private const MINIMUM_MOD_VERSION = '1.7';
 
-    private string $pulseDir;
+    private string $vitalsDir;
 
-    public function __construct(?string $pulseDir = null)
-    {
-        $this->pulseDir = $pulseDir ?? (string) config('zomboid.lua_bridge.pzserver_pulse_dir');
+    public function __construct(
+        private readonly GameStateReader $gameState,
+        ?string $vitalsDir = null,
+    ) {
+        $this->vitalsDir = $vitalsDir ?? (string) config('zomboid.lua_bridge.vitals_dir');
     }
 
     /**
@@ -57,7 +58,7 @@ class PzServerPulseService
         }
 
         /**
-         * SP_Codec encodes an empty Lua table as `[]`, so a heartbeat whose
+         * KR_Codec encodes an empty Lua table as `[]`, so a heartbeat whose
          * collectors all bailed decodes to a list rather than an object. The
          * page expects a keyed payload or nothing.
          */
@@ -65,15 +66,20 @@ class PzServerPulseService
     }
 
     /**
-     * Whether the mod is running on the game server at all.
+     * Whether the server runs a Knox Relay new enough to export vitals.
      *
-     * A player who has never logged in has no heartbeat of their own, so the
-     * boot-time self-test is what separates "you haven't played yet" from
-     * "this server does not run PZServerPulse".
+     * Read from the bridge version in game_state.json rather than from a
+     * boot-time marker file: the world export runs on a real-time hook every
+     * ten seconds, whereas OnServerStarted has never been observed to fire on
+     * this server, so anything hanging off it would report a false negative
+     * forever.
      */
     public function isAvailable(): bool
     {
-        return is_file($this->luaRoot().'/'.self::SELF_TEST_FILE);
+        $version = $this->gameState->getGameState()['mod_version'] ?? null;
+
+        return is_string($version)
+            && version_compare($version, self::MINIMUM_MOD_VERSION, '>=');
     }
 
     /**
@@ -95,11 +101,11 @@ class PzServerPulseService
     /**
      * Resolve the on-disk path to a player's heartbeat file.
      *
-     * Checks the PZServerPulse/ subdirectory first, then the flat fallback
-     * (pzsp_<username>.json) the mod falls back to when that subdirectory is
-     * unwritable — same pattern KnoxRelay uses for inventory snapshots. The
-     * fallback is deliberately not gated on the subdirectory existing, since
-     * a missing subdirectory is the case it exists to cover.
+     * Checks the vitals/ subdirectory first, then the flat fallback
+     * (vitals_<username>.json) the mod falls back to when that subdirectory is
+     * unwritable — the same pattern KR_Snapshot uses for inventory. The
+     * fallback is deliberately not gated on the subdirectory existing, since a
+     * missing subdirectory is the case it exists to cover.
      */
     private function heartbeatPath(string $username): ?string
     {
@@ -110,8 +116,8 @@ class PzServerPulseService
         }
 
         $candidates = [
-            $this->pulseDir.'/'.$username.'.json',
-            $this->luaRoot().'/pzsp_'.$username.'.json',
+            $this->vitalsDir.'/'.$username.'.json',
+            $this->luaRoot().'/vitals_'.$username.'.json',
         ];
 
         foreach ($candidates as $candidate) {
@@ -144,6 +150,6 @@ class PzServerPulseService
      */
     private function luaRoot(): string
     {
-        return dirname($this->pulseDir);
+        return dirname($this->vitalsDir);
     }
 }

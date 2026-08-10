@@ -12,12 +12,12 @@ cd "$(dirname "$0")/.."
 
 LUA="${1:-data/zomboid/Lua}"
 echo "Fixing permissions under: $LUA"
-mkdir -p "$LUA/inventory" "$LUA/PZServerPulse"
+mkdir -p "$LUA/inventory" "$LUA/vitals"
 
 # Drop sticky bit if present — required for cross-UID atomic rename/replace
 chmod 777 "$LUA" 2>/dev/null || true
 chmod 777 "$LUA/inventory" 2>/dev/null || true
-chmod 777 "$LUA/PZServerPulse" 2>/dev/null || true
+chmod 777 "$LUA/vitals" 2>/dev/null || true
 
 for f in export_requests.json player_stats.json players_live.json game_state.json \
          items_catalog.json delivery_queue.json delivery_results.json \
@@ -34,7 +34,7 @@ find "$LUA" -type f -exec chmod 666 {} + 2>/dev/null || true
 find "$LUA" -type d -exec chmod 777 {} + 2>/dev/null || true
 
 # Make host user own nothing restrictive if we can (optional best-effort)
-chmod a+rwX "$LUA" "$LUA/inventory" "$LUA/PZServerPulse" 2>/dev/null || true
+chmod a+rwX "$LUA" "$LUA/inventory" "$LUA/vitals" 2>/dev/null || true
 
 echo "Result:"
 ls -la "$LUA" || true

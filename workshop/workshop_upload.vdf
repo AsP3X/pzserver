@@ -6,6 +6,6 @@
     "previewfile"       "./KnoxRelay/preview.png"
     "visibility"        "0"
     "title"             "Knox Relay"
-    "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions and progression, and processes item delivery and money deposit queues via file-based JSON communication."
-    "changenote"    "1.6 — inventory snapshots now address each bag by the id of the item holding it instead of by its display name, so a player carrying two bags with the same name no longer has both sets of contents reported as one container; snapshots carry a containers tree with explicit parent links, capacity, contents weight and a worn flag; a worn bag the engine keeps out of the main inventory listing is now reported as an item as well as a container, instead of its contents appearing under a container nothing holds"
+    "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression and live character vitals, and processes item delivery and money deposit queues via file-based JSON communication."
+    "changenote"    "1.7 — the live character dashboard is now part of Knox Relay instead of a separate mod: every online player gets a heartbeat roughly every ten real seconds carrying health and wounds per body part, trained skills with progress towards the next level, the full moodle stack, the equipped weapon, worn clothing, body temperature, bite and scratch protection, encumbrance, the quickload hotbar and recently learned recipes, written to Lua/vitals/<username>.json; servers that ran the separate PZServerPulse mod alongside this one should drop it from Mods=, since both would be writing the same data"
 }

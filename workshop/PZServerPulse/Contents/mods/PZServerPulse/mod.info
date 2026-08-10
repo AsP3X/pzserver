@@ -1,5 +1,0 @@
-name=PZServerPulse
-id=PZServerPulse
-author=pzserver
-modversion=1.1
-description=Server-side character dashboard mod. Exports live character data (health, skills, moodles, equipment, temperature, protection, encumbrance, wounds, recipes) as per-player JSON heartbeat files for the web dashboard.
