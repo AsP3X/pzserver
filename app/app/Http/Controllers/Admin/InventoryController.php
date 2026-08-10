@@ -65,6 +65,7 @@ class InventoryController extends Controller
                 'weight' => $inventory['weight'],
                 'max_weight' => $inventory['max_weight'],
                 'items' => $items,
+                'containers' => $inventory['containers'] ?? [],
             ] : null,
             'catalog' => $catalog,
             'deliveries' => $deliveries,

@@ -37,9 +37,9 @@ import type { BreadcrumbItem } from '@/types';
 import type {
     DeliveryEntry,
     DeliveryResult,
-    InventoryItem,
     InventorySnapshot,
     ItemCatalogEntry,
+    StackedItem,
 } from '@/types/server';
 
 type Props = {
@@ -55,7 +55,7 @@ type Props = {
 export default function PlayerInventory({ username, inventory, catalog, deliveries }: Props) {
     const { t } = useTranslation();
     const [giveOpen, setGiveOpen] = useState(false);
-    const [removeTarget, setRemoveTarget] = useState<InventoryItem | null>(null);
+    const [removeTarget, setRemoveTarget] = useState<StackedItem | null>(null);
     const [giveSearch, setGiveSearch] = useState('');
     const [giveSelected, setGiveSelected] = useState<ItemCatalogEntry | null>(null);
     const [giveCount, setGiveCount] = useState(1);
@@ -74,7 +74,10 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
 
     const items = inventory?.items ?? [];
     const stackedItems = useMemo(() => stackItems(items), [items]);
-    const containerGroups = useMemo(() => groupItemsByContainer(items), [items]);
+    const containerGroups = useMemo(
+        () => groupItemsByContainer(items, inventory?.containers ?? []),
+        [items, inventory?.containers],
+    );
 
     const filteredCatalog = useMemo(() => {
         if (!giveSearch) return catalog.slice(0, 50);
@@ -195,16 +198,7 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
                                     className="size-8 p-0"
                                     onClick={() => {
                                         setRemoveCount(1);
-                                        setRemoveTarget({
-                                            full_type: item.full_type,
-                                            name: item.name,
-                                            category: item.category,
-                                            count: item.totalCount,
-                                            condition: item.condition,
-                                            equipped: item.equipped,
-                                            container: item.containers[0],
-                                            icon: item.icon,
-                                        });
+                                        setRemoveTarget(item);
                                     }}
                                 >
                                     <Trash2 className="size-4 text-destructive" />
@@ -474,20 +468,20 @@ export default function PlayerInventory({ username, inventory, catalog, deliveri
 
                             <div className="space-y-2">
                                 <Label htmlFor="remove-count">
-                                    {t('admin.player_inventory.count_max', { max: String(removeTarget.count) })}
+                                    {t('admin.player_inventory.count_max', { max: String(removeTarget.totalCount) })}
                                 </Label>
                                 <Input
                                     id="remove-count"
                                     type="number"
                                     min={1}
-                                    max={removeTarget.count}
+                                    max={removeTarget.totalCount}
                                     value={removeCount}
                                     onChange={(e) =>
                                         setRemoveCount(
                                             Math.max(
                                                 1,
                                                 Math.min(
-                                                    removeTarget.count,
+                                                    removeTarget.totalCount,
                                                     parseInt(e.target.value) || 1,
                                                 ),
                                             ),

@@ -64,8 +64,8 @@ export default function PortalInventory({ username, inventory, isOnline, hasPzAc
 
     const stackedItems = useMemo(() => stackItems(inventory?.items ?? []), [inventory?.items]);
     const containerGroups = useMemo(
-        () => groupItemsByContainer(inventory?.items ?? []),
-        [inventory?.items],
+        () => groupItemsByContainer(inventory?.items ?? [], inventory?.containers ?? []),
+        [inventory?.items, inventory?.containers],
     );
 
     return (

@@ -113,7 +113,12 @@ it('renders the inventory page for a player with snapshot', function () {
                 'condition' => 0.85,
                 'equipped' => true,
                 'container' => 'inventory',
+                'container_id' => 'inventory',
+                'contains' => null,
             ],
+        ],
+        'containers' => [
+            ['id' => 'inventory', 'parent' => null, 'name' => 'inventory', 'depth' => 0],
         ],
         'weight' => 5.2,
         'max_weight' => 15.0,
@@ -128,6 +133,8 @@ it('renders the inventory page for a player with snapshot', function () {
         ->where('username', 'TestPlayer')
         ->has('inventory')
         ->has('inventory.items', 1)
+        ->has('inventory.containers', 1)
+        ->where('inventory.containers.0.id', 'inventory')
         ->has('catalog')
         ->has('deliveries')
     );

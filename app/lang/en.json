@@ -1195,6 +1195,7 @@
     "game_state.winter": "Winter",
     "inventory.categories": "Categories",
     "inventory.condition": "Condition",
+    "inventory.container_empty": "Empty",
     "inventory.container_items": ":count items",
     "inventory.contents_below": "Contents listed below",
     "inventory.filter_items": "Filter items...",

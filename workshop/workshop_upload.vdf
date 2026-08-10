@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions and progression, and processes item delivery and money deposit queues via file-based JSON communication."
-    "changenote"    "1.5 — export world state on a real-time hook so the clock, weather and temperature keep refreshing on a paused empty server; report whether the world is paused; export world_day (days since world creation) so panels can show days survived instead of the calendar day, which reads 190 on every fresh world"
+    "changenote"    "1.6 — inventory snapshots now address each bag by the id of the item holding it instead of by its display name, so a player carrying two bags with the same name no longer has both sets of contents reported as one container; snapshots carry a containers tree with explicit parent links, capacity, contents weight and a worn flag; a worn bag the engine keeps out of the main inventory listing is now reported as an item as well as a container, instead of its contents appearing under a container nothing holds"
 }

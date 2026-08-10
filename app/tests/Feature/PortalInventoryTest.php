@@ -36,7 +36,13 @@ function portalSnapshot(string $username = 'TestPlayer'): array
                 'condition' => null,
                 'equipped' => false,
                 'container' => 'backpack',
+                'container_id' => 'bag:i1',
+                'contains' => null,
             ],
+        ],
+        'containers' => [
+            ['id' => 'inventory', 'parent' => null, 'name' => 'inventory', 'depth' => 0],
+            ['id' => 'bag:i1', 'parent' => 'inventory', 'name' => 'backpack', 'depth' => 1],
         ],
         'weight' => 5.2,
         'max_weight' => 15.0,
@@ -102,6 +108,8 @@ it('renders the signed-in player their own inventory', function () {
         ->where('isOnline', true)
         ->where('inventory.weight', 5.2)
         ->has('inventory.items', 2)
+        ->has('inventory.containers', 2)
+        ->where('inventory.containers.1.name', 'backpack')
         ->where('inventory.items.0.icon', '/images/items/placeholder.svg')
     );
 });

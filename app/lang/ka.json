@@ -1195,6 +1195,7 @@
     "game_state.winter": "ზამთარი",
     "inventory.categories": "კატეგორიები",
     "inventory.condition": "მდგომარეობა",
+    "inventory.container_empty": "ცარიელი",
     "inventory.container_items": ":count ნივთი",
     "inventory.contents_below": "შიგთავსი იხილეთ ქვემოთ",
     "inventory.filter_items": "ნივთების ფილტრი...",

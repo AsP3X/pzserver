@@ -52,7 +52,7 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
         const query = filter.toLowerCase();
         const source: ContainerGroup[] = showGroups
             ? (groups ?? [])
-            : [{ container: '', depth: 0, items }];
+            : [{ id: '', container: '', label: '', depth: 0, worn: false, capacity: null, items }];
 
         return source
             .map((group) => ({
@@ -80,7 +80,8 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                         return sortDir === 'desc' ? -cmp : cmp;
                     }),
             }))
-            .filter((group) => group.items.length > 0);
+            /** An empty bag is worth showing as empty, but never as a search hit. */
+            .filter((group) => group.items.length > 0 || (showGroups && query === ''));
     }, [groups, items, showGroups, filter, sortKey, sortDir]);
 
     const totalRows = useMemo(
@@ -106,7 +107,12 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
 
         for (const group of visibleGroups) {
             const groupEnd = offset + group.items.length;
-            if (groupEnd > start && offset < end) {
+
+            /** An empty bag has no rows to straddle a page, so it rides on its own offset. */
+            const onThisPage =
+                group.items.length === 0 ? offset >= start && offset < end : groupEnd > start && offset < end;
+
+            if (onThisPage) {
                 result.push({
                     ...group,
                     items: group.items.slice(Math.max(0, start - offset), Math.max(0, end - offset)),
@@ -117,12 +123,6 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
 
         return result;
     }, [visibleGroups, currentPage]);
-
-    /** Container names, so a bag row can point at the group holding its contents. */
-    const containerNames = useMemo(
-        () => new Set((groups ?? []).map((group) => group.container)),
-        [groups],
-    );
 
     const columnCount = 5 + (rowActions ? 1 : 0);
 
@@ -201,7 +201,7 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                             </TableHeader>
                             <TableBody>
                                 {pagedGroups.map((group) => (
-                                    <Fragment key={group.container}>
+                                    <Fragment key={group.id}>
                                         {showGroups && (
                                             <TableRow className="bg-muted/50 hover:bg-muted/50">
                                                 <TableCell colSpan={columnCount} className="py-2">
@@ -209,27 +209,29 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                                                         className="flex items-center gap-2"
                                                         style={{ paddingLeft: group.depth * INDENT_STEP }}
                                                     >
-                                                        {group.container === MAIN_CONTAINER ? (
+                                                        {group.id === MAIN_CONTAINER || group.worn ? (
                                                             <Backpack className="text-muted-foreground size-4" />
                                                         ) : (
                                                             <Package className="text-muted-foreground size-4" />
                                                         )}
                                                         <span className="text-sm font-semibold">
-                                                            {group.container === MAIN_CONTAINER
+                                                            {group.id === MAIN_CONTAINER
                                                                 ? t('inventory.main_container')
-                                                                : group.container}
+                                                                : group.label}
                                                         </span>
                                                         <Badge variant="secondary" className="text-xs">
-                                                            {t('inventory.container_items', {
-                                                                count: String(group.items.length),
-                                                            })}
+                                                            {group.items.length === 0
+                                                                ? t('inventory.container_empty')
+                                                                : t('inventory.container_items', {
+                                                                      count: String(group.items.length),
+                                                                  })}
                                                         </Badge>
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
                                         )}
                                         {group.items.map((item) => (
-                                            <TableRow key={`${group.container}-${item.full_type}`}>
+                                            <TableRow key={`${group.id}-${item.full_type}`}>
                                                 <TableCell>
                                                     <div
                                                         className="flex items-center gap-2"
@@ -253,7 +255,7 @@ export function InventoryTable({ items, groups, rowActions }: Props) {
                                                                 {t('common.equipped')}
                                                             </span>
                                                         )}
-                                                        {showGroups && containerNames.has(item.name) && (
+                                                        {showGroups && item.opens.length > 0 && (
                                                             <span className="text-muted-foreground flex items-center gap-1 text-xs">
                                                                 <Package className="size-3" />
                                                                 {t('inventory.contents_below')}

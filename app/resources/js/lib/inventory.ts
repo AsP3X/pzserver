@@ -1,6 +1,6 @@
-import type { ContainerGroup, InventoryItem, StackedItem } from '@/types/server';
+import type { ContainerGroup, InventoryContainer, InventoryItem, StackedItem } from '@/types/server';
 
-/** Container name the Lua bridge uses for the player's own pockets. */
+/** Container id the Lua bridge uses for the player's own pockets. */
 export const MAIN_CONTAINER = 'inventory';
 
 /**
@@ -25,6 +25,9 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
             if (!existing.containers.includes(item.container)) {
                 existing.containers.push(item.container);
             }
+            if (item.contains) {
+                existing.opens.push(item.contains);
+            }
         } else {
             map.set(item.full_type, {
                 full_type: item.full_type,
@@ -35,6 +38,7 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
                 condition: item.condition,
                 equipped: item.equipped,
                 containers: [item.container],
+                opens: item.contains ? [item.contains] : [],
             });
         }
     }
@@ -43,82 +47,64 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
 }
 
 /**
- * Split the snapshot into one group per container — the player's own pockets,
- * then every bag, holster and pouch they carry — so the dashboard can show
- * what is inside a backpack instead of merging it into one flat list.
+ * Fill one group per container — the player's own pockets, then every bag,
+ * holster and pouch they carry — so the dashboard can show what is inside a
+ * backpack instead of merging it into one flat list.
  *
- * A bag is listed as an item in whichever container holds it, which is what
- * links the groups into a tree: the group named "Big Hiking Bag" nests under
- * the group holding the item called "Big Hiking Bag". Bags that are worn
- * rather than carried have no such item and stay at the top level.
+ * The tree arrives already ordered and depth-stamped from the server, keyed by
+ * container id rather than by name: a player carrying two Wallets has two
+ * groups, and each shows only its own contents.
  */
-export function groupItemsByContainer(items: InventoryItem[]): ContainerGroup[] {
-    const byContainer = new Map<string, InventoryItem[]>();
+export function groupItemsByContainer(
+    items: InventoryItem[],
+    containers: InventoryContainer[],
+): ContainerGroup[] {
+    /** Nothing to nest into: everything reads as one flat group of pockets. */
+    if (containers.length === 0) {
+        return items.length === 0
+            ? []
+            : [
+                  {
+                      id: MAIN_CONTAINER,
+                      container: MAIN_CONTAINER,
+                      label: MAIN_CONTAINER,
+                      depth: 0,
+                      worn: false,
+                      capacity: null,
+                      items: stackItems(items),
+                  },
+              ];
+    }
 
+    const byContainer = new Map<string, InventoryItem[]>();
     for (const item of items) {
-        const existing = byContainer.get(item.container);
+        const existing = byContainer.get(item.container_id);
         if (existing) {
             existing.push(item);
         } else {
-            byContainer.set(item.container, [item]);
+            byContainer.set(item.container_id, [item]);
         }
     }
 
-    const parents = new Map<string, string>();
-    for (const container of byContainer.keys()) {
-        const holder = items.find((item) => item.name === container && item.container !== container);
-        if (holder && byContainer.has(holder.container)) {
-            parents.set(container, holder.container);
-        }
+    /** Two bags called the same thing get numbered, so their headers differ. */
+    const totals = new Map<string, number>();
+    for (const container of containers) {
+        totals.set(container.name, (totals.get(container.name) ?? 0) + 1);
     }
+    const numbered = new Map<string, number>();
 
-    const children = new Map<string, string[]>();
-    const roots: string[] = [];
-    for (const container of byContainer.keys()) {
-        const parent = parents.get(container);
-        if (parent === undefined) {
-            roots.push(container);
-            continue;
-        }
-        const siblings = children.get(parent);
-        if (siblings) {
-            siblings.push(container);
-        } else {
-            children.set(parent, [container]);
-        }
-    }
+    return containers.map((container) => {
+        const index = (numbered.get(container.name) ?? 0) + 1;
+        numbered.set(container.name, index);
 
-    /** The player's own pockets lead, whatever order the snapshot arrived in. */
-    roots.sort((a, b) => Number(b === MAIN_CONTAINER) - Number(a === MAIN_CONTAINER));
-
-    const groups: ContainerGroup[] = [];
-    const visited = new Set<string>();
-
-    const descend = (container: string, depth: number): void => {
-        if (visited.has(container)) {
-            return;
-        }
-        visited.add(container);
-
-        groups.push({
-            container,
-            depth,
-            items: stackItems(byContainer.get(container) ?? []),
-        });
-
-        for (const child of children.get(container) ?? []) {
-            descend(child, depth + 1);
-        }
-    };
-
-    for (const root of roots) {
-        descend(root, 0);
-    }
-
-    /** A bag reported as its own ancestor would otherwise vanish from the view. */
-    for (const container of byContainer.keys()) {
-        descend(container, 0);
-    }
-
-    return groups;
+        return {
+            id: container.id,
+            container: container.name,
+            label: (totals.get(container.name) ?? 1) > 1 ? `${container.name} (${index})` : container.name,
+            depth: container.depth,
+            worn: container.worn ?? false,
+            capacity: container.capacity ?? null,
+            items: stackItems(byContainer.get(container.id) ?? []),
+        };
+    });
 }

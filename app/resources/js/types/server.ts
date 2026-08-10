@@ -370,14 +370,35 @@ export type InventoryItem = {
     count: number;
     condition: number | null;
     equipped: boolean;
+    /** Display name of the holding container; not unique across a rig. */
     container: string;
+    /** Identity of the holding container, which two same-named bags do not share. */
+    container_id: string;
+    /** Container this item opens, when it is itself a bag. */
+    contains: string | null;
     icon: string;
+};
+
+/**
+ * One node of the player's container tree, already ordered depth-first by the
+ * server so a bag is listed straight after the bag holding it.
+ */
+export type InventoryContainer = {
+    id: string;
+    parent: string | null;
+    name: string;
+    depth: number;
+    full_type?: string | null;
+    capacity?: number | null;
+    weight?: number | null;
+    worn?: boolean;
 };
 
 export type InventorySnapshot = {
     username: string;
     timestamp: string;
     items: InventoryItem[];
+    containers: InventoryContainer[];
     weight: number;
     max_weight: number;
 };
@@ -394,6 +415,8 @@ export type StackedItem = {
     condition: number | null;
     equipped: boolean;
     containers: string[];
+    /** Ids of the containers these items open, when they are bags. */
+    opens: string[];
 };
 
 /**
@@ -401,8 +424,13 @@ export type StackedItem = {
  * that container sits in the player's rig (0 = pockets or a worn bag).
  */
 export type ContainerGroup = {
+    id: string;
     container: string;
+    /** `container`, numbered when the rig holds more than one bag of that name. */
+    label: string;
     depth: number;
+    worn: boolean;
+    capacity: number | null;
     items: StackedItem[];
 };
 

@@ -51,6 +51,7 @@ class PlayerInventoryController extends Controller
                 'weight' => $inventory['weight'],
                 'max_weight' => $inventory['max_weight'],
                 'items' => $this->withIcons($inventory['items'] ?? []),
+                'containers' => $inventory['containers'] ?? [],
             ] : null,
             'isOnline' => in_array($pzUsername, $this->onlinePlayersReader->getOnlineUsernames(), true),
             'hasPzAccount' => true,
