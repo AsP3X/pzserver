@@ -1,9 +1,9 @@
 import { Head, usePoll } from '@inertiajs/react';
 import type { Map as LeafletMap } from 'leaflet';
-import { Crosshair, MapPin, RefreshCw, ShieldCheck, TriangleAlert, UserX } from 'lucide-react';
+import { Car, Crosshair, MapPin, RefreshCw, ShieldCheck, TriangleAlert, UserX } from 'lucide-react';
 import { useCallback, useMemo, useRef } from 'react';
 import PzMap from '@/components/pz-map';
-import type { ZoneOverlay } from '@/components/pz-map';
+import type { VehicleMarker, ZoneOverlay } from '@/components/pz-map';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -33,6 +33,8 @@ type Props = {
     mapConfig: MapConfig;
     hasTiles: boolean;
     safeZones: SafeZone[];
+    /** Vehicles this player holds a key to; deferred, so absent on first paint. */
+    vehicles?: VehicleMarker[];
 };
 
 const ZONE_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
@@ -53,7 +55,15 @@ function EmptyState({ icon, title, description }: { icon: React.ReactNode; title
     );
 }
 
-export default function PortalMap({ username, hasPzAccount, marker, mapConfig, hasTiles, safeZones }: Props) {
+export default function PortalMap({
+    username,
+    hasPzAccount,
+    marker,
+    mapConfig,
+    hasTiles,
+    safeZones,
+    vehicles,
+}: Props) {
     const { t } = useTranslation();
     const mapRef = useRef<LeafletMap | null>(null);
 
@@ -64,12 +74,18 @@ export default function PortalMap({ username, hasPzAccount, marker, mapConfig, h
         [safeZones],
     );
 
+    /**
+     * Street level, or as close as this basemap goes. The vector basemap tops
+     * out at zoom 4, so asking for 5 was a silent clamp rather than a choice.
+     */
+    const focusZoom = Math.min(5, mapConfig.maxZoom);
+
     /** The map keeps its own view once mounted, so recentring is an explicit act. */
     const centreOnMe = useCallback(() => {
         if (mapRef.current && marker) {
-            mapRef.current.setView([-marker.y, marker.x], 5);
+            mapRef.current.setView([-marker.y, marker.x], focusZoom);
         }
-    }, [marker]);
+    }, [marker, focusZoom]);
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: t('portal.title'), href: '/portal' },
@@ -144,6 +160,12 @@ export default function PortalMap({ username, hasPzAccount, marker, mapConfig, h
                                     {t('portal.map.safe_zones', { count: String(zones.length) })}
                                 </span>
                             )}
+                            {vehicles && vehicles.length > 0 && (
+                                <span className="text-muted-foreground flex items-center gap-1.5 text-sm">
+                                    <Car className="size-3.5" />
+                                    {t('portal.map.my_vehicles', { count: String(vehicles.length) })}
+                                </span>
+                            )}
                         </div>
 
                         <Card className="flex-1 overflow-hidden">
@@ -153,10 +175,11 @@ export default function PortalMap({ username, hasPzAccount, marker, mapConfig, h
                                     mapConfig={{
                                         ...mapConfig,
                                         center: { x: marker.x, y: marker.y },
-                                        defaultZoom: 5,
+                                        defaultZoom: focusZoom,
                                     }}
                                     hasTiles={hasTiles}
                                     zones={zones}
+                                    vehicles={vehicles}
                                     onMapReady={(map) => {
                                         mapRef.current = map;
                                     }}

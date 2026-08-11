@@ -2,6 +2,7 @@
 
 use App\Models\AuditLog;
 use App\Models\Backup;
+use App\Models\GameEvent;
 use App\Models\User;
 use App\Services\BackupManager;
 use App\Services\ModManager;
@@ -13,6 +14,7 @@ use App\Services\SandboxLuaParser;
 use App\Services\ServerIniParser;
 use App\Services\WhitelistManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 
 uses(RefreshDatabase::class);
 
@@ -193,6 +195,25 @@ it('can set access level via admin', function () {
 
     $response->assertOk();
     $response->assertJson(['message' => 'Set TestPlayer access to admin']);
+});
+
+it('teleports a player to a map square and records it', function () {
+    mockAdminRcon(['teleport "TestPlayer" 10500,9800,0' => 'ok']);
+
+    $this->actingAs(adminUser())
+        ->postJson('/admin/players/TestPlayer/teleport', ['x' => 10500.4, 'y' => 9800, 'z' => 0])
+        ->assertOk()
+        ->assertJson(['message' => 'Teleported TestPlayer to 10500, 9800']);
+
+    expect(AuditLog::query()->where('action', 'player.teleport')->exists())->toBeTrue();
+});
+
+it('refuses a teleport to a square off the map', function () {
+    mockAdminRcon();
+
+    $this->actingAs(adminUser())
+        ->postJson('/admin/players/TestPlayer/teleport', ['x' => -5, 'y' => 9800])
+        ->assertStatus(422);
 });
 
 it('syncs the web role when an access level is set so the players page updates immediately', function () {
@@ -629,14 +650,113 @@ it('renders the player map page with merged data', function () {
         ->has('markers', 2)
         ->has('mapConfig')
         ->has('hasTiles')
-        ->has('vectorSources')
-        ->has('vectorAsset')
+        ->has('vehicles')
         ->where('markers.0.username', 'Alice')
         ->where('markers.0.status', 'online')
         ->where('markers.0.x', 10510)
         ->where('markers.1.username', 'Bob')
         ->where('markers.1.status', 'offline')
+        /**
+         * Resolving these globs the Workshop tree, so they belong to opening
+         * the basemap panel — not to the page the 5s poll keeps refreshing.
+         */
+        ->missing('vectorSources')
+        ->missing('vectorAsset')
+        ->missing('activity')
     );
+});
+
+it('sends the basemap sources only when the setup panel asks for them', function () {
+    mockPlayersDbReader([]);
+    mockPlayerPositionReader(null);
+
+    $onlinePlayers = Mockery::mock(OnlinePlayersReader::class);
+    $onlinePlayers->shouldReceive('getOnlineUsernames')->andReturn([]);
+    $onlinePlayers->shouldReceive('getOnlinePlayers')->andReturn(['usernames' => [], 'source' => 'test']);
+    app()->instance(OnlinePlayersReader::class, $onlinePlayers);
+
+    $this->actingAs(adminUser());
+
+    inertiaPartialReload('/admin/players/map', 'admin/player-map', 'vectorSources,vectorAsset')
+        ->assertOk()
+        ->assertJsonStructure(['props' => ['vectorSources', 'vectorAsset']])
+        ->assertJsonMissingPath('props.markers');
+});
+
+it('plots located events when the activity heatmap is requested', function () {
+    mockPlayersDbReader([]);
+    mockPlayerPositionReader(null);
+
+    $onlinePlayers = Mockery::mock(OnlinePlayersReader::class);
+    $onlinePlayers->shouldReceive('getOnlineUsernames')->andReturn([]);
+    $onlinePlayers->shouldReceive('getOnlinePlayers')->andReturn(['usernames' => [], 'source' => 'test']);
+    app()->instance(OnlinePlayersReader::class, $onlinePlayers);
+
+    GameEvent::query()->create([
+        'event_type' => 'death',
+        'player' => 'Alice',
+        'x' => 10500,
+        'y' => 9800,
+        'game_time' => now()->subDay(),
+    ]);
+    /** Outside the window, and so outside the answer. */
+    GameEvent::query()->create([
+        'event_type' => 'death',
+        'player' => 'Bob',
+        'x' => 1,
+        'y' => 2,
+        'game_time' => now()->subDays(20),
+    ]);
+    /** Located nowhere, so nothing to plot. */
+    GameEvent::query()->create([
+        'event_type' => 'connect',
+        'player' => 'Carol',
+        'game_time' => now(),
+    ]);
+
+    $this->actingAs(adminUser());
+
+    inertiaPartialReload('/admin/players/map?activity_days=7', 'admin/player-map', 'activity')
+        ->assertOk()
+        ->assertJsonCount(1, 'props.activity')
+        ->assertJsonPath('props.activity.0.player', 'Alice')
+        ->assertJsonPath('props.activity.0.x', 10500);
+});
+
+it('dates an offline player from their last connect or disconnect', function () {
+    mockPlayersDbReader([
+        ['username' => 'Bob', 'name' => 'Bob', 'x' => 100.0, 'y' => 200.0, 'z' => 0, 'is_dead' => false],
+    ]);
+    mockPlayerPositionReader(null);
+
+    $onlinePlayers = Mockery::mock(OnlinePlayersReader::class);
+    $onlinePlayers->shouldReceive('getOnlineUsernames')->andReturn([]);
+    $onlinePlayers->shouldReceive('getOnlinePlayers')->andReturn(['usernames' => [], 'source' => 'test']);
+    app()->instance(OnlinePlayersReader::class, $onlinePlayers);
+
+    $lastSeenAt = now()->subDays(3);
+
+    GameEvent::query()->create([
+        'event_type' => 'disconnect',
+        'player' => 'Bob',
+        'game_time' => $lastSeenAt,
+    ]);
+    /** An older event must not win over the most recent one. */
+    GameEvent::query()->create([
+        'event_type' => 'connect',
+        'player' => 'Bob',
+        'game_time' => now()->subDays(9),
+    ]);
+
+    $this->actingAs(adminUser())->get('/admin/players/map')
+        ->assertInertia(fn ($page) => $page
+            ->where('markers.0.status', 'offline')
+            ->where(
+                'markers.0.last_seen',
+                fn (?string $seen) => $seen !== null
+                    && Carbon::parse($seen)->diffInSeconds($lastSeenAt, absolute: true) <= 1,
+            )
+        );
 });
 
 it('bakes the vector basemap from the admin endpoint', function () {

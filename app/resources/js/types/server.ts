@@ -313,6 +313,8 @@ export type PlayerMarker = {
     z: number;
     status: 'online' | 'offline' | 'dead';
     is_online: boolean;
+    /** Last connect/disconnect seen for an offline player; null while online. */
+    last_seen?: string | null;
 };
 
 export type DziInfo = {

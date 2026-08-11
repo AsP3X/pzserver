@@ -17,7 +17,32 @@ export type WorldMapVectorData = {
 
 type LayerStyle = { fill: string; minZ: number; order: number };
 
+/**
+ * World squares to canvas pixels for one frame.
+ *
+ * Holds the whole projection as four numbers so a ring can be pathed with
+ * plain arithmetic. The alternative — asking Leaflet to project every vertex —
+ * allocates a LatLng and a Point per point of every polygon in view, on every
+ * frame of a pan, which is where the map used to spend its time.
+ *
+ * Valid only for an axis-aligned CRS, which is what the vector basemap always
+ * runs on (`createWorldSquareCrs`); the isometric basemap is a tile layer and
+ * never reaches this code.
+ */
+type FrameProjection = { ox: number; oy: number; sx: number; sy: number };
+
+type LabelBox = { left: number; top: number; right: number; bottom: number };
+
 const DEFAULT_BG = 'rgb(219, 215, 192)';
+
+/** Most important first, so a town keeps its spot when a hamlet wants it. */
+const LABEL_PRIORITY: Record<string, number> = {
+    town: 0,
+    water: 1,
+    place: 2,
+    forest: 3,
+    building: 4,
+};
 
 /**
  * Leaflet layer that paints the vanilla schematic world map on a single canvas.
@@ -38,9 +63,15 @@ export class WorldMapVectorLayer extends L.Layer {
 
     private cellIndex: Map<string, Array<[string, number[]]>>;
 
+    private labels: WorldMapVectorData['labels'];
+
     private redrawScheduled = false;
 
     private darkMode = false;
+
+    private showLabels = true;
+
+    private showGrid = true;
 
     constructor(data: WorldMapVectorData, options?: L.LayerOptions) {
         super(options);
@@ -48,6 +79,9 @@ export class WorldMapVectorLayer extends L.Layer {
         this.cellSize = data.cellSize || 300;
         this.sortedStyles = Object.entries(data.styles).sort((a, b) => a[1].order - b[1].order);
         this.cellIndex = new Map(Object.entries(data.cells));
+        this.labels = [...(data.labels ?? [])].sort(
+            (a, b) => (LABEL_PRIORITY[a.k] ?? 9) - (LABEL_PRIORITY[b.k] ?? 9),
+        );
     }
 
     /** Dark UI: deeper paper + slightly lifted fills for contrast. */
@@ -56,6 +90,24 @@ export class WorldMapVectorLayer extends L.Layer {
             return;
         }
         this.darkMode = dark;
+        this.scheduleRedraw();
+    }
+
+    /** Town / water place names. Off declutters a map full of markers. */
+    setShowLabels(show: boolean): void {
+        if (this.showLabels === show) {
+            return;
+        }
+        this.showLabels = show;
+        this.scheduleRedraw();
+    }
+
+    /** The 300-square cell grid drawn at high zoom. */
+    setShowGrid(show: boolean): void {
+        if (this.showGrid === show) {
+            return;
+        }
+        this.showGrid = show;
         this.scheduleRedraw();
     }
 
@@ -140,6 +192,8 @@ export class WorldMapVectorLayer extends L.Layer {
         const topLeft = map.containerPointToLayerPoint([0, 0]);
         L.DomUtil.setPosition(canvas, topLeft);
 
+        const projection = this.frameProjection(map, zoom, topLeft);
+
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const paper = this.paperColor();
         ctx.fillStyle = paper;
@@ -201,7 +255,7 @@ export class WorldMapVectorLayer extends L.Layer {
 
             ctx.beginPath();
             for (const ring of rings) {
-                this.pathRing(ctx, map, ring, topLeft);
+                pathRing(ctx, ring, projection);
             }
 
             const fill = this.tintFill(style.fill);
@@ -230,132 +284,166 @@ export class WorldMapVectorLayer extends L.Layer {
             }
         }
 
-        this.drawLabels(ctx, map, topLeft, zoom, minX, minY, maxX, maxY);
+        if (this.showLabels) {
+            this.drawLabels(ctx, projection, zoom, minX, minY, maxX, maxY);
+        }
 
         // Cell grid at high zoom (usability — matches admin mental model of PZ cells)
-        if (zoom >= 1.5) {
-            this.drawCellGrid(ctx, map, topLeft, cellMinX, cellMaxX, cellMinY, cellMaxY, zoom);
+        if (this.showGrid && zoom >= 1.5) {
+            this.drawCellGrid(ctx, projection, cellMinX, cellMaxX, cellMinY, cellMaxY, zoom);
         }
     }
 
-    private pathRing(
-        ctx: CanvasRenderingContext2D,
-        map: L.Map,
-        ring: number[],
-        topLeft: L.Point,
-    ): void {
-        const n = ring.length;
-        if (n < 6) {
-            return;
-        }
-        for (let i = 0; i < n; i += 2) {
-            const pt = map.latLngToLayerPoint(L.latLng(-ring[i + 1], ring[i]));
-            const x = pt.x - topLeft.x;
-            const y = pt.y - topLeft.y;
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-        }
-        ctx.closePath();
+    /**
+     * The frame's world-square → canvas-pixel mapping.
+     *
+     * Probes the CRS rather than Leaflet's `latLngToLayerPoint`, which rounds
+     * to whole pixels — rounding two probes a single square apart would read
+     * the scale as 0 whenever the map is zoomed out past 1px per square.
+     */
+    private frameProjection(map: L.Map, zoom: number, topLeft: L.Point): FrameProjection {
+        const pixelOrigin = map.getPixelOrigin();
+        const origin = map.project(L.latLng(0, 0), zoom);
+        const unit = map.project(L.latLng(-1, 1), zoom);
+
+        return {
+            ox: origin.x - pixelOrigin.x - topLeft.x,
+            oy: origin.y - pixelOrigin.y - topLeft.y,
+            sx: unit.x - origin.x,
+            sy: unit.y - origin.y,
+        };
     }
 
+    /**
+     * Place names, most important first, skipping any that would land on one
+     * already drawn. Without the collision pass a cluster of hamlets renders
+     * as a single unreadable smear at mid zoom.
+     */
     private drawLabels(
         ctx: CanvasRenderingContext2D,
-        map: L.Map,
-        topLeft: L.Point,
+        projection: FrameProjection,
         zoom: number,
         minX: number,
         minY: number,
         maxX: number,
         maxY: number,
     ): void {
-        const labels = this.data.labels;
-        if (!labels?.length) {
+        if (!this.labels.length) {
             return;
         }
 
-        for (const label of labels) {
+        const placed: LabelBox[] = [];
+        const palette = this.labelPalette();
+
+        for (const label of this.labels) {
             if (label.x < minX || label.x > maxX || label.y < minY || label.y > maxY) {
                 continue;
             }
 
-            const minZ = labelMinZoom(label.k);
-            if (zoom < minZ) {
+            if (zoom < labelMinZoom(label.k)) {
                 continue;
             }
 
-            const pt = map.latLngToLayerPoint(L.latLng(-label.y, label.x));
-            const x = pt.x - topLeft.x;
-            const y = pt.y - topLeft.y;
+            const x = projection.ox + label.x * projection.sx;
+            const y = projection.oy + label.y * projection.sy;
 
             const fontSize = Math.max(10, Math.min(28, 11 * Math.pow(2, zoom / 2) * (label.s || 1)));
             const isTown = label.k === 'town';
-            const isWater = label.k === 'water';
 
             ctx.font = `${isTown ? '700' : '600'} ${fontSize}px "Segoe UI", system-ui, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            if (isWater) {
-                ctx.fillStyle = 'rgba(30, 80, 90, 0.85)';
-                ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-            } else if (isTown) {
-                ctx.fillStyle = 'rgba(40, 35, 30, 0.9)';
-                ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-            } else {
-                ctx.fillStyle = 'rgba(50, 45, 40, 0.85)';
-                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-            }
+            const halfWidth = ctx.measureText(label.t).width / 2;
+            const halfHeight = fontSize * 0.6;
+            const box: LabelBox = {
+                left: x - halfWidth,
+                top: y - halfHeight,
+                right: x + halfWidth,
+                bottom: y + halfHeight,
+            };
 
+            if (placed.some((other) => boxesOverlap(box, other))) {
+                continue;
+            }
+            placed.push(box);
+
+            const colors = label.k === 'water'
+                ? palette.water
+                : isTown
+                  ? palette.town
+                  : palette.place;
+
+            ctx.fillStyle = colors.fill;
+            ctx.strokeStyle = colors.halo;
             ctx.lineWidth = Math.max(2, fontSize * 0.12);
             ctx.strokeText(label.t, x, y);
             ctx.fillText(label.t, x, y);
         }
     }
 
+    /**
+     * Label ink and halo for the current paper. Dark paper flips the pair:
+     * the light-mode near-black fill was all but invisible on it.
+     */
+    private labelPalette(): Record<'town' | 'water' | 'place', { fill: string; halo: string }> {
+        if (this.darkMode) {
+            return {
+                town: { fill: 'rgba(240, 236, 225, 0.95)', halo: 'rgba(12, 14, 12, 0.8)' },
+                water: { fill: 'rgba(150, 210, 225, 0.95)', halo: 'rgba(8, 20, 26, 0.8)' },
+                place: { fill: 'rgba(214, 210, 199, 0.9)', halo: 'rgba(12, 14, 12, 0.75)' },
+            };
+        }
+
+        return {
+            town: { fill: 'rgba(40, 35, 30, 0.9)', halo: 'rgba(255, 255, 255, 0.55)' },
+            water: { fill: 'rgba(30, 80, 90, 0.85)', halo: 'rgba(255, 255, 255, 0.35)' },
+            place: { fill: 'rgba(50, 45, 40, 0.85)', halo: 'rgba(255, 255, 255, 0.4)' },
+        };
+    }
+
     private drawCellGrid(
         ctx: CanvasRenderingContext2D,
-        map: L.Map,
-        topLeft: L.Point,
+        projection: FrameProjection,
         cellMinX: number,
         cellMaxX: number,
         cellMinY: number,
         cellMaxY: number,
         zoom: number,
     ): void {
-        ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+        ctx.strokeStyle = this.darkMode ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.08)';
         ctx.lineWidth = 1;
         ctx.beginPath();
 
+        const top = projection.oy + cellMinY * this.cellSize * projection.sy;
+        const bottom = projection.oy + (cellMaxY + 1) * this.cellSize * projection.sy;
         for (let cx = cellMinX; cx <= cellMaxX + 1; cx++) {
-            const x = cx * this.cellSize;
-            const a = map.latLngToLayerPoint(L.latLng(-(cellMinY * this.cellSize), x));
-            const b = map.latLngToLayerPoint(L.latLng(-((cellMaxY + 1) * this.cellSize), x));
-            ctx.moveTo(a.x - topLeft.x, a.y - topLeft.y);
-            ctx.lineTo(b.x - topLeft.x, b.y - topLeft.y);
+            const x = projection.ox + cx * this.cellSize * projection.sx;
+            ctx.moveTo(x, top);
+            ctx.lineTo(x, bottom);
         }
+
+        const left = projection.ox + cellMinX * this.cellSize * projection.sx;
+        const right = projection.ox + (cellMaxX + 1) * this.cellSize * projection.sx;
         for (let cy = cellMinY; cy <= cellMaxY + 1; cy++) {
-            const y = cy * this.cellSize;
-            const a = map.latLngToLayerPoint(L.latLng(-y, cellMinX * this.cellSize));
-            const b = map.latLngToLayerPoint(L.latLng(-y, (cellMaxX + 1) * this.cellSize));
-            ctx.moveTo(a.x - topLeft.x, a.y - topLeft.y);
-            ctx.lineTo(b.x - topLeft.x, b.y - topLeft.y);
+            const y = projection.oy + cy * this.cellSize * projection.sy;
+            ctx.moveTo(left, y);
+            ctx.lineTo(right, y);
         }
         ctx.stroke();
 
         if (zoom >= 2.5) {
-            ctx.fillStyle = 'rgba(80,70,60,0.45)';
+            ctx.fillStyle = this.darkMode ? 'rgba(228,224,214,0.5)' : 'rgba(80,70,60,0.45)';
             ctx.font = '10px monospace';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
             for (let cy = cellMinY; cy <= cellMaxY; cy++) {
                 for (let cx = cellMinX; cx <= cellMaxX; cx++) {
-                    const pt = map.latLngToLayerPoint(
-                        L.latLng(-(cy * this.cellSize + 8), cx * this.cellSize + 8),
+                    ctx.fillText(
+                        `${cx},${cy}`,
+                        projection.ox + (cx * this.cellSize + 8) * projection.sx,
+                        projection.oy + (cy * this.cellSize + 8) * projection.sy,
                     );
-                    ctx.fillText(`${cx},${cy}`, pt.x - topLeft.x, pt.y - topLeft.y);
                 }
             }
         }
@@ -385,6 +473,26 @@ export class WorldMapVectorLayer extends L.Layer {
 
         return `rgb(${lift(r)}, ${lift(g)}, ${lift(b)})`;
     }
+}
+
+function pathRing(
+    ctx: CanvasRenderingContext2D,
+    ring: number[],
+    { ox, oy, sx, sy }: FrameProjection,
+): void {
+    const n = ring.length;
+    if (n < 6) {
+        return;
+    }
+    ctx.moveTo(ox + ring[0] * sx, oy + ring[1] * sy);
+    for (let i = 2; i < n; i += 2) {
+        ctx.lineTo(ox + ring[i] * sx, oy + ring[i + 1] * sy);
+    }
+    ctx.closePath();
+}
+
+function boxesOverlap(a: LabelBox, b: LabelBox): boolean {
+    return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
 }
 
 function ringIntersects(

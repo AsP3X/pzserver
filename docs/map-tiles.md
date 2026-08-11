@@ -11,7 +11,7 @@ Out of the box the panel uses a **compact vector pack** baked from vanilla `worl
 
 ## Map view: Vector vs 3D isometric
 
-Admin → Player map → **Map view** toggle (stored in browser `localStorage` as `pz-map-view-mode`):
+Admin → Player map → the **Vector (2D) / 3D isometric** switch above the map (stored in browser `localStorage` as `pz-map-view-mode`):
 
 | Mode | What you see | Server load |
 |------|----------------|-------------|
@@ -50,7 +50,7 @@ docker compose exec app php artisan zomboid:generate-map-tiles --force --profile
 make exec CMD="php artisan zomboid:generate-map-tiles --force --profile=lite"
 ```
 
-**Admin UI:** Map view → **3D isometric** → open **Isometric tiles (Advanced)** → choose Lite/Full → Generate.  
+**Admin UI:** **Basemap setup** (page header) → **Isometric tiles (Advanced)** → choose Lite/Full → Generate.  
 API: `POST /admin/players/map/generate-tiles` body `{ "profile": "lite"|"full", "force"?: true, "resume"?: true }`.
 
 After a successful pack, 3D mode automatically prefers **local** tiles over the CDN.
@@ -116,7 +116,7 @@ data/map-tiles/html/map_data/base/layer0_files/{z}/{x}_{y}.webp
 
 ### How to generate
 
-**UI:** Admin → **Player map** → **Local map tiles** card (Generate / Stop / Resume / Start over + progress bar).
+**UI:** Admin → **Player map** → **Basemap setup** → **Isometric tiles (Advanced)** (Generate / Stop / Resume / Start over + progress bar).
 
 > **Frontend not updating after git pull?** Host volume `./data/app-build` can pin an old Vite build. Redeploy rebuilds the app image; entrypoint now re-syncs `public/build` when the image manifest changes. Force refresh once:
 > ```bash
@@ -223,7 +223,7 @@ docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --workers=
 While generation runs, progress is written to `app/storage/app/map-tiles.progress.json` and shown:
 
 - **CLI** — live status line (`job: done/total`, saved tiles, elapsed time) when using `docker exec -it`
-- **Admin UI** — progress bar on the Player map page (polls every 5s)
+- **Admin UI** — progress bar in the Player map's Basemap setup panel (polls every 5s, 3s while generating)
 
 Inspect progress manually:
 

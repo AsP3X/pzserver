@@ -260,6 +260,7 @@ Route::middleware(['auth', 'admin', 'throttle:admin'])->group(function () {
             Route::post('backups/import', [Admin\BackupController::class, 'importWorld'])->name('backups.import');
             Route::post('players/{name}/access', [Admin\PlayerController::class, 'setAccessLevel'])->name('players.access');
             Route::post('players/{name}/kick', [Admin\PlayerController::class, 'kick'])->name('players.kick');
+            Route::post('players/{name}/teleport', [Admin\PlayerController::class, 'teleport'])->name('players.teleport');
             Route::post('players/{name}/ban', [Admin\PlayerController::class, 'ban'])->name('players.ban');
             Route::post('players/{name}/password', [Admin\PlayerController::class, 'setPassword'])->name('players.password');
             Route::post('backups/{backup}/rollback', [Admin\BackupController::class, 'rollback'])->name('backups.rollback');

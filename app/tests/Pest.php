@@ -45,3 +45,28 @@ function something()
 {
     // ..
 }
+
+/**
+ * Ask a page for a subset of its props, the way Inertia's partial reloads do.
+ *
+ * The asset version has to match or Inertia answers 409 instead of the page,
+ * so it is read from a full render first rather than guessed at.
+ *
+ * The answer is JSON, not a rendered view, so assert on it with
+ * `assertJsonPath('props.…')` — `assertInertia()` reads view data and will
+ * report a perfectly good partial as "not a valid Inertia response".
+ */
+function inertiaPartialReload(
+    string $url,
+    string $component,
+    string $only,
+): Illuminate\Testing\TestResponse {
+    $version = test()->get($url)->viewData('page')['version'];
+
+    return test()->get($url, [
+        'X-Inertia' => 'true',
+        'X-Inertia-Version' => $version,
+        'X-Inertia-Partial-Component' => $component,
+        'X-Inertia-Partial-Data' => $only,
+    ]);
+}

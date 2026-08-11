@@ -94,12 +94,14 @@ After adding/removing **map mods**, re-run the bake and hard-refresh the browser
 
 ### Admin UI
 
-**Admin → Player map → Vector basemap** card:
+**Admin → Player map → Basemap setup** (button in the page header, opens a side panel):
 
 - Lists resolved `Map=` packs (origin + found/missing)
 - Optional **Also include workshop maps not listed on Map=**
 - **Rebuild vector basemap** runs the same bake as the artisan command (`POST /admin/players/map/bake-vector`)
 - Writes `public/map-vector/vanilla/map.json` (or `PZ_MAP_VECTOR_PATH`) and records audit action `map.vector_bake`
+
+Pack resolution globs the Workshop tree, so `vectorSources` / `vectorAsset` / `vectorBakeResult` are `Inertia::optional()` props: they are fetched when the panel is first opened, never by the page's 5-second poll.
 
 ## Configuration
 
@@ -117,9 +119,10 @@ After adding/removing **map mods**, re-run the bake and hard-refresh the browser
 
 - **CRS:** world squares via `CRS.Simple` with `scale = 2^zoom` (not DZI isometric).
 - **Coordinates:** markers / safe zones stay `x, y` world squares (`lat = -y`, `lng = x`).
-- **Performance:** cell-index culling + single canvas + rAF redraw; DPR capped at 2.
+- **Performance:** cell-index culling + single canvas + rAF redraw; DPR capped at 2. Vertices are projected with a per-frame affine transform (probed from the CRS, not `latLngToLayerPoint`, which rounds), so a pan allocates nothing per point.
 - **Accuracy:** absolute coords = `cell * 300 + local` from vanilla XML; colors match TIS layer fills.
-- **UI polish:** collapsible map key, Map= pack chips, live X/Y cursor, fit Home/World/Players, measure tool, dark paper mode.
+- **Labels:** drawn most-important-first with a collision pass — a label that would land on one already placed is dropped rather than overprinted.
+- **UI polish:** collapsible map key, Map= pack chips, live X/Y cursor, fit Home/World/Players, measure tool, dark paper mode, fullscreen, layer toggles, `#x/y/zoom` in the URL, right-click menu.
 - **Forest:** when `worldmap-forest.xml` sits beside `worldmap.xml`, bake one soft green rect per forest cell (dense overview without 100k polygons).
 
 ## 3D isometric (optional)
@@ -147,5 +150,12 @@ PZ_MAP_BASEMAP=proxy   # map.projectzomboid.com
 | Artisan command | `zomboid:build-worldmap-vector` (`--list-only`, `--scan-workshop`, `--xml`) |
 | Config selection | `app/Services/MapConfigBuilder.php` |
 | Canvas layer | `resources/js/lib/worldmap-vector-layer.ts` |
+| Activity heat layer | `resources/js/lib/activity-heat-layer.ts` |
 | Map component | `resources/js/components/pz-map.tsx` |
 | Tests | `tests/Unit/WorldMapVectorBuilderTest.php`, `WorldMapSourceLocatorTest.php`, `MapConfigBuilderTest.php` |
+
+## Overlays
+
+Beyond the basemap, `PzMap` can draw: player markers (faded by how stale an offline position is), safe zones and safehouse claims, located `game_events`, vehicles from the Lua mod's `vehicles.json`, and an activity density heatmap. Each is switchable from the **Layers** button; the admin map adds a time window (1 / 7 / 30 days) for the heatmap, which is an `Inertia::optional()` prop fetched only once the heatmap is switched on.
+
+Right-clicking the map copies the square under the cursor, and — with a player selected from the list below the map — teleports them there via `POST /admin/players/{name}/teleport` (RCON, audit action `player.teleport`).

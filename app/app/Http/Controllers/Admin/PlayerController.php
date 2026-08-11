@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\AdminSetPasswordRequest;
 use App\Http\Requests\Admin\BanPlayerRequest;
 use App\Http\Requests\Admin\KickPlayerRequest;
 use App\Http\Requests\Admin\SetAccessLevelRequest;
+use App\Http\Requests\Admin\TeleportPlayerRequest;
 use App\Models\PlayerStat;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -112,6 +113,42 @@ class PlayerController extends Controller
         );
 
         return response()->json(['message' => "Kicked {$name}", 'rcon_response' => $response, 'command' => $command]);
+    }
+
+    /**
+     * Put a player on a map square.
+     *
+     * Only online players can be moved — PZ's teleport acts on a loaded
+     * character, and silently doing nothing for an offline one would read as
+     * a teleport that worked.
+     */
+    public function teleport(TeleportPlayerRequest $request, string $name): JsonResponse
+    {
+        $name = RconSanitizer::playerName($name);
+        $x = (int) round((float) $request->validated('x'));
+        $y = (int) round((float) $request->validated('y'));
+        $z = (int) round((float) $request->validated('z', 0));
+
+        try {
+            $this->rcon->connect();
+            $command = "teleport \"{$name}\" {$x},{$y},{$z}";
+            $response = $this->rcon->command($command);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Failed: '.$e->getMessage()], 503);
+        }
+
+        $this->auditLogger->log(
+            actor: $request->user()->name ?? 'admin',
+            action: 'player.teleport',
+            target: $name,
+            details: ['x' => $x, 'y' => $y, 'z' => $z, 'rcon_response' => $response],
+            ip: $request->ip(),
+        );
+
+        return response()->json([
+            'message' => "Teleported {$name} to {$x}, {$y}",
+            'rcon_response' => $response,
+        ]);
     }
 
     public function ban(BanPlayerRequest $request, string $name): JsonResponse

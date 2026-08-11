@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\VehicleKeyHolder;
 use App\Services\MapConfigBuilder;
 use App\Services\OnlinePlayersReader;
 use App\Services\PlayerPositionReader;
 use App\Services\PlayersDbReader;
 use App\Services\PzIdentityResolver;
 use App\Services\SafeZoneManager;
+use App\Services\VehicleReader;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -28,6 +30,7 @@ class PlayerMapController extends Controller
         private readonly OnlinePlayersReader $onlinePlayersReader,
         private readonly MapConfigBuilder $mapConfigBuilder,
         private readonly SafeZoneManager $safeZoneManager,
+        private readonly VehicleReader $vehicleReader,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -43,7 +46,52 @@ class PlayerMapController extends Controller
             'mapConfig' => $mapConfig,
             'hasTiles' => (bool) ($mapConfig['hasBasemap'] ?? false),
             'safeZones' => $safeZoneConfig['enabled'] ? $safeZoneConfig['zones'] : [],
+            /**
+             * Deferred because the fleet file is read from disk and the map is
+             * useful the moment the player's own marker lands.
+             */
+            'vehicles' => $pzUsername === null
+                ? []
+                : Inertia::defer(fn () => $this->ownVehicles($pzUsername)),
         ]);
+    }
+
+    /**
+     * Vehicles this player holds a key to, and where they were left.
+     *
+     * Held keys are the player's own information, so this leaks nothing about
+     * anyone else's position. Keys remembered from an earlier session count:
+     * the whole point is finding a car after logging back in, and the mod can
+     * only see the inventories it currently has loaded.
+     *
+     * @return array<int, array{id: int, model: string, x: int, y: int, fuel_percent: int|null, engine_running: bool}>
+     */
+    private function ownVehicles(string $username): array
+    {
+        $remembered = VehicleKeyHolder::query()
+            ->where('username', $username)
+            ->pluck('vehicle_id')
+            ->all();
+
+        $mine = array_filter(
+            $this->vehicleReader->read()['vehicles'],
+            fn (array $vehicle) => $vehicle['x'] !== null
+                && $vehicle['y'] !== null
+                && (in_array($username, $vehicle['key_holders'], true)
+                    || in_array($vehicle['id'], $remembered, true)),
+        );
+
+        return array_values(array_map(
+            fn (array $vehicle) => [
+                'id' => $vehicle['id'],
+                'model' => $vehicle['model'],
+                'x' => (int) $vehicle['x'],
+                'y' => (int) $vehicle['y'],
+                'fuel_percent' => $vehicle['fuel_percent'],
+                'engine_running' => $vehicle['engine_running'],
+            ],
+            $mine,
+        ));
     }
 
     /**

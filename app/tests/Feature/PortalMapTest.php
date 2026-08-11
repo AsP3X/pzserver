@@ -1,11 +1,13 @@
 <?php
 
 use App\Models\User;
+use App\Models\VehicleKeyHolder;
 use App\Models\WhitelistEntry;
 use App\Services\OnlinePlayersReader;
 use App\Services\PlayerPositionReader;
 use App\Services\PlayersDbReader;
 use App\Services\SafeZoneManager;
+use App\Services\VehicleReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -158,6 +160,41 @@ it('passes safe zones through only while they are enabled', function () {
 
     $this->actingAs(mapPlayer())->get('/portal/map')
         ->assertInertia(fn ($page) => $page->has('safeZones', 0));
+});
+
+it('plots only the vehicles the player holds a key to', function () {
+    mockMapPositions(['username' => 'TestPlayer', 'x' => 1.0, 'y' => 2.0, 'z' => 0, 'is_dead' => false], null);
+    mockMapOnlinePlayers(['TestPlayer']);
+    mockMapSafeZones();
+
+    $vehicles = Mockery::mock(VehicleReader::class);
+    $vehicles->shouldReceive('read')->andReturn([
+        'timestamp' => null,
+        'vehicles' => [
+            ['id' => 1, 'model' => 'Chevalier Dart', 'x' => 100, 'y' => 200, 'fuel_percent' => 40, 'engine_running' => false, 'key_holders' => ['TestPlayer']],
+            ['id' => 2, 'model' => 'Franklin Valuline', 'x' => 300, 'y' => 400, 'fuel_percent' => 10, 'engine_running' => false, 'key_holders' => ['Someone else']],
+            /** Remembered from an earlier session, so still theirs to find. */
+            ['id' => 3, 'model' => 'Dash Elite', 'x' => 500, 'y' => 600, 'fuel_percent' => null, 'engine_running' => false, 'key_holders' => []],
+            /** Never located by the mod; nothing to draw. */
+            ['id' => 4, 'model' => 'Masterson Horizon', 'x' => null, 'y' => null, 'fuel_percent' => null, 'engine_running' => false, 'key_holders' => ['TestPlayer']],
+        ],
+    ]);
+    app()->instance(VehicleReader::class, $vehicles);
+
+    VehicleKeyHolder::query()->create([
+        'vehicle_id' => 3,
+        'key_id' => 77,
+        'username' => 'TestPlayer',
+        'last_seen_at' => now()->subDay(),
+    ]);
+
+    $this->actingAs(mapPlayer());
+
+    inertiaPartialReload('/portal/map', 'portal/map', 'vehicles')
+        ->assertOk()
+        ->assertJsonCount(2, 'props.vehicles')
+        ->assertJsonPath('props.vehicles.0.id', 1)
+        ->assertJsonPath('props.vehicles.1.id', 3);
 });
 
 it('serves basemap tiles to a player who is not an admin', function () {
