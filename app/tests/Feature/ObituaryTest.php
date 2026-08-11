@@ -78,3 +78,16 @@ it('shows the newest death first', function () {
     $this->get('/obituary')
         ->assertInertia(fn ($page) => $page->where('deaths.0.player', 'Newer'));
 });
+
+it('sends the map config so deaths can be plotted', function () {
+    deathEvent(['cause' => 'player', 'killer' => 'Someone']);
+
+    $this->get('/obituary')
+        ->assertInertia(fn ($page) => $page
+            ->has('mapConfig')
+            ->has('hasTiles')
+            /** The pins come from the same rows the list renders. */
+            ->where('deaths.0.x', 100)
+            ->where('deaths.0.y', 200)
+        );
+});

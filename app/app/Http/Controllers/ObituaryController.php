@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\GameEvent;
+use App\Services\MapConfigBuilder;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -17,12 +18,25 @@ class ObituaryController extends Controller
 {
     private const PAGE_SIZE = 30;
 
+    public function __construct(
+        private readonly MapConfigBuilder $mapConfigBuilder,
+    ) {}
+
     public function __invoke(): Response
     {
+        $mapConfig = $this->mapConfigBuilder->build();
+
         return Inertia::render('obituary', [
             'server_name' => config('zomboid.server_name', 'Project Zomboid Server'),
             'deaths' => $this->recentDeaths(),
             'toll' => $this->toll(),
+            /**
+             * The list already carries every death's coordinates; the map is
+             * the same rows plotted, so where the server kills people reads at
+             * a glance instead of one row at a time.
+             */
+            'mapConfig' => $mapConfig,
+            'hasTiles' => (bool) ($mapConfig['hasBasemap'] ?? false),
         ]);
     }
 

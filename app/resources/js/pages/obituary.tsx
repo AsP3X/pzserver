@@ -1,10 +1,14 @@
 import { Head, Link } from '@inertiajs/react';
 import { Bug, Flame, HelpCircle, MapPin, Skull, Swords } from 'lucide-react';
+import { useMemo } from 'react';
+import PzMap from '@/components/pz-map';
+import type { EventMarker } from '@/components/pz-map';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/use-translation';
 import PublicLayout from '@/layouts/public-layout';
 import { formatRelativeTime } from '@/lib/dates';
+import type { MapConfig } from '@/types/server';
 
 type Death = {
     id: number;
@@ -29,6 +33,8 @@ type Props = {
     server_name: string;
     deaths: Death[];
     toll: Toll;
+    mapConfig: MapConfig;
+    hasTiles: boolean;
 };
 
 const causeIcons: Record<string, typeof Skull> = {
@@ -94,8 +100,32 @@ function DeathRow({ death }: { death: Death }) {
     );
 }
 
-export default function Obituary({ server_name, deaths, toll }: Props) {
+export default function Obituary({ server_name, deaths, toll, mapConfig, hasTiles }: Props) {
     const { t } = useTranslation();
+
+    /**
+     * The same deaths the list below shows, as map pins. A death without
+     * coordinates is dropped rather than pinned at the origin, which would put
+     * it in the sea north-west of Muldraugh and read as a real place someone
+     * died.
+     */
+    const deathMarkers = useMemo<EventMarker[]>(
+        () =>
+            deaths
+                .filter((death): death is Death & { x: number; y: number } => death.x !== null && death.y !== null)
+                .map((death) => ({
+                    id: death.id,
+                    x: death.x,
+                    y: death.y,
+                    type: death.cause,
+                    player: death.player,
+                    target: death.killer,
+                    label: death.killer
+                        ? t('obituary.killed_by', { player: death.player, killer: death.killer })
+                        : t(`obituary.cause.${death.cause}`, { player: death.player }),
+                })),
+        [deaths, t],
+    );
 
     return (
         <PublicLayout>
@@ -139,6 +169,25 @@ export default function Obituary({ server_name, deaths, toll }: Props) {
                             </Card>
                         ))}
                 </div>
+
+                {deathMarkers.length > 0 && (
+                    <Card className="mb-6">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-base">
+                                <MapPin className="size-4" />
+                                {t('obituary.map')}
+                            </CardTitle>
+                            <CardDescription>
+                                {t('obituary.map_description', { count: String(deathMarkers.length) })}
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="h-[360px] overflow-hidden rounded-md border">
+                                <PzMap mapConfig={mapConfig} hasTiles={hasTiles} eventMarkers={deathMarkers} />
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
 
                 <Card>
                     <CardHeader>
