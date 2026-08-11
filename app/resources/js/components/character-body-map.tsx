@@ -43,9 +43,12 @@ type Props = {
  * The figure faces the viewer, so the character's right arm is the one on the
  * left of the screen — the same way a paper doll or a mirror works.
  *
- * Proportions are roughly canonical: the crotch sits at half the total height,
- * the head is about a seventh of it. Every region is at least 22 units across
- * at its label, because the reading has to fit inside the part it describes.
+ * Proportions follow the game's survivors rather than an anatomy chart: a small
+ * squarish head, shoulders better than twice its width, a neck all but hidden
+ * between them, and limbs thick enough to look like they carry a bag. Drawn to
+ * real human proportion it came out lanky and bulb-headed. Every region is
+ * still at least 22 units across at its label, because the reading has to fit
+ * inside the part it describes — that is what sets the minimum limb width.
  */
 const MIRROR_AXIS = 130;
 
@@ -61,76 +64,78 @@ type Region = {
 
 const REGIONS: Region[] = [
     {
+        /** Squarish rather than round: the game's survivors read as pixel art, not portraits. */
         part: 'Head',
-        d: 'M130,12 C143,12 152,23 152,37 C152,45 149,53 144,58 C140,63 135,67 130,67 C125,67 120,63 116,58 C111,53 108,45 108,37 C108,23 117,12 130,12 Z',
-        label: [130, 38],
-        pin: [145, 25],
+        d: 'M130,16 C141,16 149,23 149,33 L149,44 C149,54 141,60 130,60 C119,60 111,54 111,44 L111,33 C111,23 119,16 130,16 Z',
+        label: [130, 39],
+        pin: [143, 25],
     },
     {
+        /** Barely there. A visible neck is what made the first attempt look like a puppet. */
         part: 'Neck',
-        d: 'M119,60 L141,60 L141,82 L152,88 L108,88 L119,82 Z',
-        label: [130, 74],
-        pin: [139, 68],
+        d: 'M120,54 L140,54 L140,72 L152,80 L108,80 L120,72 Z',
+        label: [130, 70],
+        pin: [146, 76],
     },
     {
         part: 'Torso_Upper',
-        d: 'M108,88 L152,88 C160,89 165,95 166,104 L165,140 C164,158 163,170 162,178 L98,178 C97,170 96,158 95,140 L94,104 C95,95 100,89 108,88 Z',
-        label: [130, 132],
-        pin: [156, 100],
+        d: 'M108,80 L152,80 C164,81 172,88 174,100 L172,140 C171,156 169,168 168,176 L92,176 C91,168 89,156 88,140 L86,100 C88,88 96,81 108,80 Z',
+        label: [130, 128],
+        pin: [160, 94],
     },
     {
         part: 'Torso_Lower',
-        d: 'M98,178 L162,178 L160,214 C159,228 157,240 155,248 L105,248 C103,240 101,228 100,214 Z',
-        label: [130, 212],
-        pin: [154, 188],
+        d: 'M92,176 L168,176 L166,208 C165,222 163,234 161,244 L99,244 C97,234 95,222 94,208 Z',
+        label: [130, 208],
+        pin: [158, 186],
     },
     {
         part: 'Groin',
-        d: 'M105,248 L155,248 C154,262 150,276 143,286 L130,294 L117,286 C110,276 106,262 105,248 Z',
-        label: [130, 266],
-        pin: [146, 257],
+        d: 'M99,244 L161,244 C160,258 156,272 148,282 L130,290 L112,282 C104,272 100,258 99,244 Z',
+        label: [130, 262],
+        pin: [150, 252],
     },
     {
         /** The cap sweeps above the shoulder line so the deltoid rounds off the trunk. */
         part: 'UpperArm_R',
-        d: 'M94,104 C86,92 74,92 68,101 C64,108 64,116 65,124 L69,186 L91,186 C92,160 93,130 94,104 Z',
-        label: [78, 146],
-        pin: [86, 114],
+        d: 'M86,100 C78,86 64,86 58,96 C54,103 54,112 55,122 L60,184 L84,184 C85,158 85,126 86,100 Z',
+        label: [70, 144],
+        pin: [79, 110],
         side: 'R',
     },
     {
         part: 'ForeArm_R',
-        d: 'M69,186 L91,186 L92,252 L74,252 Z',
-        label: [82, 218],
-        pin: [87, 194],
+        d: 'M60,184 L84,184 L85,248 L66,248 Z',
+        label: [75, 216],
+        pin: [80, 192],
         side: 'R',
     },
     {
         part: 'Hand_R',
-        d: 'M74,252 L92,252 C94,264 93,278 87,286 C81,292 74,290 71,282 C69,272 71,261 74,252 Z',
-        label: [82, 268],
-        pin: [89, 258],
+        d: 'M66,248 L85,248 C88,262 87,276 81,284 C74,291 66,289 63,280 C61,270 63,258 66,248 Z',
+        label: [75, 266],
+        pin: [83, 256],
         side: 'R',
     },
     {
         part: 'UpperLeg_R',
-        d: 'M117,286 L129,294 L129,372 L100,372 C99,344 105,312 117,286 Z',
-        label: [114, 332],
-        pin: [123, 301],
+        d: 'M112,282 L129,290 L129,368 L98,368 C97,340 103,308 112,282 Z',
+        label: [113, 328],
+        pin: [122, 298],
         side: 'R',
     },
     {
         part: 'LowerLeg_R',
-        d: 'M100,372 L129,372 L129,442 L106,442 C102,420 99,396 100,372 Z',
-        label: [115, 405],
-        pin: [123, 382],
+        d: 'M98,368 L129,368 L129,436 L104,436 C100,414 97,392 98,368 Z',
+        label: [114, 400],
+        pin: [122, 378],
         side: 'R',
     },
     {
         part: 'Foot_R',
-        d: 'M106,442 L129,442 L129,460 C129,465 125,468 119,468 L98,468 C93,468 91,464 93,459 L106,442 Z',
-        label: [112, 453],
-        pin: [124, 448],
+        d: 'M104,436 L129,436 L129,454 C129,459 125,462 119,462 L96,462 C91,462 89,458 91,453 L104,436 Z',
+        label: [111, 448],
+        pin: [123, 442],
         side: 'R',
     },
 ];
@@ -269,7 +274,7 @@ function BodyFigure({
     });
 
     return (
-        <svg viewBox="0 0 260 478" className="h-auto w-full max-w-[240px]" role="img" aria-label={title}>
+        <svg viewBox="0 0 260 470" className="h-auto w-full max-w-[240px]" role="img" aria-label={title}>
             {placements.map((place) => {
                 const part = parts[place.part];
 
