@@ -64,9 +64,12 @@ pz_compose_cli_args() {
 }
 
 pz_compose() {
-  local args=()
-  # shellcheck disable=SC2207
-  mapfile -t args < <(pz_compose_cli_args)
+  # Read line-by-line rather than with `mapfile`: macOS ships bash 3.2, where
+  # mapfile does not exist and the args array would silently come back empty.
+  local args=() line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && args+=("$line")
+  done < <(pz_compose_cli_args)
   docker compose "${args[@]}" "$@"
 }
 
