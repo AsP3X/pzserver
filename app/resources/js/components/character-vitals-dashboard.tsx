@@ -18,7 +18,7 @@ import {
     Wind,
     Zap,
 } from 'lucide-react';
-import { CharacterBodyMap } from '@/components/character-body-map';
+import { CharacterBodyMap, defaultBodyParts, defaultBodyTemperature } from '@/components/character-body-map';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/use-translation';
@@ -494,25 +494,38 @@ export function CharacterVitalsDashboard({ heartbeat, heartbeatAvailable, heartb
 
     if (!heartbeatAvailable) return null;
 
-    if (!heartbeat) {
-        return (
-            <Card>
-                <CardContent className="py-8">
-                    <p className="text-muted-foreground text-center text-sm">{t('portal.character.vitals.no_heartbeat')}</p>
-                </CardContent>
-            </Card>
-        );
-    }
+    const hasAnyData =
+        heartbeat !== null && Object.values(heartbeat).some((v) => v !== undefined && v !== null);
 
-    const hasAnyData = Object.values(heartbeat).some((v) => v !== undefined && v !== null);
-
+    /**
+     * Nothing has ever been reported for this character, so draw an unhurt,
+     * comfortable body rather than an apology.
+     *
+     * A heartbeat stops when the player logs out but the file it wrote stays on
+     * disk, so an offline player with any history lands in the branch below and
+     * sees their own last reading. This one is only for a character the server
+     * has never described — and it says so, because invented numbers passed off
+     * as readings are what made the 1.7 dashboard worthless.
+     */
     if (!hasAnyData) {
         return (
-            <Card>
-                <CardContent className="py-8">
-                    <p className="text-muted-foreground text-center text-sm">{t('portal.character.vitals.waiting_for_data')}</p>
-                </CardContent>
-            </Card>
+            <div className="space-y-6">
+                <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-xl font-bold tracking-tight">{t('portal.character.vitals.title')}</h2>
+                    <Badge variant="secondary" className="text-xs">Knox Relay</Badge>
+                    <Badge variant="outline" className="text-xs">
+                        {t('portal.character.vitals.defaults')}
+                    </Badge>
+                </div>
+                <CharacterBodyMap
+                    parts={defaultBodyParts()}
+                    temperature={defaultBodyTemperature()}
+                    overall={100}
+                />
+                <p className="text-muted-foreground text-center text-sm">
+                    {t('portal.character.vitals.no_heartbeat')}
+                </p>
+            </div>
         );
     }
 

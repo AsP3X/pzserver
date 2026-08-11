@@ -16,6 +16,7 @@ beforeEach(function () {
     mkdir($this->data.'/backups/startup', 0755, true);
     mkdir($this->data.'/backups/version', 0755, true);
     mkdir($this->data.'/Lua/inventory', 0755, true);
+    mkdir($this->data.'/Lua/vitals', 0755, true);
 
     file_put_contents($this->data."/Saves/Multiplayer/{$server}/map/chunk.bin", 'world');
     file_put_contents($this->data."/Saves/Multiplayer/{$server}/players.db", 'players');
@@ -26,6 +27,7 @@ beforeEach(function () {
     file_put_contents($this->data.'/backups/version/backup_1.zip', 'zip');
     file_put_contents($this->data.'/Lua/players_live.json', '{"x":1}');
     file_put_contents($this->data.'/Lua/inventory/Alice.json', '{}');
+    file_put_contents($this->data.'/Lua/vitals/Alice.json', '{"health":{}}');
 
     // Config to preserve
     file_put_contents($this->data."/Server/{$server}.ini", 'PublicName=ZomboidServer');
@@ -67,7 +69,11 @@ it('deletes save worlds and player databases', function () {
         ->and(file_exists($this->data.'/backups/startup/backup_1.zip'))->toBeFalse()
         ->and(file_exists($this->data.'/backups/version/backup_1.zip'))->toBeFalse()
         ->and(file_get_contents($this->data.'/Lua/players_live.json'))->toBe('')
-        ->and(file_exists($this->data.'/Lua/inventory/Alice.json'))->toBeFalse();
+        ->and(file_exists($this->data.'/Lua/inventory/Alice.json'))->toBeFalse()
+        // The character page shows the last heartbeat when its owner is offline,
+        // so a survivor here is a destroyed character still on display.
+        ->and(file_exists($this->data.'/Lua/vitals/Alice.json'))->toBeFalse()
+        ->and(is_dir($this->data.'/Lua/vitals'))->toBeTrue();
 });
 
 it('preserves sandbox, spawn, and server.ini configuration', function () {

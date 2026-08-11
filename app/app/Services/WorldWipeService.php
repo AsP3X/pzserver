@@ -31,6 +31,16 @@ use Illuminate\Support\Facades\Schema;
 class WorldWipeService
 {
     /**
+     * Bridge directories holding one file per player, all world-tied.
+     *
+     * Emptied on a wipe but not removed — Knox Relay writes into them and does
+     * not create them. Anything the mod adds later belongs on this list.
+     *
+     * @var list<string>
+     */
+    private const PER_PLAYER_DIRS = ['inventory', 'vitals'];
+
+    /**
      * Full wipe: filesystem saves + website player data.
      *
      * @return array{
@@ -152,10 +162,20 @@ class WorldWipeService
                 if ($base === '.gitkeep') {
                     continue;
                 }
-                if (is_dir($child) && $base === 'inventory') {
-                    foreach ($this->listChildren($child) as $invFile) {
-                        if ($this->forceRemove($invFile)) {
-                            $deleted[] = $invFile;
+                /**
+                 * Per-player bridge directories, emptied but kept: the mod
+                 * writes into them and does not create them itself.
+                 *
+                 * Listed rather than special-casing one name. vitals/ arrived
+                 * after inventory/ and was missed, so a wiped world left every
+                 * player's last body on disk — and the character page shows the
+                 * last heartbeat when its owner is offline, which meant it kept
+                 * showing a character the wipe had destroyed.
+                 */
+                if (is_dir($child) && in_array($base, self::PER_PLAYER_DIRS, true)) {
+                    foreach ($this->listChildren($child) as $playerFile) {
+                        if ($this->forceRemove($playerFile)) {
+                            $deleted[] = $playerFile;
                         }
                     }
 

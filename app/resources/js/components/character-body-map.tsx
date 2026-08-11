@@ -93,6 +93,27 @@ function humanPart(part: string): string {
     return part.replace(/_/g, ' ');
 }
 
+/**
+ * What a character looks like before the server has ever reported one: whole,
+ * unwounded, and comfortable.
+ *
+ * The caller is expected to label this as a placeholder. Showing invented
+ * numbers as though they were readings is the exact failure that made 1.7's
+ * dashboard useless — the difference is that these are declared, not defaults
+ * leaking out of a swallowed error.
+ */
+export const DEFAULT_SKIN_CELSIUS = 36.6;
+
+export function defaultBodyParts(): Record<string, BodyPartHealth> {
+    return Object.fromEntries(REGIONS.map((region) => [region.part, { health: 100, wounds: [] }]));
+}
+
+export function defaultBodyTemperature(): Record<string, BodyPartTemp> {
+    return Object.fromEntries(
+        REGIONS.map((region) => [region.part, { skin: DEFAULT_SKIN_CELSIUS, insulation: 0 }]),
+    );
+}
+
 function Legend({ bands, withWound }: { bands: { fill: string; key: string }[]; withWound?: boolean }) {
     const { t } = useTranslation();
 

@@ -1318,6 +1318,7 @@
     "portal.character.vitals.clothing_desc": "ტანსაცმლის მდგომარეობა, ხვრელები და დაცვა.",
     "portal.character.vitals.condition": "მდგომარეობა",
     "portal.character.vitals.core_temp": "ძირითადი ტემპერატურა",
+    "portal.character.vitals.defaults": "ნაგულისხმევი",
     "portal.character.vitals.drunk": "მთვრალი",
     "portal.character.vitals.encumbrance": "დატვირთვა",
     "portal.character.vitals.encumbrance_desc": "ტვირთი vs. ტევადობა.",

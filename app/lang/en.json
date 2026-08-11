@@ -1319,6 +1319,7 @@
     "portal.character.vitals.clothing_desc": "Per-garment condition, holes, and protection.",
     "portal.character.vitals.condition": "Condition",
     "portal.character.vitals.core_temp": "Core temperature",
+    "portal.character.vitals.defaults": "Defaults",
     "portal.character.vitals.drunk": "Drunk",
     "portal.character.vitals.encumbrance": "Encumbrance",
     "portal.character.vitals.encumbrance_desc": "Carry load vs. capacity.",
