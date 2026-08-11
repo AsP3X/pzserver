@@ -37,7 +37,7 @@ afterEach(function () {
 test('reports unavailable until the bridge exports a version', function () {
     expect($this->service->isAvailable())->toBeFalse();
 
-    ($this->writeBridgeVersion)('1.8');
+    ($this->writeBridgeVersion)('1.9');
 
     expect($this->service->isAvailable())->toBeTrue();
 });
@@ -46,7 +46,7 @@ test('reports unavailable on a bridge too old to export vitals', function (strin
     ($this->writeBridgeVersion)($version);
 
     expect($this->service->isAvailable())->toBeFalse();
-})->with(['1.2', '1.6', '1.7']);
+})->with(['1.2', '1.6', '1.7', '1.8']);
 
 test('stays available on bridges newer than the one that added vitals', function () {
     ($this->writeBridgeVersion)('1.10');

@@ -95,6 +95,19 @@ local function round2(value)
     return math.floor(value * 100 + 0.5) / 100
 end
 
+--- Whether a keyed table has no entries.
+---
+--- `next` is the obvious way to write this and is not available: PZ runs Kahlua,
+--- whose base library ships pcall/select/type/unpack and friends but no `next`
+--- at all, so calling it raises rather than returning nil.
+local function isEmpty(collection)
+    for _ in pairs(collection) do
+        return false
+    end
+
+    return true
+end
+
 --------------------------------------------------------------------------
 -- Skills
 --------------------------------------------------------------------------
@@ -136,14 +149,15 @@ function KR_Vitals.perkProgress(player, perk, level)
         return 0
     end
 
-    local entry = safe(function() return system:getXP(perk) end)
-    if not entry then
+    --- getXP hands back the perk's total XP as a number, not an object to ask
+    --- further questions of. The level thresholds live on the perk itself.
+    local total = safe(function() return system:getXP(perk) end)
+    if type(total) ~= "number" then
         return 0
     end
 
-    local total = safe(function() return entry:getTotalXp() end, 0)
-    local nextLevel = safe(function() return entry:getXpForLevel(level + 1) end, 0)
-    local thisLevel = safe(function() return entry:getXpForLevel(level) end, 0)
+    local nextLevel = safe(function() return perk:getTotalXpForLevel(level + 1) end, 0)
+    local thisLevel = safe(function() return perk:getTotalXpForLevel(level) end, 0)
 
     if nextLevel <= thisLevel or nextLevel <= 0 then
         return 0
@@ -168,9 +182,14 @@ local function collectInfo(player)
 
     info.name = safe(function() return player:getUsername() end)
 
+    --- The descriptor holds a CharacterProfession object, not a name.
     local descriptor = safe(function() return player:getDescriptor() end)
     if descriptor then
-        info.profession = safe(function() return descriptor:getProfession() end)
+        local profession = safe(function() return descriptor:getCharacterProfession() end)
+
+        if profession then
+            info.profession = safe(function() return profession:getName() end)
+        end
     end
 
     local carried = {}
@@ -313,7 +332,7 @@ local function collectTemperature(player)
         end
     end
 
-    if next(parts) == nil then
+    if isEmpty(parts) then
         return nil
     end
 
@@ -434,14 +453,25 @@ local function collectClothing(player)
             local item = safe(function() return entry:getItem() end, entry)
 
             if item then
-                items[#items + 1] = {
+                local garment = {
                     slot = tostring(safe(function() return item:getBodyLocation() end, "unknown")),
                     name = safe(function() return item:getName() end, "unknown"),
                     condition = round1(safe(function() return item:getCondition() end, 100)),
-                    holes = safe(function() return item:getHolesNumber() end, 0),
-                    bite = round1(safe(function() return item:getBiteDefense() end, 0)),
-                    scratch = round1(safe(function() return item:getScratchDefense() end, 0)),
+                    holes = 0,
+                    bite = 0,
+                    scratch = 0,
                 }
+
+                --- Holes and defence live on Clothing, and a worn slot can hold
+                --- something that is not one — a backpack is the common case.
+                --- Asking anyway raises once per bag per heartbeat.
+                if safe(function() return item:IsClothing() end, false) then
+                    garment.holes = safe(function() return item:getHolesNumber() end, 0)
+                    garment.bite = round1(safe(function() return item:getBiteDefense() end, 0))
+                    garment.scratch = round1(safe(function() return item:getScratchDefense() end, 0))
+                end
+
+                items[#items + 1] = garment
             end
         end
     end

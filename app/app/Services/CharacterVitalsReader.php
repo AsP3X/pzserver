@@ -9,9 +9,9 @@ use Carbon\CarbonImmutable;
  *
  * KR_Vitals writes a per-player heartbeat every ten real seconds — health and
  * wounds per body part, skills with XP, moodles, equipped weapon, worn
- * clothing, temperature, protection, encumbrance, quickload and recently
- * learned recipes — into Lua/vitals/<username>.json on the game server, which
- * the app container mounts at /lua-bridge/vitals/.
+ * clothing, body temperature, encumbrance and recently learned recipes — into
+ * Lua/vitals/<username>.json on the game server, which the app container mounts
+ * at /lua-bridge/vitals/.
  */
 class CharacterVitalsReader
 {
@@ -21,13 +21,14 @@ class CharacterVitalsReader
      * Servers on an older Knox Relay write no heartbeats at all, and the page
      * needs to tell that apart from a player who simply has not logged in yet.
      *
-     * 1.8 rather than 1.7, which did write heartbeats: it called Build 41
-     * accessors that Build 42 had moved, and because every collector swallows
-     * its errors the file was full of defaults — every body part at 100% with
-     * no wounds, a flat 37°C, no moodles. Showing that is worse than showing
-     * nothing, so 1.7 is treated as not having the feature.
+     * 1.9 rather than 1.7 or 1.8, both of which did write heartbeats. Each
+     * called Build 41 accessors that Build 42 had moved, and because every
+     * collector swallows its own errors the files were full of defaults — body
+     * parts at 100% with no wounds, a flat 37°C, no profession, no skill
+     * progress. Showing that is worse than showing nothing, so neither counts
+     * as having the feature.
      */
-    private const MINIMUM_MOD_VERSION = '1.8';
+    private const MINIMUM_MOD_VERSION = '1.9';
 
     private string $vitalsDir;
 

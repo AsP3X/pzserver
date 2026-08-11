@@ -42,7 +42,7 @@ package.preload["KR_Codec"] = function() return Codec end
 local written = {}
 package.preload["KR_Bridge"] = function()
     return {
-        VERSION = "1.8",
+        VERSION = "1.9",
         wallStamp = function() return "2026-08-10T12:00:00" end,
         worldStamp = function() return "1993-07-09T12:00:00" end,
         writeText = function(path, body)
@@ -116,11 +116,15 @@ local STAT_VALUES = {
     INTOXICATION = 0, TEMPERATURE = 37, SICKNESS = 0, POISON = 0,
 }
 
-local PERKS = {
-    { getName = function() return "Strength" end },
-    { getName = function() return "Carpentry" end },
-    { getName = function() return "Cooking" end },
-}
+--- Cumulative XP to reach each level, which is what getTotalXpForLevel returns.
+local function perk(name)
+    return {
+        getName = function() return name end,
+        getTotalXpForLevel = function(_, level) return level * 100 end,
+    }
+end
+
+local PERKS = { perk("Strength"), perk("Carpentry"), perk("Cooking") }
 PerkFactory = { PerkList = list(PERKS) }
 CharacterTraitDefinition = nil
 
@@ -182,7 +186,11 @@ local function fakePlayer(name, opts)
 
     return {
         getUsername = function() return name end,
-        getDescriptor = function() return { getProfession = function() return "carpenter" end } end,
+        getDescriptor = function()
+            return { getCharacterProfession = function()
+                return { getName = function() return "carpenter" end }
+            end }
+        end,
         getCharacterTraits = function()
             return { getKnownTraits = function() return list({ "Thickskinned", "Brave" }) end }
         end,
@@ -192,12 +200,11 @@ local function fakePlayer(name, opts)
         getPerkLevel = function(_, perk) return LEVELS[perk.getName()] or 0 end,
         getXp = function()
             return {
-                getXP = function(_, perk)
-                    if perk.getName() ~= "Strength" then return nil end
-                    return {
-                        getTotalXp = function() return 150 end,
-                        getXpForLevel = function(_, lvl) return lvl == 6 and 200 or 100 end,
-                    }
+                --- A number. It used to be stubbed as an object with
+                --- getTotalXp/getXpForLevel, which the engine has never had.
+                getXP = function(_, p)
+                    if p.getName() ~= "Strength" then return nil end
+                    return 550
                 end,
             }
         end,
@@ -231,12 +238,26 @@ local function fakePlayer(name, opts)
                 {
                     getItem = function()
                         return {
+                            IsClothing = function() return true end,
                             getBodyLocation = function() return "Torso" end,
                             getName = function() return "Jacket" end,
                             getCondition = function() return 90 end,
                             getHolesNumber = function() return 1 end,
                             getBiteDefense = function() return 40 end,
                             getScratchDefense = function() return 55 end,
+                        }
+                    end,
+                },
+                {
+                    --- A backpack: worn, but not Clothing, so it has none of the
+                    --- holes/defence accessors. Asking anyway used to raise once
+                    --- per bag per heartbeat.
+                    getItem = function()
+                        return {
+                            IsClothing = function() return false end,
+                            getBodyLocation = function() return "Back" end,
+                            getName = function() return "Big Hiking Bag" end,
+                            getCondition = function() return 80 end,
                         }
                     end,
                 },
@@ -250,6 +271,12 @@ local function fakePlayer(name, opts)
         isDead = function() return false end,
     }
 end
+
+--- PZ runs Kahlua, whose base library has no `next` — pcall, select, type,
+--- unpack and friends, but not that one. Dropping it here makes any use in mod
+--- code fail in CI instead of once per heartbeat on a live server. `pairs` is
+--- unaffected: it returns the builtin iterator rather than looking up a global.
+next = nil
 
 --------------------------------------------------------------------------
 -- Load the real modules
@@ -276,6 +303,8 @@ roster = { player }
 local beat = Vitals.heartbeat(player)
 
 check("heartbeat is a keyed table", type(beat) == "table" and beat.info ~= nil)
+check("profession is read off the CharacterProfession object",
+    beat.info.profession == "carpenter", "got " .. tostring(beat.info.profession))
 check("info carries the identity fields",
     beat.info.name == "Bob" and beat.info.profession == "carpenter" and beat.info.kills == 412,
     "got " .. tostring(beat.info.name) .. "/" .. tostring(beat.info.profession))
@@ -286,7 +315,8 @@ check("no favourite weapon is claimed", beat.info.favourite_weapon == nil)
 
 check("untrained perks are omitted", beat.skills.Cooking == nil)
 check("trained perks carry their level", beat.skills.Strength.level == 5 and beat.skills.Carpentry.level == 2)
-check("xp progress is a 0-1 fraction", beat.skills.Strength.xp == 0.5, "got " .. tostring(beat.skills.Strength.xp))
+check("xp progress is a 0-1 fraction against the perk's own thresholds",
+    beat.skills.Strength.xp == 0.5, "got " .. tostring(beat.skills.Strength.xp))
 check("a perk with no xp entry still reports a level", beat.skills.Carpentry.xp == 0, "got " .. tostring(beat.skills.Carpentry.xp))
 
 -- Body parts come from the enum, so the count and the names track the build.
@@ -335,6 +365,11 @@ check("sharpness is a proportion of the item's maximum", beat.weapon.sharpness =
 check("attachments come from getAttachmentsProvided", beat.weapon.attachments[1] == "Scope")
 check("absent firearm fields are omitted", beat.weapon.ammo == nil and beat.weapon.chamber == nil)
 check("clothing is unwrapped from the worn entry", beat.clothing.items[1].name == "Jacket")
+check("a worn non-garment is still listed", beat.clothing.items[2].name == "Big Hiking Bag")
+check("a worn non-garment reports no holes or defence", (function()
+    local bag = beat.clothing.items[2]
+    return bag.holes == 0 and bag.bite == 0 and bag.scratch == 0
+end)())
 check("clothing keeps both defences", beat.clothing.items[1].bite == 40 and beat.clothing.items[1].scratch == 55)
 check("encumbrance is load over capacity", beat.encumbrance.current == 8.3 and beat.encumbrance.capacity == 20)
 check("recipes are read without draining", beat.recipes[1].name == "Make Stew")
