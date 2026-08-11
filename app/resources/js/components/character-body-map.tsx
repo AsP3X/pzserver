@@ -1,3 +1,4 @@
+import { BODY_CANVAS, BODY_PART_ORDER, BODY_SPRITES } from '@/components/character-body-sprites';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/use-translation';
 
@@ -8,6 +9,10 @@ import { useTranslation } from '@/hooks/use-translation';
  * questions a player has at the same moment — a cold hand and a bitten hand want
  * different responses, and reading them one after the other loses the comparison
  * between them.
+ *
+ * The silhouette is the game's own, so the body here is the body the player
+ * already reads in game. It arrives as one alpha mask per part, tinted from our
+ * palette through a CSS mask — the shape is theirs, every colour is ours.
  *
  * Every part carries its own number as well as its colour. That is not
  * decoration: the health palette is green / amber / red, and green against
@@ -32,124 +37,14 @@ type Props = {
     overall?: number;
 };
 
-/**
- * The figure, drawn once and mirrored.
- *
- * Only the centre line and the character's right side are authored here; the
- * left is the same path reflected about x=130 at render time. Hand-writing both
- * halves invites them to drift a pixel apart, and a lopsided body reads as a
- * bug in the data rather than in the drawing.
- *
- * The figure faces the viewer, so the character's right arm is the one on the
- * left of the screen — the same way a paper doll or a mirror works.
- *
- * Proportions follow the game's survivors rather than an anatomy chart: a small
- * squarish head, shoulders better than twice its width, a neck all but hidden
- * between them, and limbs thick enough to look like they carry a bag. Drawn to
- * real human proportion it came out lanky and bulb-headed. Every region is
- * still at least 22 units across at its label, because the reading has to fit
- * inside the part it describes — that is what sets the minimum limb width.
- */
-const MIRROR_AXIS = 130;
-
-type Region = {
-    part: string;
-    d: string;
-    /** Where the reading sits, and where a wound pin hangs off it. */
-    label: [number, number];
-    pin: [number, number];
-    /** Centre parts are drawn once; sided parts are drawn twice, mirrored. */
-    side?: 'R';
-};
-
-const REGIONS: Region[] = [
-    {
-        /** Squarish rather than round: the game's survivors read as pixel art, not portraits. */
-        part: 'Head',
-        d: 'M130,16 C141,16 149,23 149,33 L149,44 C149,54 141,60 130,60 C119,60 111,54 111,44 L111,33 C111,23 119,16 130,16 Z',
-        label: [130, 39],
-        pin: [143, 25],
-    },
-    {
-        /** Barely there. A visible neck is what made the first attempt look like a puppet. */
-        part: 'Neck',
-        d: 'M120,54 L140,54 L140,72 L152,80 L108,80 L120,72 Z',
-        label: [130, 70],
-        pin: [146, 76],
-    },
-    {
-        part: 'Torso_Upper',
-        d: 'M108,80 L152,80 C164,81 172,88 174,100 L172,140 C171,156 169,168 168,176 L92,176 C91,168 89,156 88,140 L86,100 C88,88 96,81 108,80 Z',
-        label: [130, 128],
-        pin: [160, 94],
-    },
-    {
-        part: 'Torso_Lower',
-        d: 'M92,176 L168,176 L166,208 C165,222 163,234 161,244 L99,244 C97,234 95,222 94,208 Z',
-        label: [130, 208],
-        pin: [158, 186],
-    },
-    {
-        part: 'Groin',
-        d: 'M99,244 L161,244 C160,258 156,272 148,282 L130,290 L112,282 C104,272 100,258 99,244 Z',
-        label: [130, 262],
-        pin: [150, 252],
-    },
-    {
-        /** The cap sweeps above the shoulder line so the deltoid rounds off the trunk. */
-        part: 'UpperArm_R',
-        d: 'M86,100 C78,86 64,86 58,96 C54,103 54,112 55,122 L60,184 L84,184 C85,158 85,126 86,100 Z',
-        label: [70, 144],
-        pin: [79, 110],
-        side: 'R',
-    },
-    {
-        part: 'ForeArm_R',
-        d: 'M60,184 L84,184 L85,248 L66,248 Z',
-        label: [75, 216],
-        pin: [80, 192],
-        side: 'R',
-    },
-    {
-        part: 'Hand_R',
-        d: 'M66,248 L85,248 C88,262 87,276 81,284 C74,291 66,289 63,280 C61,270 63,258 66,248 Z',
-        label: [75, 266],
-        pin: [83, 256],
-        side: 'R',
-    },
-    {
-        part: 'UpperLeg_R',
-        d: 'M112,282 L129,290 L129,368 L98,368 C97,340 103,308 112,282 Z',
-        label: [113, 328],
-        pin: [122, 298],
-        side: 'R',
-    },
-    {
-        part: 'LowerLeg_R',
-        d: 'M98,368 L129,368 L129,436 L104,436 C100,414 97,392 98,368 Z',
-        label: [114, 400],
-        pin: [122, 378],
-        side: 'R',
-    },
-    {
-        part: 'Foot_R',
-        d: 'M104,436 L129,436 L129,454 C129,459 125,462 119,462 L96,462 C91,462 89,458 91,453 L104,436 Z',
-        label: [111, 448],
-        pin: [123, 442],
-        side: 'R',
-    },
-];
-
-/** Every part the figure can draw, both sides of the mirrored ones. */
-const ALL_PARTS: string[] = REGIONS.flatMap((region) =>
-    region.side === 'R' ? [region.part, region.part.replace(/_R$/, '_L')] : [region.part],
-);
+/** Every part the figure draws. */
+const ALL_PARTS: string[] = BODY_PART_ORDER;
 
 /** Status bands, best first, in the order the legend reads them. */
 const HEALTH_BANDS = [
-    { floor: 67, fill: 'fill-green-500/70', key: 'healthy' },
-    { floor: 34, fill: 'fill-yellow-500/70', key: 'hurt' },
-    { floor: 0, fill: 'fill-red-500/70', key: 'critical' },
+    { floor: 67, fill: 'bg-green-500/80', key: 'healthy' },
+    { floor: 34, fill: 'bg-yellow-500/80', key: 'hurt' },
+    { floor: 0, fill: 'bg-red-500/80', key: 'critical' },
 ];
 
 function healthFill(value: number): string {
@@ -162,20 +57,20 @@ function healthFill(value: number): string {
  * character is neither.
  */
 const TEMPERATURE_BANDS = [
-    { fill: 'fill-blue-600/70', key: 'freezing' },
-    { fill: 'fill-sky-400/70', key: 'cold' },
-    { fill: 'fill-muted-foreground/25', key: 'comfortable' },
-    { fill: 'fill-orange-400/70', key: 'warm' },
-    { fill: 'fill-red-500/70', key: 'overheating' },
+    { fill: 'bg-blue-600/80', key: 'freezing' },
+    { fill: 'bg-sky-400/80', key: 'cold' },
+    { fill: 'bg-muted-foreground/30', key: 'comfortable' },
+    { fill: 'bg-orange-400/80', key: 'warm' },
+    { fill: 'bg-red-500/80', key: 'overheating' },
 ];
 
 function temperatureFill(celsius: number): string {
-    if (celsius <= 28) return 'fill-blue-600/70';
-    if (celsius <= 32) return 'fill-sky-400/70';
-    if (celsius < 38.5) return 'fill-muted-foreground/25';
-    if (celsius < 40) return 'fill-orange-400/70';
+    if (celsius <= 28) return 'bg-blue-600/80';
+    if (celsius <= 32) return 'bg-sky-400/80';
+    if (celsius < 38.5) return 'bg-muted-foreground/30';
+    if (celsius < 40) return 'bg-orange-400/80';
 
-    return 'fill-red-500/70';
+    return 'bg-red-500/80';
 }
 
 function humanPart(part: string): string {
@@ -210,17 +105,13 @@ function Legend({ bands, withWound }: { bands: { fill: string; key: string }[]; 
         <ul className="space-y-1.5">
             {bands.map((band) => (
                 <li key={band.key} className="flex items-center gap-2 text-xs">
-                    <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden="true">
-                        <rect width="12" height="12" rx="3" className={`${band.fill} stroke-border`} strokeWidth={1} />
-                    </svg>
+                    <span className={`size-3 shrink-0 rounded-sm border border-border ${band.fill}`} aria-hidden="true" />
                     <span className="text-muted-foreground">{t(`portal.character.vitals.band_${band.key}`)}</span>
                 </li>
             ))}
             {withWound && (
                 <li className="flex items-center gap-2 text-xs">
-                    <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden="true">
-                        <circle cx="6" cy="6" r="4" className="fill-red-600" />
-                    </svg>
+                    <span className="size-2.5 shrink-0 rounded-full bg-red-600" aria-hidden="true" />
                     <span className="text-muted-foreground">{t('portal.character.vitals.band_wounded')}</span>
                 </li>
             )}
@@ -244,92 +135,76 @@ function BodyFigure({
     labelFor: (part: string) => string;
     showWounds: boolean;
 }) {
-    /**
-     * Shapes first, then every reading on top.
-     *
-     * Kept in two passes on purpose: the left half is the right half under a
-     * reflection, and text inside that group would come out backwards. Drawing
-     * all the silhouette first also means no neighbouring limb can overlap a
-     * number that has already been placed.
-     */
-    const placements = REGIONS.flatMap((region) => {
-        const own = { part: region.part, d: region.d, label: region.label, pin: region.pin, flip: false };
-
-        if (region.side !== 'R') {
-            return [own];
-        }
-
-        const mirror = (x: number): number => MIRROR_AXIS * 2 - x;
-
-        return [
-            own,
-            {
-                part: region.part.replace(/_R$/, '_L'),
-                d: region.d,
-                label: [mirror(region.label[0]), region.label[1]] as [number, number],
-                pin: [mirror(region.pin[0]), region.pin[1]] as [number, number],
-                flip: true,
-            },
-        ];
-    });
+    /** Percentages, so the whole figure scales with its container. */
+    const pct = (value: number, axis: 'width' | 'height'): string =>
+        `${(value / (axis === 'width' ? BODY_CANVAS.width : BODY_CANVAS.height)) * 100}%`;
 
     return (
-        <svg viewBox="0 0 260 470" className="h-auto w-full max-w-[240px]" role="img" aria-label={title}>
-            {placements.map((place) => {
-                const part = parts[place.part];
+        <div
+            className="relative w-full max-w-[190px]"
+            style={{ aspectRatio: `${BODY_CANVAS.width} / ${BODY_CANVAS.height}` }}
+            role="img"
+            aria-label={title}
+        >
+            {BODY_PART_ORDER.map((name) => {
+                const sprite = BODY_SPRITES[name];
+                const part = parts[name];
+                const wounded = showWounds && part && part.wounds.length > 0;
 
                 return (
-                    <path
-                        key={`shape-${place.part}`}
-                        d={place.d}
-                        transform={place.flip ? `translate(${MIRROR_AXIS * 2},0) scale(-1,1)` : undefined}
-                        /** A build without this part draws it absent, not healthy. */
-                        className={`${part ? fillFor(place.part) : 'fill-muted'} stroke-border`}
-                        strokeWidth={1.25}
-                        strokeLinejoin="round"
-                    />
-                );
-            })}
-
-            {placements.map((place) => {
-                const part = parts[place.part];
-                if (!part) {
-                    return null;
-                }
-
-                const wounded = showWounds && part.wounds.length > 0;
-
-                return (
-                    <g key={`reading-${place.part}`} className="cursor-default">
-                        <title>{labelFor(place.part)}</title>
+                    <div key={name} title={part ? labelFor(name) : undefined}>
                         {/*
-                          The number, in text ink rather than the fill's colour —
-                          identity never rides on hue alone here.
+                          The sprite is an alpha mask, so the element's own
+                          background is what you see. A part the server did not
+                          report stays muted rather than reading as healthy.
                         */}
-                        <text
-                            x={place.label[0]}
-                            y={place.label[1]}
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            className="fill-foreground font-medium tabular-nums"
-                            style={{ fontSize: 11 }}
-                        >
-                            {readingFor(place.part)}
-                        </text>
-                        {/* Wounds get a mark of their own, so they survive a greyscale print. */}
-                        {wounded && (
-                            <circle
-                                cx={place.pin[0]}
-                                cy={place.pin[1]}
-                                r={4.5}
-                                className="fill-red-600 stroke-background"
-                                strokeWidth={1.5}
-                            />
+                        <div
+                            className={part ? fillFor(name) : 'bg-muted'}
+                            style={{
+                                position: 'absolute',
+                                left: pct(sprite.x, 'width'),
+                                top: pct(sprite.y, 'height'),
+                                width: pct(sprite.w, 'width'),
+                                height: pct(sprite.h, 'height'),
+                                maskImage: `url(${sprite.mask})`,
+                                WebkitMaskImage: `url(${sprite.mask})`,
+                                maskSize: '100% 100%',
+                                WebkitMaskSize: '100% 100%',
+                                maskRepeat: 'no-repeat',
+                                WebkitMaskRepeat: 'no-repeat',
+                            }}
+                        />
+                        {part && (
+                            <>
+                                {/*
+                                  The number, in text ink rather than the fill's
+                                  colour — identity never rides on hue alone here.
+                                */}
+                                <span
+                                    className="text-foreground pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 text-[10px] leading-none font-semibold tabular-nums"
+                                    style={{
+                                        left: pct(sprite.label[0], 'width'),
+                                        top: pct(sprite.label[1], 'height'),
+                                    }}
+                                >
+                                    {readingFor(name)}
+                                </span>
+                                {/* Wounds get a mark of their own, so they survive a greyscale print. */}
+                                {wounded && (
+                                    <span
+                                        className="border-background pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-red-600"
+                                        style={{
+                                            left: pct(sprite.pin[0], 'width'),
+                                            top: pct(sprite.pin[1], 'height'),
+                                        }}
+                                    />
+                                )}
+                            </>
                         )}
-                    </g>
+                    </div>
                 );
             })}
-        </svg>
+        </div>
     );
 }
 
