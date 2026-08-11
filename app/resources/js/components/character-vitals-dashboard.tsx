@@ -18,6 +18,7 @@ import {
     Wind,
     Zap,
 } from 'lucide-react';
+import { CharacterBodyMap } from '@/components/character-body-map';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/use-translation';
@@ -128,24 +129,6 @@ export type VitalsHeartbeat = {
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────
-
-/**
- * The BodyPartType members, in enum order. Head-down rather than the enum's own
- * hands-first order, because that is how a person reads a body. Anything the
- * heartbeat does not carry is filtered out at render, so a build with a
- * different set degrades to what it does have.
- */
-const BODY_PARTS = [
-    'Head', 'Neck',
-    'Torso_Upper', 'Torso_Lower',
-    'UpperArm_L', 'UpperArm_R',
-    'ForeArm_L', 'ForeArm_R',
-    'Hand_L', 'Hand_R',
-    'Groin',
-    'UpperLeg_L', 'UpperLeg_R',
-    'LowerLeg_L', 'LowerLeg_R',
-    'Foot_L', 'Foot_R',
-];
 
 /** `UpperArm_L` is a body part id, not something to show a player. */
 function humanPart(part: string): string {
@@ -287,48 +270,6 @@ function SkillsPanel({ skills }: { skills: Record<string, SkillXp> }) {
     );
 }
 
-function HealthPanel({ health }: { health: VitalsHealth }) {
-    const { t } = useTranslation();
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{t('portal.character.vitals.health')}</CardTitle>
-                <CardDescription>{t('portal.character.vitals.health_desc')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-                {health.overall !== undefined && (
-                    <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="flex items-center gap-1.5"><HeartPulse className="size-3.5" />{t('portal.character.health')}</span>
-                            <span className="tabular-nums">{Math.round(health.overall)}%</span>
-                        </div>
-                        <ProgressBar value={health.overall} max={100} />
-                    </div>
-                )}
-                {health.parts && (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                        {BODY_PARTS.filter((p) => health.parts![p]).map((part) => {
-                            const p = health.parts![part];
-                            const hasWounds = p.wounds && p.wounds.length > 0;
-                            return (
-                                <div key={part} className="flex items-center justify-between text-xs">
-                                    <span className="text-muted-foreground truncate">{humanPart(part)}</span>
-                                    <span
-                                        className={`tabular-nums ${hasWounds ? 'text-red-500 font-medium' : ''}`}
-                                        title={hasWounds ? p.wounds.join(', ') : undefined}
-                                    >
-                                        {Math.round(p.health)}%{hasWounds && ` (${p.wounds.length})`}
-                                    </span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    );
-}
-
 function TemperaturePanel({ temperature }: { temperature: VitalsTemperature }) {
     const { t } = useTranslation();
     return (
@@ -340,28 +281,7 @@ function TemperaturePanel({ temperature }: { temperature: VitalsTemperature }) {
             <CardContent className="space-y-3">
                 {temperature.core !== undefined && <StatRow icon={<Thermometer className="size-3.5" />} label={t('portal.character.vitals.core_temp')} value={temperature.core.toFixed(1)} suffix="°C" />}
                 {temperature.body_heat !== undefined && <StatRow icon={<Flame className="size-3.5" />} label={t('portal.character.vitals.body_heat')} value={temperature.body_heat.toFixed(1)} />}
-                {temperature.parts && (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1">
-                        {BODY_PARTS.filter((p) => temperature.parts![p]).map((part) => {
-                            const p = temperature.parts![part];
-                            return (
-                                <div key={part} className="flex items-center justify-between text-xs">
-                                    <span className="text-muted-foreground truncate">{humanPart(part)}</span>
-                                    <span className="tabular-nums">
-                                        {p.skin.toFixed(1)}°C
-                                        <span
-                                            className="text-muted-foreground ml-1"
-                                            title={t('portal.character.vitals.insulation')}
-                                        >
-                                            ({p.insulation.toFixed(1)})
-                                        </span>
-                                    </span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </CardContent>
+                            </CardContent>
         </Card>
     );
 }
@@ -610,9 +530,16 @@ export function CharacterVitalsDashboard({ heartbeat, heartbeatAvailable, heartb
                 )}
             </div>
 
+            {heartbeat.health?.parts && (
+                <CharacterBodyMap
+                    parts={heartbeat.health.parts}
+                    temperature={heartbeat.temperature?.parts}
+                    overall={heartbeat.health.overall}
+                />
+            )}
+
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 {heartbeat.info && <InfoPanel info={heartbeat.info} />}
-                {heartbeat.health && <HealthPanel health={heartbeat.health} />}
                 {heartbeat.temperature && <TemperaturePanel temperature={heartbeat.temperature} />}
                 {heartbeat.moodles && <MoodlesPanel moodles={heartbeat.moodles} />}
                 {heartbeat.weapon && <WeaponPanel weapon={heartbeat.weapon} />}
