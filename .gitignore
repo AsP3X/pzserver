@@ -61,6 +61,10 @@ backups/*.tar.gz
 # Node (frontend - future)
 node_modules/
 
+# Second web stack (web/) build output
+/web/api/target/
+/web/ui/dist/
+
 # Workshop build artifacts
 workshop/KnoxRelay/Contents/mods/KnoxRelay/42/media/
 

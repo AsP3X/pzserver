@@ -1,0 +1,8 @@
+//! Application services: everything between the HTTP layer and its sources.
+
+pub mod auth;
+pub mod rate_limit;
+pub mod site;
+pub mod stats;
+pub mod status;
+pub mod tasks;

@@ -1,0 +1,168 @@
+@import 'tailwindcss';
+
+/*
+ * Knox County design tokens.
+ *
+ * Dark-only by design: this is a survival server's front door, not a dashboard
+ * that has to work in a bright office. Everything is built on a near-black with
+ * a green cast, hairline borders, square corners, and exactly two accents —
+ * hazard amber for anything actionable, moss green for anything alive.
+ */
+@theme {
+  /* --- Surfaces ------------------------------------------------------------ */
+  --color-void: #070806;
+  --color-ash: #0c0f0c;
+  --color-ash-raised: #121612;
+  --color-fence: #1d231c;
+  --color-fence-bright: #2b332a;
+
+  /* --- Text ---------------------------------------------------------------- */
+  --color-bone: #e8e6dd;
+  --color-smoke: #9aa093;
+  --color-dust: #676e62;
+
+  /* --- Accents ------------------------------------------------------------- */
+  /* Amber: actions, emphasis, anything the eye should land on first. */
+  --color-hazard: #f2a20c;
+  --color-hazard-soft: #3a2a05;
+  /* Moss: alive, online, safe. */
+  --color-moss: #8bb04a;
+  --color-moss-soft: #1c2712;
+  /* Blood: dead, offline, destructive. */
+  --color-blood: #c0392b;
+  --color-blood-soft: #2b110d;
+  --color-rust: #a8532a;
+
+  /* --- Type --------------------------------------------------------------- */
+  --font-display: 'Oswald Variable', 'Oswald', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Square by default. Corners get brackets, not radii. */
+  --radius-panel: 2px;
+
+  --animate-pulse-slow: pulse-slow 2.6s ease-in-out infinite;
+}
+
+@keyframes pulse-slow {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* The header is sticky; anchor targets must clear it. */
+    scroll-padding-top: 5rem;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-bone);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv05', 'ss01';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-hazard);
+    color: var(--color-void);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-hazard);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Display type: condensed, uppercase, tight. The signage voice. */
+  .display {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+    line-height: 0.95;
+  }
+
+  /* Small all-caps label used above sections and beside data. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-dust);
+  }
+
+  /*
+   * Film grain. A single inline SVG turbulence tile, so there is no image
+   * request and nothing to 404 in an offline install.
+   */
+  .grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Diagonal hazard tape. Used as thin rules, never as a fill. */
+  .hazard-tape {
+    background-image: repeating-linear-gradient(
+      45deg,
+      var(--color-hazard) 0px,
+      var(--color-hazard) 8px,
+      var(--color-void) 8px,
+      var(--color-void) 16px
+    );
+  }
+
+  /* Corner brackets: the panel treatment that replaces rounded corners. */
+  .bracketed {
+    position: relative;
+  }
+
+  .bracketed::before,
+  .bracketed::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: var(--color-fence-bright);
+    pointer-events: none;
+  }
+
+  .bracketed::before {
+    top: -1px;
+    left: -1px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+
+  .bracketed::after {
+    right: -1px;
+    bottom: -1px;
+    border-right: 1px solid;
+    border-bottom: 1px solid;
+  }
+}

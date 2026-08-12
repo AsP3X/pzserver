@@ -38,7 +38,8 @@ CADDY_HTTPS_PORT ?= 443
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
 .PHONY: up down build restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
-	admin-expose admin-hide expose hide info
+	admin-expose admin-hide expose hide info \
+	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
 # ── First-run setup ──────────────────────────────────────────────────
 # Interactive wizard: configures env, creates DB volume, starts services,
@@ -365,6 +366,66 @@ update-version:
 	echo "  PZ_VERSION=$$VER"; \
 	echo "  PZ_VERSION_FULL=$$FULL"
 
+# ── Second web stack (Rust API + Vite UI + own Postgres) ─────────────
+# Runs alongside the Laravel stack; see web/README.md. The base compose file
+# is included for the shared pzserver-internal network and the game container.
+COMPOSE_WEB := $(COMPOSE_BASE) -f docker-compose.web.yml
+COMPOSE_WEB_DEV := $(COMPOSE_WEB) -f docker-compose.web-dev.yml
+
+WEB_DB_PORT ?= 55433
+WEB_DB_USER ?= $(shell sed -n 's/^WEB_DB_USERNAME=//p' .env 2>/dev/null | tail -1 | tr -d '\r')
+WEB_DB_NAME ?= $(shell sed -n 's/^WEB_DB_DATABASE=//p' .env 2>/dev/null | tail -1 | tr -d '\r')
+ifeq ($(WEB_DB_USER),)
+	WEB_DB_USER := knox
+endif
+ifeq ($(WEB_DB_NAME),)
+	WEB_DB_NAME := knox
+endif
+
+ensure-web-data-dirs:
+	@mkdir -p data/web-postgres
+
+web-up: ensure-web-data-dirs ensure-networks
+	$(COMPOSE_WEB) up -d --build web-db web-api web-ui
+
+web-down:
+	$(COMPOSE_WEB) down
+
+web-build:
+	$(COMPOSE_WEB) build web-api web-ui
+
+web-logs:
+	$(COMPOSE_WEB) logs -f web-api web-ui
+
+web-ps:
+	$(COMPOSE_WEB) ps
+
+# Database only, published on 127.0.0.1:$(WEB_DB_PORT) for host development
+# (cargo run + npm run dev). See web/README.md.
+web-dev-db: ensure-web-data-dirs
+	$(COMPOSE_WEB_DEV) up -d web-db
+	@echo "web-db ready on 127.0.0.1:$(WEB_DB_PORT)"
+
+# Development data for the public site. Truncates the tables it fills.
+web-seed:
+	@echo "WARNING: this replaces player_stats, game_events and status samples in $(WEB_DB_NAME)."
+	@echo "Type SEED and press Enter to continue:"
+	@read confirm; \
+	if [ "$$confirm" != "SEED" ]; then \
+		echo "Cancelled."; \
+		exit 1; \
+	fi; \
+	docker exec -i pz-web-db psql -U $(WEB_DB_USER) -d $(WEB_DB_NAME) -q < web/api/seeds/dev_seed.sql
+	@echo "Seeded."
+
+# Host-side checks. No containers needed.
+web-test:
+	cd web/api && cargo test --workspace
+
+web-check:
+	cd web/api && cargo clippy --all-targets --all-features -- -D warnings && cargo fmt --check
+	cd web/ui && npx tsc -b && npm run lint
+
 help:
 	@echo "Available targets:"
 	@echo ""
@@ -400,6 +461,16 @@ help:
 	@echo "    migrate        - Run database migrations"
 	@echo "    test           - Run tests in the app container"
 	@echo "    exec CMD=...   - Run a command in the app container"
+	@echo ""
+	@echo "  Second web stack (Rust API + Vite UI — see web/README.md):"
+	@echo "    web-up         - Build and start web-db, web-api and web-ui"
+	@echo "    web-down       - Stop the second web stack"
+	@echo "    web-logs       - Follow web-api and web-ui logs"
+	@echo "    web-ps         - Show second-stack containers"
+	@echo "    web-dev-db     - Start only its Postgres, published for host dev"
+	@echo "    web-seed       - Load development data (DANGER: truncates tables)"
+	@echo "    web-test       - Run the Rust test suite on the host"
+	@echo "    web-check      - clippy + rustfmt + tsc + eslint on the host"
 	@echo ""
 	@echo "  Other:"
 	@echo "    info             - Show URLs, public IP, and firewall status"

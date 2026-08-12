@@ -1,0 +1,26 @@
+# -----------------------------------------------------------------------------
+# Host-development overrides for the Rust/Vite stack.
+#
+# Publishes Postgres so `cargo run` and `npm run dev` on the host can reach it:
+#
+#   make web-dev-db      # just the database, published on 127.0.0.1:55433
+#
+# The containerised API and UI are not needed in this mode.
+#
+# The extra network is not optional: pzserver-internal is declared
+# `internal: true`, and Docker silently ignores published ports on a container
+# that is only attached to an internal network. Joining a normal bridge as well
+# is what makes the publish take effect.
+# -----------------------------------------------------------------------------
+services:
+  web-db:
+    ports:
+      - "127.0.0.1:${WEB_DB_PORT:-55433}:5432"
+    networks:
+      - pzserver-internal
+      - pzweb-dev
+
+networks:
+  pzweb-dev:
+    name: pzweb-dev
+    driver: bridge

@@ -1,0 +1,120 @@
+# -----------------------------------------------------------------------------
+# Second web stack: Rust API + Vite UI + its own Postgres.
+#
+# Runs alongside the Laravel stack rather than replacing it in place, so both
+# can be up at once during the port. Nothing here touches pz-db, pz-app or the
+# game container's data beyond read-only mounts.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.<arch>.yml \
+#                  -f docker-compose.web.yml up -d web-db web-api web-ui
+#
+# or simply: make web-up
+# -----------------------------------------------------------------------------
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — the Rust stack's own database, schema owned by sqlx migrations
+  # ---------------------------------------------------------------------------
+  web-db:
+    image: postgres:16-alpine
+    container_name: pz-web-db
+    restart: unless-stopped
+    # Internal only, same as pz-db. docker-compose.web-dev.yml publishes it for
+    # host development.
+    volumes:
+      - ${PZ_WEB_POSTGRES_HOST:-./data/web-postgres}:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${WEB_DB_DATABASE:-knox}
+      POSTGRES_USER: ${WEB_DB_USERNAME:-knox}
+      POSTGRES_PASSWORD: ${WEB_DB_PASSWORD:-knox}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WEB_DB_USERNAME:-knox} -d ${WEB_DB_DATABASE:-knox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pzserver-internal
+
+  # ---------------------------------------------------------------------------
+  # Rust API — control plane. Applies its own migrations on boot.
+  # ---------------------------------------------------------------------------
+  web-api:
+    image: ${PZ_WEB_API_IMAGE:-pzserver-web-api:local}
+    build:
+      context: ./web/api
+      dockerfile: Dockerfile
+    pull_policy: build
+    container_name: pz-web-api
+    restart: unless-stopped
+    depends_on:
+      web-db:
+        condition: service_healthy
+    volumes:
+      # The mod's JSON exports. Read-only: this stack observes the bridge, the
+      # PHP stack still owns writing to it.
+      - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge:ro
+      # server.ini, for map name and player cap.
+      - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data:ro
+    environment:
+      API_BIND: 0.0.0.0:8080
+      DATABASE_URL: postgres://${WEB_DB_USERNAME:-knox}:${WEB_DB_PASSWORD:-knox}@web-db:5432/${WEB_DB_DATABASE:-knox}
+      WEB_CORS_ORIGINS: ${WEB_CORS_ORIGINS:-http://localhost:5174}
+      RUST_LOG: ${WEB_API_LOG:-pz_api=info,tower_http=info,warn}
+
+      PZ_RCON_HOST: game-server
+      PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
+      PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:-}
+      DOCKER_PROXY_URL: http://docker-socket-proxy:2375
+      GAME_SERVER_CONTAINER_NAME: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
+
+      PZ_DATA_PATH: /pz-data
+      PZ_SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
+      LUA_BRIDGE_PATH: /lua-bridge
+
+      PZ_CONNECT_HOST: ${PZ_CONNECT_HOST:-}
+      PZ_GAME_PORT: ${PZ_GAME_PORT:-16261}
+
+      # First administrator, created only when the users table has none. Same
+      # variables the PHP stack's entrypoint already reads.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Leave on unless the site is served over plain HTTP on something other
+      # than localhost — browsers treat localhost itself as a secure origin.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks:
+      - pzserver-internal
+
+  # ---------------------------------------------------------------------------
+  # Vite UI — static build served by nginx, which also fronts the API so the
+  # browser sees a single origin in production.
+  # ---------------------------------------------------------------------------
+  web-ui:
+    image: ${PZ_WEB_UI_IMAGE:-pzserver-web-ui:local}
+    build:
+      context: ./web/ui
+      dockerfile: Dockerfile
+    pull_policy: build
+    container_name: pz-web-ui
+    restart: unless-stopped
+    depends_on:
+      - web-api
+    ports:
+      # Localhost-only. Put a reverse proxy in front for public access.
+      - "127.0.0.1:${WEB_UI_PORT:-8100}:8080"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      # Both memberships are required. pzserver-internal is declared
+      # `internal: true`, and Docker silently drops published ports on a
+      # container attached only to an internal network — the port simply never
+      # appears on the host. proxy-network is the non-internal edge that makes
+      # the publish take effect; pzserver-internal is how nginx reaches web-api.
+      - proxy-network
+      - pzserver-internal

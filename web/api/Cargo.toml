@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/pz-api", "crates/pz-bridge", "crates/pz-rcon"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+pz-bridge = { path = "crates/pz-bridge" }
+pz-rcon = { path = "crates/pz-rcon" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
