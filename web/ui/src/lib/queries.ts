@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
+import type { LeaderboardStat } from '@/lib/api'
 
 /**
  * Live status is polled. The API caches each resolve for STATUS_CACHE_TTL
@@ -31,11 +32,15 @@ export const statsSummaryQuery = queryOptions({
   staleTime: 60_000,
 })
 
-export const leaderboardQuery = queryOptions({
-  queryKey: ['stats', 'leaderboard', 'zombie_kills', 6],
-  queryFn: () => api.leaderboard('zombie_kills', 6),
-  staleTime: 60_000,
-})
+export const leaderboardQuery = (
+  stat: LeaderboardStat = 'zombie_kills',
+  limit = 6,
+) =>
+  queryOptions({
+    queryKey: ['stats', 'leaderboard', stat, limit],
+    queryFn: () => api.leaderboard(stat, limit),
+    staleTime: 60_000,
+  })
 
 /** The signed-in player's own character. Polled while the page is open. */
 export const myCharacterQuery = queryOptions({

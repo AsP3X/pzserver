@@ -42,7 +42,7 @@ export function RegisterPage() {
     setTooShort(false)
     register.mutate(
       { code, email, password },
-      { onSuccess: () => void navigate({ to: '/character' }) },
+      { onSuccess: () => void navigate({ to: '/me/character' }) },
     )
   }
 

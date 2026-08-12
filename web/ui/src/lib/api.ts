@@ -46,6 +46,8 @@ export interface StatsSummary {
   most_popular_profession: string | null
 }
 
+export type LeaderboardStat = 'zombie_kills' | 'hours_survived' | 'deaths'
+
 export interface LeaderboardEntry {
   rank: number
   username: string
@@ -53,6 +55,7 @@ export interface LeaderboardEntry {
   hours_survived: number
   profession: string | null
   is_dead: boolean
+  deaths: number
 }
 
 export interface StatusSample {
@@ -337,7 +340,7 @@ export const api = {
 
   statsSummary: () => request<StatsSummary>('/api/v1/stats/summary'),
 
-  leaderboard: (stat: 'zombie_kills' | 'hours_survived' = 'zombie_kills', limit = 10) =>
+  leaderboard: (stat: LeaderboardStat = 'zombie_kills', limit = 10) =>
     request<LeaderboardEntry[]>(
       `/api/v1/stats/leaderboard?stat=${stat}&limit=${limit}`,
     ),

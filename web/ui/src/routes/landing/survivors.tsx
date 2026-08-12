@@ -10,7 +10,7 @@ import { leaderboardQuery } from '@/lib/queries'
 
 export function Survivors() {
   const { t, intlLocale } = useTranslation()
-  const { data: entries, isPending } = useQuery(leaderboardQuery)
+  const { data: entries, isPending } = useQuery(leaderboardQuery())
 
   return (
     <Section id="survivors" className="border-b border-fence">

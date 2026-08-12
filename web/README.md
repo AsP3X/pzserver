@@ -23,10 +23,39 @@ web/
 | Player portal | `/api/v1/me/character` — the signed-in account's own character plus the mod's full vitals heartbeat |
 | Game server integration | Source RCON client, Lua bridge readers, `server.ini` parser, Docker status via the socket proxy |
 | Background tasks | Player-stats sync from the mod export, population sampling, expired-session cleanup |
-| UI | Design system, i18n (en/de), landing page, sign in / register / account, character |
+| UI | Design system, i18n (en/de), three navigation surfaces, and the pages listed below |
 
-Not built yet: any admin surface, the rest of the player portal (inventory, map,
-vault, reports), and the shop. The old stack still owns all of that.
+## Information architecture
+
+Three surfaces, each with its own shell and guard, defined in
+`ui/src/lib/navigation.ts`:
+
+| Surface |路 | Who | Shell |
+| --- | --- | --- | --- |
+| Public site | `/` | anyone | Top nav, collapses to a panel below `md` |
+| Player | `/me/*` | signed in | Sidebar, off-canvas drawer below `lg` |
+| Admin | `/admin/*` | staff | Sidebar, seven groups |
+
+The old UI had one sidebar filtered by role, which left a player looking at a
+"Menu" group wedged under four admin groups and an admin scrolling twenty-six
+flat entries. Splitting them lets each surface pick its own density, and a
+player never sees the shape of the admin panel.
+
+Player routes sit under `/me` to match the API's `/api/v1/me/*`, rather than the
+old split between `/portal/*` and `/shop/my/*`. Shop administration was six
+sibling sidebar entries and is now one group.
+
+Adding a page is one entry in one array plus one route under the matching layout
+— it inherits the shell and the guard. Sections that are not built yet are
+listed and marked `soon` rather than hidden, so the shape of what is coming is
+visible without shipping dead links.
+
+**Built so far:** landing, status, rankings, sign in, register, 404, player
+overview, character, settings, admin overview.
+
+**Not built yet:** news, obituary, public profiles, the rest of the player area
+(inventory, map, vault, wallet, purchases, reports), the shop, and every admin
+section beyond the overview. The old stack still owns all of that.
 
 **Accounts can only be created from in game.** There is no sign-up form that
 stands on its own: registration starts with `/account register` on the server,

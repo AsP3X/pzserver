@@ -18,13 +18,14 @@ pub struct StatsSummary {
 /// Which column a leaderboard sorts by.
 ///
 /// This is an enum rather than a string because the value reaches an
-/// `ORDER BY`; only these two variants can ever name a column.
+/// `ORDER BY`; only these variants can ever name a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LeaderboardStat {
     #[default]
     ZombieKills,
     HoursSurvived,
+    Deaths,
 }
 
 /// Builds a leaderboard query with the ordering baked in at compile time.
@@ -39,12 +40,19 @@ macro_rules! leaderboard_sql {
             "SELECT row_number() OVER (ORDER BY ",
             $ordering,
             ")::bigint AS rank, \
-             username, \
-             zombie_kills, \
-             hours_survived::double precision AS hours_survived, \
-             profession, \
-             is_dead \
-             FROM player_stats \
+             p.username, \
+             p.zombie_kills, \
+             p.hours_survived::double precision AS hours_survived, \
+             p.profession, \
+             p.is_dead, \
+             coalesce(d.deaths, 0)::bigint AS deaths \
+             FROM player_stats p \
+             LEFT JOIN ( \
+                 SELECT player, count(*) AS deaths \
+                 FROM game_events \
+                 WHERE event_type = 'death' \
+                 GROUP BY player \
+             ) d ON d.player = p.username \
              ORDER BY ",
             $ordering,
             " LIMIT $1"
@@ -54,10 +62,14 @@ macro_rules! leaderboard_sql {
 
 impl LeaderboardStat {
     /// The pre-built query that sorts by this stat.
+    ///
+    /// Every board carries the same columns and differs only in its ordering,
+    /// so the table can keep its shape while the tab changes what leads.
     fn query(self) -> &'static str {
         match self {
-            Self::ZombieKills => leaderboard_sql!("zombie_kills DESC, username ASC"),
-            Self::HoursSurvived => leaderboard_sql!("hours_survived DESC, username ASC"),
+            Self::ZombieKills => leaderboard_sql!("p.zombie_kills DESC, p.username ASC"),
+            Self::HoursSurvived => leaderboard_sql!("p.hours_survived DESC, p.username ASC"),
+            Self::Deaths => leaderboard_sql!("coalesce(d.deaths, 0) DESC, p.username ASC"),
         }
     }
 }
@@ -70,6 +82,7 @@ pub struct LeaderboardEntry {
     pub hours_survived: f64,
     pub profession: Option<String>,
     pub is_dead: bool,
+    pub deaths: i64,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -140,13 +153,33 @@ mod tests {
         assert!(
             LeaderboardStat::ZombieKills
                 .query()
-                .contains("ORDER BY zombie_kills DESC")
+                .contains("ORDER BY p.zombie_kills DESC")
         );
         assert!(
             LeaderboardStat::HoursSurvived
                 .query()
-                .contains("ORDER BY hours_survived DESC")
+                .contains("ORDER BY p.hours_survived DESC")
         );
+        assert!(
+            LeaderboardStat::Deaths
+                .query()
+                .contains("ORDER BY coalesce(d.deaths, 0) DESC")
+        );
+    }
+
+    #[test]
+    fn every_board_carries_the_same_columns() {
+        for stat in [
+            LeaderboardStat::ZombieKills,
+            LeaderboardStat::HoursSurvived,
+            LeaderboardStat::Deaths,
+        ] {
+            let query = stat.query();
+
+            for column in ["p.username", "p.zombie_kills", "hours_survived", "deaths"] {
+                assert!(query.contains(column), "{stat:?} is missing {column}");
+            }
+        }
     }
 
     #[test]

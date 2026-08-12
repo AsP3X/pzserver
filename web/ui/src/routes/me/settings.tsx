@@ -5,16 +5,15 @@ import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { Field, FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useChangePassword } from '@/lib/auth'
-import { useRequireUser } from '@/lib/auth-guards'
+import { useChangePassword, useCurrentUser } from '@/lib/auth'
 import { splitError } from '@/lib/form-error'
 import { useTranslation } from '@/i18n/use-translation'
 
 const MIN_PASSWORD_LENGTH = 10
 
-export function AccountPage() {
+export function SettingsPage() {
   const { t } = useTranslation()
-  const { user, isLoading } = useRequireUser()
+  const { user, isLoading } = useCurrentUser()
 
   return (
     <Section>

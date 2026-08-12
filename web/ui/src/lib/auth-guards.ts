@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
 import { useCurrentUser } from '@/lib/auth'
+import { canAdminister } from '@/lib/navigation'
 
 /**
  * Send signed-out visitors to the login page.
@@ -33,4 +34,37 @@ export function useRedirectSignedIn() {
       void navigate({ to: '/', replace: true })
     }
   }, [isLoading, user, navigate])
+}
+
+/**
+ * Staff only.
+ *
+ * A signed-in player who guesses an `/admin` URL goes to their own area rather
+ * than the login page — they are not short of credentials, they are in the
+ * wrong place, and bouncing them to a login form they have already passed
+ * would just be confusing.
+ */
+export function useAdminOnly() {
+  const navigate = useNavigate()
+  const { user, isLoading } = useCurrentUser()
+
+  const allowed = canAdminister(user?.role)
+
+  useEffect(() => {
+    if (isLoading) {
+      return
+    }
+
+    if (!user) {
+      void navigate({ to: '/login', replace: true })
+
+      return
+    }
+
+    if (!allowed) {
+      void navigate({ to: '/me', replace: true })
+    }
+  }, [isLoading, user, allowed, navigate])
+
+  return { user, allowed, isLoading }
 }
