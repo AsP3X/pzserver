@@ -13,6 +13,7 @@ use crate::extract::{
     AuthUser, MaybeAuthUser, SESSION_COOKIE, expired_session_cookie, session_cookie,
 };
 use crate::services::auth::{self, User};
+use crate::services::registration;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -26,6 +27,8 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct RegisterRequest {
+    /// Handed to the player in game by `/account register`.
+    code: String,
     email: String,
     password: String,
 }
@@ -46,18 +49,16 @@ struct MeResponse {
     user: Option<User>,
 }
 
-/// Create an account and sign the new user straight in.
+/// Finish an in-game registration and sign the new user straight in.
 async fn register(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
     Json(body): Json<RegisterRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    let user = auth::register(&state.db, &body.email, &body.password).await?;
+    let user = registration::complete(&state.db, &body.code, &body.email, &body.password).await?;
 
-    // Logged by id: the account has no username yet, and the log is not the
-    // place for an email address.
-    tracing::info!(user_id = %user.id, "account registered");
+    tracing::info!(username = %user.username, "account registered");
 
     let jar = start_session(&state, jar, &user, &headers).await?;
 
@@ -88,7 +89,7 @@ async fn login(
     };
 
     state.login_limiter.clear(&body.email);
-    tracing::info!(user_id = %user.id, "login");
+    tracing::info!(username = %user.username, "login");
 
     let jar = start_session(&state, jar, &user, &headers).await?;
 
@@ -167,7 +168,7 @@ async fn change_password(
     .await?;
 
     tracing::info!(
-        user_id = %user.id,
+        username = %user.username,
         revoked_sessions = revoked,
         "password changed",
     );

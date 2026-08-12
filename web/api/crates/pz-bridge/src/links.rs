@@ -1,10 +1,11 @@
-//! The account-link channel shared with the game.
+//! The registration channel shared with the game.
 //!
 //! Mirrors the mod's own request/result idiom, with the direction reversed: the
-//! mod writes `account_links.json`, this stack answers in
-//! `account_link_results.json`. Entries are keyed by `id` and any id that
-//! already has a result is skipped, so a request file read twice never links
-//! twice — the same rule `KR_Orders` applies to the delivery queue.
+//! mod writes `account_links.json` when a player runs `/account register`, this
+//! stack answers in `account_link_results.json` with the code that finishes
+//! sign-up on the website. Entries are keyed by `id` and any id that already
+//! has a result is skipped, so a request file read twice never issues twice —
+//! the same rule `KR_Orders` applies to the delivery queue.
 //!
 //! Nothing here is written by the mod today. `/account register` still has to
 //! be added to KnoxRelay; this is the contract it should write against.
@@ -13,10 +14,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Written by the mod when a player runs `/account register <code>`.
+/// Written by the mod when a player runs `/account register`.
 pub const LINK_REQUESTS_FILE: &str = "account_links.json";
 
-/// Written by this stack, read by the mod to tell the player what happened.
+/// Written by this stack, read by the mod to show the player their code.
 pub const LINK_RESULTS_FILE: &str = "account_link_results.json";
 
 /// Keeps the ledger from growing without bound; the mod caps its own the same way.
@@ -30,11 +31,9 @@ pub struct LinkRequests {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkRequest {
-    /// Unique per claim. The mod should not reuse one.
+    /// Unique per run of the command. The mod should not reuse one.
     pub id: String,
-    /// What the player typed after `/account register`.
-    pub code: String,
-    /// The PZ username of the character that ran the command.
+    /// The PZ username of the character that ran it.
     pub username: String,
     #[serde(default)]
     pub steam_id: Option<String>,
@@ -66,9 +65,14 @@ pub struct LinkResult {
     /// Echoes the request id, which is how the mod matches them up.
     pub id: String,
     pub username: String,
-    /// `linked`, `unknown_code`, `expired`, `already_claimed`,
-    /// `account_already_linked` or `name_taken`.
+    /// `issued`, `already_registered` or `error`.
     pub status: String,
+    /// The code to show the player. Only on `issued`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub code: Option<String>,
+    /// When that code stops working. Only on `issued`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub expires_at: Option<String>,
     pub at: String,
 }
 
@@ -107,7 +111,7 @@ impl LinkChannel {
         Self { dir: dir.into() }
     }
 
-    /// Pending claims, or an empty list when the mod has written nothing.
+    /// Pending registrations, or an empty list when the mod has written nothing.
     pub async fn requests(&self) -> Result<LinkRequests, LinkChannelError> {
         let path = self.dir.join(LINK_REQUESTS_FILE);
 
@@ -195,12 +199,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parses_a_claim_written_by_the_mod() {
+    async fn parses_a_request_written_by_the_mod() {
         let (dir, channel) = channel();
         std::fs::write(
             dir.path().join(LINK_REQUESTS_FILE),
             r#"{"version":1,"requests":[
-                {"id":"1","code":"A7K2P9","username":"rook","steam_id":"7656119","requested_at":"1993-07-14T09:20:00"}
+                {"id":"1","username":"rook","steam_id":"7656119","requested_at":"1993-07-14T09:20:00"}
             ]}"#,
         )
         .expect("write");
@@ -208,16 +212,16 @@ mod tests {
         let requests = channel.requests().await.expect("read").requests;
 
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].code, "A7K2P9");
         assert_eq!(requests[0].username, "rook");
+        assert_eq!(requests[0].steam_id.as_deref(), Some("7656119"));
     }
 
     #[tokio::test]
-    async fn parses_a_claim_without_the_optional_fields() {
+    async fn parses_a_request_without_the_optional_fields() {
         let (dir, channel) = channel();
         std::fs::write(
             dir.path().join(LINK_REQUESTS_FILE),
-            r#"{"requests":[{"id":"1","code":"A7K2P9","username":"rook"}]}"#,
+            r#"{"requests":[{"id":"1","username":"rook"}]}"#,
         )
         .expect("write");
 
@@ -227,18 +231,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn results_round_trip() {
+    async fn an_issued_result_carries_the_code() {
         let (_dir, channel) = channel();
 
         channel
             .write_results(LinkResults {
                 version: 1,
-                updated_at: "2026-08-11T19:00:00Z".to_owned(),
+                updated_at: "2026-08-12T09:00:00Z".to_owned(),
                 results: vec![LinkResult {
                     id: "1".to_owned(),
                     username: "rook".to_owned(),
-                    status: "linked".to_owned(),
-                    at: "2026-08-11T19:00:00Z".to_owned(),
+                    status: "issued".to_owned(),
+                    code: Some("NYUY2Z".to_owned()),
+                    expires_at: Some("2026-08-12T09:30:00Z".to_owned()),
+                    at: "2026-08-12T09:00:00Z".to_owned(),
                 }],
             })
             .await
@@ -246,8 +252,31 @@ mod tests {
 
         let ledger = channel.results().await.expect("read");
 
-        assert_eq!(ledger.results.len(), 1);
-        assert_eq!(ledger.results[0].status, "linked");
+        assert_eq!(ledger.results[0].code.as_deref(), Some("NYUY2Z"));
+    }
+
+    #[tokio::test]
+    async fn a_rejection_carries_no_code_field_at_all() {
+        let (dir, channel) = channel();
+
+        channel
+            .write_results(LinkResults {
+                results: vec![LinkResult {
+                    id: "1".to_owned(),
+                    username: "rook".to_owned(),
+                    status: "already_registered".to_owned(),
+                    code: None,
+                    expires_at: None,
+                    at: String::new(),
+                }],
+                ..LinkResults::default()
+            })
+            .await
+            .expect("write");
+
+        let body = std::fs::read_to_string(dir.path().join(LINK_RESULTS_FILE)).expect("read");
+
+        assert!(!body.contains("code"));
     }
 
     #[tokio::test]
@@ -258,16 +287,17 @@ mod tests {
             .map(|index| LinkResult {
                 id: index.to_string(),
                 username: "rook".to_owned(),
-                status: "linked".to_owned(),
+                status: "issued".to_owned(),
+                code: None,
+                expires_at: None,
                 at: String::new(),
             })
             .collect();
 
         channel
             .write_results(LinkResults {
-                version: 1,
-                updated_at: String::new(),
                 results,
+                ..LinkResults::default()
             })
             .await
             .expect("write");

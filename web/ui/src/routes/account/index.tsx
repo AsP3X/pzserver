@@ -7,7 +7,6 @@ import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useChangePassword } from '@/lib/auth'
 import { useRequireUser } from '@/lib/auth-guards'
-import { cn } from '@/lib/cn'
 import { splitError } from '@/lib/form-error'
 import { useTranslation } from '@/i18n/use-translation'
 
@@ -30,14 +29,9 @@ export function AccountPage() {
           <PanelHeader label={t('account.details')} />
           <dl className="grid grid-cols-1 divide-y divide-fence sm:grid-cols-2 sm:divide-x sm:divide-y-0">
             <Detail label={t('auth.email')} value={isLoading ? undefined : user?.email} />
-            {/* An account with no linked character has no name to show, which
-                is a normal state rather than missing data. */}
             <Detail
               label={t('account.linked_character')}
-              value={
-                isLoading ? undefined : (user?.username ?? t('account.not_linked'))
-              }
-              muted={!isLoading && !user?.username}
+              value={isLoading ? undefined : user?.username}
             />
           </dl>
         </Panel>
@@ -48,22 +42,11 @@ export function AccountPage() {
   )
 }
 
-function Detail({
-  label,
-  value,
-  muted = false,
-}: {
-  label: string
-  value: string | undefined
-  muted?: boolean
-}) {
+function Detail({ label, value }: { label: string; value: string | undefined }) {
   return (
     <div className="px-4 py-5">
       <dt className="eyebrow">{label}</dt>
-      <dd
-        className={cn('display mt-2 truncate text-xl', muted ? 'text-dust' : 'text-bone')}
-        title={value}
-      >
+      <dd className="display mt-2 truncate text-xl text-bone" title={value}>
         {value ?? <Skeleton className="h-6 w-32" />}
       </dd>
     </div>

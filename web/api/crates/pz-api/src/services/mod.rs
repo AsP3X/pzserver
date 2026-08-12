@@ -2,8 +2,8 @@
 
 pub mod auth;
 pub mod character;
-pub mod link;
 pub mod rate_limit;
+pub mod registration;
 pub mod site;
 pub mod stats;
 pub mod status;

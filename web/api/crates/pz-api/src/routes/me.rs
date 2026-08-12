@@ -1,74 +1,73 @@
 //! Endpoints scoped to the signed-in user.
 
 use axum::extract::State;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::error::ApiResult;
 use crate::extract::AuthUser;
 use crate::services::character::{self, Character};
-use crate::services::link::{self, CODE_LIFETIME_MINUTES, LinkCode};
 use crate::state::AppState;
 
+use pz_bridge::{PlayerVitals, VitalsReader};
+
 pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/me/character", get(my_character))
-        .route("/me/link-code", post(issue_link_code))
+    Router::new().route("/me/character", get(my_character))
 }
 
 #[derive(Serialize)]
 struct CharacterResponse {
-    /// `null` when the account has no character linked, or when the linked
-    /// character has not been reported by the game yet.
+    /// `null` when the game has not reported this character yet — a brand new
+    /// survivor whose first export has not landed.
     character: Option<Character>,
     /// Whether this player is connected right now.
     online: bool,
+    /// Per-part health and body temperature from the mod's heartbeat. Absent
+    /// for a character that has never been online while the mod was running.
+    body: Option<BodyResponse>,
+}
+
+#[derive(Serialize)]
+struct BodyResponse {
+    #[serde(flatten)]
+    vitals: PlayerVitals,
+    /// When the heartbeat was written. The file outlives the session, so this
+    /// is what tells the UI whether it is showing live or last-known state.
+    reported_at: Option<DateTime<Utc>>,
 }
 
 async fn my_character(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<CharacterResponse>> {
-    // No linked name means nothing to look up. The UI shows the link flow.
-    let Some(username) = user.username.as_deref() else {
-        return Ok(Json(CharacterResponse {
-            character: None,
-            online: false,
-        }));
-    };
-
+    let username = user.username.as_str();
     let character = character::for_username(&state.db, username).await?;
 
     // Reuses the cached status resolve, so opening this page does not add an
     // RCON round trip of its own.
     let status = state.status.current().await;
 
+    let body = match VitalsReader::new(&state.config.lua_bridge_path)
+        .read(username)
+        .await
+    {
+        Ok(read) => read.map(|read| BodyResponse {
+            vitals: read.vitals,
+            reported_at: read.reported_at.map(DateTime::<Utc>::from),
+        }),
+        Err(error) => {
+            // A missing or broken heartbeat costs the condition panel, not the
+            // page.
+            tracing::warn!(%error, "vitals heartbeat unreadable");
+            None
+        }
+    };
+
     Ok(Json(CharacterResponse {
         online: character::is_online(&status.players, username),
         character,
-    }))
-}
-
-#[derive(Serialize)]
-struct LinkCodeResponse {
-    #[serde(flatten)]
-    code: LinkCode,
-    /// So the UI can say how long it lasts without hardcoding the number.
-    lifetime_minutes: i64,
-}
-
-/// Issue a one-time code to type into `/account register` in game.
-async fn issue_link_code(
-    State(state): State<AppState>,
-    AuthUser(user): AuthUser,
-) -> ApiResult<Json<LinkCodeResponse>> {
-    let code = link::issue(&state.db, user.id).await?;
-
-    tracing::info!(user_id = %user.id, "issued an account link code");
-
-    Ok(Json(LinkCodeResponse {
-        code,
-        lifetime_minutes: CODE_LIFETIME_MINUTES,
+        body,
     }))
 }

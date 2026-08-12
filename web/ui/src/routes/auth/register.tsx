@@ -9,10 +9,13 @@ import { useRedirectSignedIn } from '@/lib/auth-guards'
 import { splitError } from '@/lib/form-error'
 import { useTranslation } from '@/i18n/use-translation'
 
-const FIELDS = ['email', 'password'] as const
+const FIELDS = ['code', 'email', 'password'] as const
 
 /** Mirrors the API's floor, so the obvious case fails without a round trip. */
 const MIN_PASSWORD_LENGTH = 10
+
+/** Matches the code the API issues: six characters, no ambiguous letters. */
+const CODE_LENGTH = 6
 
 export function RegisterPage() {
   const { t } = useTranslation()
@@ -21,6 +24,7 @@ export function RegisterPage() {
   useRedirectSignedIn()
   const register = useRegister()
 
+  const [code, setCode] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [tooShort, setTooShort] = useState(false)
@@ -36,7 +40,10 @@ export function RegisterPage() {
     }
 
     setTooShort(false)
-    register.mutate({ email, password }, { onSuccess: () => void navigate({ to: '/character' }) })
+    register.mutate(
+      { code, email, password },
+      { onSuccess: () => void navigate({ to: '/character' }) },
+    )
   }
 
   return (
@@ -53,8 +60,36 @@ export function RegisterPage() {
         </>
       }
     >
+      {/* Spelled out before the form: without a code from in game there is
+          nothing to fill in here. */}
+      <ol className="mb-6 flex flex-col gap-2 border-l-2 border-fence-bright pl-4 text-sm text-smoke">
+        <li>{t('auth.step_join')}</li>
+        <li>
+          {t('auth.step_command')}{' '}
+          <code className="font-mono text-hazard">/account register</code>
+        </li>
+        <li>{t('auth.step_code')}</li>
+      </ol>
+
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         {errors.form ? <FormError>{errors.form}</FormError> : null}
+
+        <Field
+          label={t('auth.code')}
+          name="code"
+          value={code}
+          // Codes are issued uppercase; accepting any case and normalising here
+          // saves a pointless rejection.
+          onChange={(event) => setCode(event.target.value.toUpperCase())}
+          autoComplete="one-time-code"
+          autoCapitalize="characters"
+          spellCheck={false}
+          maxLength={CODE_LENGTH}
+          autoFocus
+          required
+          className="text-lg tracking-[0.3em]"
+          error={errors.fields.code}
+        />
 
         <Field
           label={t('auth.email')}
@@ -63,7 +98,6 @@ export function RegisterPage() {
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           autoComplete="email"
-          autoFocus
           required
           error={errors.fields.email}
         />
@@ -83,9 +117,6 @@ export function RegisterPage() {
               : errors.fields.password
           }
         />
-
-        {/* No name field: the character is attached from in game afterwards. */}
-        <p className="text-xs leading-relaxed text-dust">{t('auth.name_comes_later')}</p>
 
         <Button type="submit" disabled={register.isPending} className="mt-1 w-full">
           {register.isPending ? t('auth.creating_account') : t('auth.create_account')}

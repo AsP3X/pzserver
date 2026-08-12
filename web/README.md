@@ -19,8 +19,8 @@ web/
 | API foundation | Config, error envelope, tracing, CORS, graceful shutdown, migrations on boot |
 | Public endpoints | `/api/health`, `/api/health/detailed`, `/api/v1/{site,server/status,server/history,stats/summary,stats/leaderboard}` |
 | Localisation | English and German, in the UI strings and in the admin-editable site copy (`GET /api/v1/site?locale=de`) |
-| Auth | `/api/v1/auth/{register,login,logout,me,password}` — Argon2id, server-side sessions, per-username login throttling |
-| Player portal | `/api/v1/me/character` — the signed-in account's own character, joined to the game on username |
+| Auth | `/api/v1/auth/{register,login,logout,me,password}` — Argon2id, server-side sessions, per-account login throttling |
+| Player portal | `/api/v1/me/character` — the signed-in account's own character, its condition and its body temperature |
 | Game server integration | Source RCON client, Lua bridge readers, `server.ini` parser, Docker status via the socket proxy |
 | Background tasks | Player-stats sync from the mod export, population sampling, expired-session cleanup |
 | UI | Design system, i18n (en/de), landing page, sign in / register / account, character |
@@ -28,9 +28,11 @@ web/
 Not built yet: any admin surface, the rest of the player portal (inventory, map,
 vault, reports), and the shop. The old stack still owns all of that.
 
-**Accounts are joined to characters by username, and the username comes from the
-game.** Registration takes an email and a password only. The PZ name is stamped
-on when the player links a character from in game — see below.
+**Accounts can only be created from in game.** There is no sign-up form that
+stands on its own: registration starts with `/account register` on the server,
+which proves the character exists and that the person registering is playing it.
+An account with no character behind it is not a state this schema can represent
+— `users.username` is `NOT NULL`.
 
 ## Authentication
 
@@ -44,18 +46,22 @@ The cookie is `HttpOnly`, `SameSite=Lax`, `Secure`, and expires with the row it
 points at. `SameSite=Lax` is the CSRF defence: the browser will not attach it to
 a cross-site POST, and every state-changing endpoint is a POST.
 
-Passwords are Argon2id with per-password salts. A login for an unknown username
+Signing in uses the email address, not the PZ name — the name identifies a
+character, and one person may hold several.
+
+Passwords are Argon2id with per-password salts. A login for an unknown address
 still pays for a hash verification, so response time does not reveal which
 accounts exist, and both failure modes return the same message.
 
-Failed logins are throttled per username (8 per 15 minutes by default). The
-counter is per username rather than per address because the API only ever sees
-nginx's address; add per-address limiting at the edge alongside it.
+Failed logins are throttled per address (8 per 15 minutes by default). The
+counter is per account rather than per network address because the API only ever
+sees nginx's; add per-address limiting at the edge alongside it.
 
 The first administrator is created on boot from `ADMIN_USERNAME` /
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` — the same variables the PHP stack's entrypoint
 reads — and only when the table has no administrator, so it cannot be used to
-reset a forgotten password.
+reset a forgotten password. It is the one account that gets its username without
+an in-game claim, on the grounds that the operator can assert their own name.
 
 ## Architecture notes
 
@@ -81,22 +87,23 @@ TTL.
 in-game time — it reads 1993 and stops whenever the world is paused. Staleness
 is judged by the file's mtime, never by its contents.
 
-## Linking an account to a character
+## Registering
 
-Registration never asks for a PZ name. Instead:
+1. The player joins the server as the character they want the account for.
+2. In game they run `/account register`.
+3. The mod reports who ran it; this stack opens a registration and answers
+   within five seconds with a six-character code, which the mod shows them.
+4. On the website they enter that code with an email and a password. The
+   account is created already carrying the character's name.
 
-1. A signed-in player opens `/character` and presses **Get a code**. The API
-   issues a six-character one-time code, good for 30 minutes.
-2. In game they type `/account register <code>`.
-3. The mod records the claim; this stack picks it up within five seconds,
-   stamps the character's name onto the account, and answers.
-4. The page they left open flips to their character on its own — it polls the
-   session while a code is on screen.
+A code rather than an email address typed in game: whatever goes into the chat
+channel also goes into the server log, where other players and every log reader
+can see it. Codes use an alphabet with no `I`, `L`, `O`, `0` or `1`, so nothing
+is lost reading one off a second monitor.
 
-A code rather than an email address on purpose: whatever is typed goes into the
-chat channel and the server log, where other players can read it. Codes use an
-alphabet with no `I`, `L`, `O`, `0` or `1`, so nothing is lost reading one off a
-second monitor.
+Only a completed registration consumes a code, and a code is single-use. Running
+the command again replaces an outstanding code rather than adding a second, so a
+character never has two live codes.
 
 ### The file contract (mod side not written yet)
 
@@ -105,7 +112,7 @@ finished and tested against the contract below; the command still has to be
 added to the mod. The channel mirrors the mod's own request/result idiom with
 the direction reversed — the mod writes the requests, this stack answers.
 
-**The mod writes `Lua/account_links.json`:**
+**The mod writes `Lua/account_links.json`** when a player runs the command:
 
 ```json
 {
@@ -113,8 +120,7 @@ the direction reversed — the mod writes the requests, this stack answers.
   "updated_at": "1993-07-14T10:00:00",
   "requests": [
     {
-      "id": "unique-per-claim",
-      "code": "NYUY2Z",
+      "id": "unique-per-run",
       "username": "pike",
       "steam_id": "76561198000000001",
       "requested_at": "1993-07-14T10:00:00"
@@ -123,41 +129,65 @@ the direction reversed — the mod writes the requests, this stack answers.
 }
 ```
 
-`id` is what makes this safe to read twice: any id that already has a result is
-skipped, exactly as `KR_Orders` skips delivered ids. `steam_id` and
-`requested_at` are optional. The code may be typed in any case.
+No code in the request — the player has nothing to type yet. `id` is what makes
+this safe to read twice: any id that already has a result is skipped, exactly as
+`KR_Orders` skips delivered ids. `steam_id` and `requested_at` are optional.
 
 **This stack writes `Lua/account_link_results.json`:**
 
 ```json
 {
   "version": 1,
-  "updated_at": "2026-08-12T07:33:20Z",
+  "updated_at": "2026-08-12T07:49:17Z",
   "results": [
-    { "id": "unique-per-claim", "username": "pike", "status": "linked", "at": "2026-08-12T07:33:20Z" }
+    {
+      "id": "unique-per-run",
+      "username": "pike",
+      "status": "issued",
+      "code": "3ACQ2R",
+      "expires_at": "2026-08-12T08:19:17Z",
+      "at": "2026-08-12T07:49:17Z"
+    }
   ]
 }
 ```
 
 | `status` | What to tell the player |
 | --- | --- |
-| `linked` | Their account now carries this character |
-| `unknown_code` | No such code — mistyped, or never issued |
-| `expired` | Older than 30 minutes; get a fresh one |
-| `already_claimed` | That code has been used once already |
-| `account_already_linked` | The account behind the code already has a character |
-| `name_taken` | Another account already claimed this character name |
+| `issued` | Show them `code`, and that it lasts until `expires_at` |
+| `already_registered` | This character already has an account — sign in instead |
+
+`code` and `expires_at` are present only on `issued`.
 
 Two rules worth honouring:
 
 - **The mod owns the request file.** This stack only reads it, and never deletes
   from it. Answered entries should be pruned mod-side, or the file grows forever.
-- **A rejection does not burn the code.** Only `linked` consumes it, so a player
-  who hits `name_taken` can try again on another character with the same code.
+- **Show the code privately.** It is worth an account to whoever reads it, so it
+  belongs in a message to the one player, not the public channel.
 
 The ledger is capped at 200 entries and written to a temporary file that is then
 renamed, so the mod never reads a half-written one. `web-api` therefore mounts
 the bridge directory read-write, unlike the rest of the game data.
+
+## The character page
+
+`/character` shows the signed-in player their own survivor. Two sources feed it:
+
+- **`player_stats`**, folded in from the mod's ten-minute export and kept in
+  Postgres. Kills, hours, profession, skills, traits and a health summary. This
+  is what persists when nobody is online.
+- **The vitals heartbeat**, `Lua/vitals/<username>.json`, written per player
+  while they are connected. Per-part health with wound types, and the
+  thermoregulator's core and per-part skin temperatures.
+
+The heartbeat file outlives the session, so the condition panel is labelled with
+the file's mtime — it is "last known", not "now". Only parts that are hurt are
+listed: nobody needs to read seventeen rows of 100%.
+
+Temperature bands (freezing / cold / normal / warm / overheating) approximate
+where PZ shows its own moodles; the game exposes no thresholds, so they are read
+off normal body temperature rather than taken from the source.
 
 ## Running it
 
@@ -266,8 +296,9 @@ Variables specific to this stack, all optional with defaults:
   English validation error. The fix is a specific `code` per failure that the UI
   maps to a translation key, falling back to the server's text.
 - Professions on the leaderboard are the game's own English strings, straight
-  from the mod export, so they stay English in German. Translating them needs a
-  mapping from PZ's profession ids.
+  from the mod export, so they stay English in German. Body parts and wound
+  kinds get the same treatment on the character page and *are* translated, via a
+  lookup with a fallback — professions want the same and do not have it yet.
 - Query-parameter validation failures return axum's plain-text rejection rather
   than the JSON error envelope. Correct status codes, inconsistent shape.
 - No password reset. It needs outbound mail, which this stack has no

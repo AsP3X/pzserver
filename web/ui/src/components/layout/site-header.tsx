@@ -99,9 +99,7 @@ function AccountControls({ onLanding }: { onLanding: boolean }) {
         to="/account"
         className="hidden font-mono text-xs tracking-widest text-bone uppercase transition-colors hover:text-hazard sm:block"
       >
-        {/* Falls back to a generic label until a character is linked — an
-            account has no name of its own to show. */}
-        {user.username ?? t('nav.my_account')}
+        {user.username}
       </Link>
       <Button
         variant="outline"

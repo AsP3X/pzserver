@@ -1,18 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
-import { Clock, Crosshair, Droplet, Hourglass, Skull, Snowflake, Syringe } from 'lucide-react'
+import { Clock, Crosshair, Hourglass, Skull } from 'lucide-react'
 
 import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { LinkButton } from '@/components/ui/button'
-import { Meter } from '@/components/ui/meter'
+import { Condition } from '@/routes/character/condition'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatTile } from '@/components/ui/stat-tile'
 import { useRequireUser } from '@/lib/auth-guards'
-import { LinkPanel } from '@/routes/character/link-panel'
 import { useTranslation } from '@/i18n/use-translation'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
 import { myCharacterQuery } from '@/lib/queries'
-import type { Character } from '@/lib/api'
+import type { Character, PlayerBody } from '@/lib/api'
 import { cn } from '@/lib/cn'
 
 export function CharacterPage() {
@@ -32,12 +31,14 @@ export function CharacterPage() {
         {isPending ? (
           <Skeleton className="h-64 w-full" />
         ) : data?.character ? (
-          <CharacterDetail character={data.character} online={data.online} />
-        ) : user?.username ? (
-          // Linked, but the mod has not reported this character yet.
-          <NotSeenYet username={user.username} />
+          <CharacterDetail
+            character={data.character}
+            online={data.online}
+            body={data.body}
+          />
         ) : (
-          <LinkPanel />
+          // Registered from in game, but the mod's export has not caught up yet.
+          <NotSeenYet username={user?.username ?? ''} />
         )}
       </Container>
     </Section>
@@ -47,9 +48,11 @@ export function CharacterPage() {
 function CharacterDetail({
   character,
   online,
+  body,
 }: {
   character: Character
   online: boolean
+  body: PlayerBody | null
 }) {
   const { t, intlLocale } = useTranslation()
 
@@ -114,90 +117,12 @@ function CharacterDetail({
         </div>
       </Panel>
 
-      <Vitals character={character} />
+      <Condition character={character} body={body} />
 
       <div className="grid gap-8 lg:grid-cols-2">
         <Skills skills={skills} />
         <Traits traits={traits} />
       </div>
-    </div>
-  )
-}
-
-function Vitals({ character }: { character: Character }) {
-  const { t } = useTranslation()
-  const vitals = character.vitals
-
-  if (!vitals) {
-    return null
-  }
-
-  const health = vitals.health ?? 0
-
-  return (
-    <Panel bracketed>
-      <PanelHeader label={t('character.condition')} />
-
-      <div className="p-6">
-        <Meter
-          label={t('character.health')}
-          value={health}
-          readout={`${Math.round(health)}%`}
-        />
-
-        <div className="mt-6 grid grid-cols-1 gap-px bg-fence sm:grid-cols-3">
-          <Flag
-            icon={Droplet}
-            label={t('character.bleeding')}
-            active={vitals.bleeding_parts > 0}
-            detail={
-              vitals.bleeding_parts > 0
-                ? t('character.bleeding_parts', { count: vitals.bleeding_parts })
-                : t('character.none')
-            }
-          />
-          <Flag
-            icon={Syringe}
-            label={t('character.infection')}
-            active={vitals.infected}
-            detail={vitals.infected ? t('character.infected') : t('character.clear')}
-          />
-          <Flag
-            icon={Snowflake}
-            label={t('character.cold')}
-            active={vitals.has_cold}
-            detail={vitals.has_cold ? t('character.has_cold') : t('character.clear')}
-          />
-        </div>
-      </div>
-    </Panel>
-  )
-}
-
-function Flag({
-  icon: Icon,
-  label,
-  active,
-  detail,
-}: {
-  icon: typeof Droplet
-  label: string
-  active: boolean
-  detail: string
-}) {
-  return (
-    <div className="bg-ash px-4 py-4">
-      <div className="flex items-center gap-2">
-        <Icon
-          aria-hidden="true"
-          className={cn('size-3.5', active ? 'text-blood' : 'text-dust')}
-          strokeWidth={1.5}
-        />
-        <span className="eyebrow">{label}</span>
-      </div>
-      <p className={cn('mt-1.5 text-sm', active ? 'text-blood' : 'text-smoke')}>
-        {detail}
-      </p>
     </div>
   )
 }

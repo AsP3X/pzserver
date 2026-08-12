@@ -76,13 +76,3 @@ export function useChangePassword() {
     mutationFn: api.changePassword,
   })
 }
-
-/**
- * Ask for a one-time code to type into `/account register` in game.
- *
- * The code is not cached: it is short-lived and single-use, so a stale one on
- * screen would be worse than asking again.
- */
-export function useIssueLinkCode() {
-  return useMutation({ mutationFn: api.issueLinkCode })
-}

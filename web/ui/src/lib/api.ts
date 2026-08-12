@@ -109,18 +109,51 @@ export interface Character {
   last_synced_at: string
 }
 
+export interface BodyPartHealth {
+  health: number
+  /** `Scratch`, `Bite`, `Cut`, `Burn`, `Infection`, … as the mod names them. */
+  wounds: string[]
+}
+
+export interface BodyWound {
+  part: string
+  type: string
+  severity: string | null
+  /** Bandaged or stitched — as close as PZ gets to a treated flag. */
+  treated: boolean
+}
+
+export interface BodyPartTemperature {
+  skin: number
+  insulation: number
+}
+
+/** The mod's per-player heartbeat: richer than the summary on the character. */
+export interface PlayerBody {
+  health: { overall: number; parts: Record<string, BodyPartHealth> } | null
+  wounds: BodyWound[] | null
+  temperature: {
+    core: number
+    body_heat: number
+    parts: Record<string, BodyPartTemperature>
+  } | null
+  /** The file outlives the session, so this says how live the reading is. */
+  reported_at: string | null
+}
+
 export interface MyCharacterResponse {
   /** Null when the account has never been seen in game. */
   character: Character | null
   online: boolean
+  body: PlayerBody | null
 }
 
 export type UserRole = 'super_admin' | 'admin' | 'moderator' | 'player'
 
 export interface User {
   id: string
-  /** The PZ name, once a character is linked from in game. Null until then. */
-  username: string | null
+  /** The PZ name. Always present: an account only exists for a proven character. */
+  username: string
   email: string
   role: UserRole
   steam_id: string | null
@@ -137,6 +170,8 @@ export interface SessionResponse {
 }
 
 export interface RegisterInput {
+  /** Issued in game by `/account register`. */
+  code: string
   email: string
   password: string
 }
@@ -144,12 +179,6 @@ export interface RegisterInput {
 export interface LoginInput {
   email: string
   password: string
-}
-
-export interface LinkCode {
-  code: string
-  expires_at: string
-  lifetime_minutes: number
 }
 
 export interface ChangePasswordInput {
@@ -243,8 +272,6 @@ export const api = {
   currentUser: () => request<MeResponse>('/api/v1/auth/me'),
 
   myCharacter: () => request<MyCharacterResponse>('/api/v1/me/character'),
-
-  issueLinkCode: () => post<LinkCode>('/api/v1/me/link-code', {}),
 
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),

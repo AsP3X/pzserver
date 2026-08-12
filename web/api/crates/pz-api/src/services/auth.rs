@@ -9,7 +9,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -32,9 +32,9 @@ const MAX_USERNAME_LENGTH: usize = 50;
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct User {
     pub id: Uuid,
-    /// The PZ name, once a character has been linked from in game. `None`
-    /// until then: registration does not ask for it.
-    pub username: Option<String>,
+    /// The PZ name. Always present: accounts are only created for a character
+    /// that has already proven itself in game.
+    pub username: String,
     pub email: String,
     pub role: String,
     pub steam_id: Option<String>,
@@ -47,13 +47,25 @@ struct Credentials {
     password_hash: String,
 }
 
-/// Register a new account. Returns the created user.
+/// Create the account behind a completed in-game registration.
 ///
-/// No username: the PZ name is stamped on later by the in-game link command,
-/// so a fresh account has an email and nothing else to identify it.
-pub async fn register(db: &PgPool, email: &str, password: &str) -> Result<User, ApiError> {
+/// Takes the caller's transaction because the row that authorised this — the
+/// registration code — is consumed in the same one: either both happen or
+/// neither does, so a failure cannot burn a code without producing an account.
+///
+/// There is no other way to create a user. Accounts exist only for characters
+/// that have proven themselves on the server.
+pub async fn create_from_registration(
+    transaction: &mut Transaction<'_, Postgres>,
+    username: &str,
+    steam_id: Option<&str>,
+    email: &str,
+    password: &str,
+) -> Result<User, ApiError> {
+    let username = username.trim();
     let email = email.trim();
 
+    validate_username(username)?;
     validate_email(email)?;
     validate_password(password)?;
 
@@ -61,14 +73,16 @@ pub async fn register(db: &PgPool, email: &str, password: &str) -> Result<User, 
 
     let user = sqlx::query_as::<_, User>(
         r#"
-        INSERT INTO users (email, password_hash)
-        VALUES ($1, $2)
+        INSERT INTO users (username, steam_id, email, password_hash)
+        VALUES ($1, $2, $3, $4)
         RETURNING id, username, email, role, steam_id, created_at
         "#,
     )
+    .bind(username)
+    .bind(steam_id)
     .bind(email)
     .bind(&password_hash)
-    .fetch_one(db)
+    .fetch_one(&mut **transaction)
     .await
     .map_err(taken_field)?;
 
