@@ -17,6 +17,7 @@ import {
 import { AdminLayout, PlayerLayout, PublicLayout } from '@/components/layout/layouts'
 import { AdminOverviewPage } from '@/routes/admin/overview'
 import { CharacterPage } from '@/routes/character'
+import { InventoryPage } from '@/routes/me/inventory'
 import { LandingPage } from '@/routes/landing'
 import { LoginPage } from '@/routes/auth/login'
 import { NotFoundPage } from '@/routes/not-found'
@@ -34,6 +35,7 @@ const publicLayout = createRoute({
   getParentRoute: () => rootRoute,
   id: 'public',
   component: PublicLayout,
+  notFoundComponent: NotFoundPage,
 })
 
 const indexRoute = createRoute({
@@ -72,6 +74,7 @@ const playerLayout = createRoute({
   getParentRoute: () => rootRoute,
   id: 'player',
   component: PlayerLayout,
+  notFoundComponent: NotFoundPage,
 })
 
 const playerOverviewRoute = createRoute({
@@ -86,6 +89,12 @@ const characterRoute = createRoute({
   component: CharacterPage,
 })
 
+const inventoryRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/me/inventory',
+  component: InventoryPage,
+})
+
 const settingsRoute = createRoute({
   getParentRoute: () => playerLayout,
   path: '/me/settings',
@@ -98,6 +107,7 @@ const adminLayout = createRoute({
   getParentRoute: () => rootRoute,
   id: 'admin',
   component: AdminLayout,
+  notFoundComponent: NotFoundPage,
 })
 
 const adminOverviewRoute = createRoute({
@@ -134,11 +144,19 @@ export const router = createRouter({
       loginRoute,
       registerRoute,
     ]),
-    playerLayout.addChildren([playerOverviewRoute, characterRoute, settingsRoute]),
+    playerLayout.addChildren([
+      playerOverviewRoute,
+      characterRoute,
+      inventoryRoute,
+      settingsRoute,
+    ]),
     adminLayout.addChildren([adminOverviewRoute]),
     ...movedRoutes,
   ]),
   defaultPreload: 'intent',
+  // Only for a miss that matched no layout at all. A miss *under* a surface
+  // uses that surface's own notFoundComponent, so the shell is never drawn
+  // twice.
   defaultNotFoundComponent: () => (
     <PublicLayout>
       <NotFoundPage />

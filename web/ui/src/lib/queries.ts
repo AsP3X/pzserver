@@ -43,6 +43,18 @@ export const leaderboardQuery = (
   })
 
 /** The signed-in player's own character. Polled while the page is open. */
+/**
+ * The inventory snapshot. Polled while the page is open, because a refresh
+ * lands as a file the mod writes a tick or two later rather than as a response.
+ */
+export const myInventoryQuery = queryOptions({
+  queryKey: ['me', 'inventory'],
+  queryFn: api.myInventory,
+  refetchInterval: 10_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
 export const myCharacterQuery = queryOptions({
   queryKey: ['me', 'character'],
   queryFn: api.myCharacter,

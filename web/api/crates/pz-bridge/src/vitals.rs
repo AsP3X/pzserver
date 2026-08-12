@@ -1,8 +1,9 @@
 //! The mod's per-player vitals heartbeat.
 //!
 //! `KR_Vitals` writes one file per player into `Lua/vitals/<username>.json`,
-//! falling back to a flat `Lua/vitals_<username>.json` when the subdirectory
-//! cannot be created. Both are tried here, newest wins.
+//! falling back to a flat `Lua/vitals_<username>.json`. Finding whichever
+//! exists is [`crate::player_file`]'s job; this module is the shape of what is
+//! inside.
 //!
 //! This is richer than the summary that lands in `player_stats.json`: health
 //! and wounds per body part, and the thermoregulator's core and per-part skin
@@ -12,9 +13,10 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
+
+use crate::player_file::{PlayerFile, PlayerFileError, read_player_json};
 
 /// Preferred location, one file per player.
 const DIRECTORY: &str = "vitals";
@@ -227,26 +229,8 @@ pub struct PartTemperature {
 
 #[derive(Debug, thiserror::Error)]
 pub enum VitalsError {
-    #[error("vitals file {path} could not be read: {source}")]
-    Read {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("vitals file {path} is not valid JSON: {source}")]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
-}
-
-/// One player's heartbeat, with when it was written.
-#[derive(Debug, Clone)]
-pub struct VitalsRead {
-    pub vitals: PlayerVitals,
-    pub reported_at: Option<SystemTime>,
+    #[error(transparent)]
+    File(#[from] PlayerFileError),
 }
 
 #[derive(Debug, Clone)]
@@ -260,59 +244,12 @@ impl VitalsReader {
     }
 
     /// Read a player's heartbeat, or `None` when the mod has never written one.
-    ///
-    /// The username comes from our own database rather than from a request, but
-    /// it still ends up in a path, so anything that could climb out of the
-    /// bridge directory is refused outright.
-    pub async fn read(&self, username: &str) -> Result<Option<VitalsRead>, VitalsError> {
-        if !is_safe_filename(username) {
-            return Ok(None);
-        }
-
-        let candidates = [
-            self.dir.join(DIRECTORY).join(format!("{username}.json")),
-            self.dir.join(format!("{DIRECTORY}_{username}.json")),
-        ];
-
-        for path in candidates {
-            let contents = match tokio::fs::read_to_string(&path).await {
-                Ok(contents) => contents,
-                Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(source) => return Err(VitalsError::Read { path, source }),
-            };
-
-            if contents.trim().is_empty() {
-                continue;
-            }
-
-            let vitals = serde_json::from_str(&contents).map_err(|source| VitalsError::Parse {
-                path: path.clone(),
-                source,
-            })?;
-
-            let reported_at = tokio::fs::metadata(&path)
-                .await
-                .ok()
-                .and_then(|meta| meta.modified().ok());
-
-            return Ok(Some(VitalsRead {
-                vitals,
-                reported_at,
-            }));
-        }
-
-        Ok(None)
+    pub async fn read(
+        &self,
+        username: &str,
+    ) -> Result<Option<PlayerFile<PlayerVitals>>, VitalsError> {
+        Ok(read_player_json(&self.dir, DIRECTORY, username).await?)
     }
-}
-
-/// PZ usernames are letters, digits and underscores; anything else has no
-/// business being joined onto a path.
-fn is_safe_filename(username: &str) -> bool {
-    !username.is_empty()
-        && username.len() <= 50
-        && username
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]
@@ -379,7 +316,7 @@ mod tests {
         std::fs::write(dir.path().join(DIRECTORY).join("rook.json"), HEARTBEAT).expect("write");
 
         let read = reader.read("rook").await.expect("read").expect("present");
-        let health = read.vitals.health.expect("health");
+        let health = read.data.health.expect("health");
 
         assert_eq!(health.overall, 84.5);
         assert_eq!(health.parts["Hand_L"].wounds, vec!["Scratch"]);
@@ -393,7 +330,7 @@ mod tests {
 
         let read = reader.read("rook").await.expect("read").expect("present");
 
-        assert_eq!(read.vitals.temperature.expect("temperature").core, 36.2);
+        assert_eq!(read.data.temperature.expect("temperature").core, 36.2);
     }
 
     #[tokio::test]
@@ -406,7 +343,7 @@ mod tests {
             .await
             .expect("read")
             .expect("present")
-            .vitals;
+            .data;
 
         assert_eq!(
             vitals.info.expect("info").profession.as_deref(),
@@ -442,7 +379,7 @@ mod tests {
             .await
             .expect("read")
             .expect("present")
-            .vitals;
+            .data;
 
         assert!(vitals.moodles.is_none());
         assert!(vitals.weapon.is_none());
@@ -456,8 +393,8 @@ mod tests {
 
         let read = reader.read("rook").await.expect("read").expect("present");
 
-        assert!(read.vitals.health.is_none());
-        assert!(read.vitals.temperature.is_none());
+        assert!(read.data.health.is_none());
+        assert!(read.data.temperature.is_none());
     }
 
     #[tokio::test]

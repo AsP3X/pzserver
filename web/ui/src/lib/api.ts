@@ -220,6 +220,52 @@ export interface PlayerBody {
   reported_at: string | null
 }
 
+export interface InventoryItem {
+  id: string
+  full_type: string
+  name: string
+  category: string
+  count: number
+  /** Wear, 0–100. Null for items that do not degrade. */
+  condition: number | null
+  equipped: boolean
+  /** Display name of the container holding it. */
+  container: string
+  container_id: string
+  /** Set when the item is itself a bag: the container id it opens into. */
+  contains: string | null
+}
+
+export interface InventoryContainer {
+  id: string
+  /** Null for the player's own pockets. */
+  parent: string | null
+  name: string
+  full_type: string | null
+  item_id: string | null
+  worn: boolean | null
+  capacity: number | null
+  /** Weight of this container's own contents. */
+  weight: number | null
+}
+
+export interface InventorySnapshot {
+  username: string
+  timestamp: string | null
+  items: InventoryItem[]
+  containers: InventoryContainer[]
+  weight: number
+  max_weight: number
+}
+
+export interface MyInventoryResponse {
+  /** Null until the mod has written a snapshot for this character. */
+  snapshot: InventorySnapshot | null
+  reported_at: string | null
+  /** Whether a refresh would do anything — the mod only serves online players. */
+  online: boolean
+}
+
 export interface MyCharacterResponse {
   /** Null when the account has never been seen in game. */
   character: Character | null
@@ -351,6 +397,10 @@ export const api = {
   currentUser: () => request<MeResponse>('/api/v1/auth/me'),
 
   myCharacter: () => request<MyCharacterResponse>('/api/v1/me/character'),
+
+  myInventory: () => request<MyInventoryResponse>('/api/v1/me/inventory'),
+
+  refreshInventory: () => post<void>('/api/v1/me/inventory/refresh', {}),
 
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),

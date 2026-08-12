@@ -86,7 +86,7 @@ export const PLAYER_NAV: NavGroup[] = [
     items: [
       { to: '/me', label: 'nav.overview', icon: LayoutGrid },
       { to: '/me/character', label: 'nav.character', icon: User },
-      { to: '/me/inventory', label: 'nav.inventory', icon: Backpack, planned: true },
+      { to: '/me/inventory', label: 'nav.inventory', icon: Backpack },
       { to: '/me/map', label: 'nav.map', icon: MapPin, planned: true },
     ],
   },

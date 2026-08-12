@@ -20,7 +20,7 @@ web/
 | Public endpoints | `/api/health`, `/api/health/detailed`, `/api/v1/{site,server/status,server/history,stats/summary,stats/leaderboard}` |
 | Localisation | English and German, in the UI strings and in the admin-editable site copy (`GET /api/v1/site?locale=de`) |
 | Auth | `/api/v1/auth/{register,login,logout,me,password}` — Argon2id, server-side sessions, per-account login throttling |
-| Player portal | `/api/v1/me/character` — the signed-in account's own character plus the mod's full vitals heartbeat |
+| Player portal | `/api/v1/me/{character,inventory}` — the signed-in account's own character, vitals heartbeat and inventory snapshot |
 | Game server integration | Source RCON client, Lua bridge readers, `server.ini` parser, Docker status via the socket proxy |
 | Background tasks | Player-stats sync from the mod export, population sampling, expired-session cleanup |
 | UI | Design system, i18n (en/de), three navigation surfaces, and the pages listed below |
@@ -30,7 +30,7 @@ web/
 Three surfaces, each with its own shell and guard, defined in
 `ui/src/lib/navigation.ts`:
 
-| Surface |路 | Who | Shell |
+| Surface | Path | Who | Shell |
 | --- | --- | --- | --- |
 | Public site | `/` | anyone | Top nav, collapses to a panel below `md` |
 | Player | `/me/*` | signed in | Sidebar, off-canvas drawer below `lg` |
@@ -51,11 +51,27 @@ listed and marked `soon` rather than hidden, so the shape of what is coming is
 visible without shipping dead links.
 
 **Built so far:** landing, status, rankings, sign in, register, 404, player
-overview, character, settings, admin overview.
+overview, character, inventory, settings, admin overview.
 
 **Not built yet:** news, obituary, public profiles, the rest of the player area
-(inventory, map, vault, wallet, purchases, reports), the shop, and every admin
-section beyond the overview. The old stack still owns all of that.
+(map, vault, wallet, purchases, reports), the shop, and every admin section
+beyond the overview. The old stack still owns all of that.
+
+## The inventory
+
+`KR_Snapshot` writes `Lua/inventory/<username>.json` while a player is online: a
+flat item list plus a container tree, where a bag is addressed by the id of the
+item holding it rather than by its name — a player carrying two wallets would
+otherwise have both sets of contents reported as one.
+
+The page stacks entries by type (twelve nails are one line, and the worst
+condition in a stack wins because that is the one that will break first) and
+groups them by container id, indenting nested bags.
+
+**Refreshing** writes the player's name into `export_requests.json`, which the
+mod drains every tick. It only works while they are online — the mod matches
+requests against its roster and drops the rest — so the endpoint refuses when
+they are not, rather than leaving a button that quietly does nothing.
 
 **Accounts can only be created from in game.** There is no sign-up form that
 stands on its own: registration starts with `/account register` on the server,
