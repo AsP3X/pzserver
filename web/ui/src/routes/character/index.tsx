@@ -8,6 +8,7 @@ import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatTile } from '@/components/ui/stat-tile'
 import { useRequireUser } from '@/lib/auth-guards'
+import { LinkPanel } from '@/routes/character/link-panel'
 import { useTranslation } from '@/i18n/use-translation'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
 import { myCharacterQuery } from '@/lib/queries'
@@ -32,8 +33,11 @@ export function CharacterPage() {
           <Skeleton className="h-64 w-full" />
         ) : data?.character ? (
           <CharacterDetail character={data.character} online={data.online} />
+        ) : user?.username ? (
+          // Linked, but the mod has not reported this character yet.
+          <NotSeenYet username={user.username} />
         ) : (
-          <NeverPlayed username={user?.username} />
+          <LinkPanel />
         )}
       </Container>
     </Section>
@@ -263,8 +267,8 @@ function Traits({ traits }: { traits: Array<{ id: string; label: string }> }) {
   )
 }
 
-/** Registered on the site, never seen in game. */
-function NeverPlayed({ username }: { username: string | undefined }) {
+/** Linked to a character the mod has not reported on yet. */
+function NotSeenYet({ username }: { username: string }) {
   const { t } = useTranslation()
 
   return (
@@ -275,7 +279,7 @@ function NeverPlayed({ username }: { username: string | undefined }) {
         {t('character.never_played_title')}
       </h3>
       <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-smoke">
-        {t('character.never_played_body', { username: username ?? '' })}
+        {t('character.never_played_body', { username })}
       </p>
 
       <LinkButton href="/#status" variant="outline" size="sm" className="mt-6">

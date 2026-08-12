@@ -28,10 +28,9 @@ web/
 Not built yet: any admin surface, the rest of the player portal (inventory, map,
 vault, reports), and the shop. The old stack still owns all of that.
 
-**Accounts are joined to characters by username.** That is why registration asks
-for the name you play under, and why the lookup is case-insensitive on both
-sides. An account with no matching character is a normal state — someone who
-registered before joining — and the character page says so rather than erroring.
+**Accounts are joined to characters by username, and the username comes from the
+game.** Registration takes an email and a password only. The PZ name is stamped
+on when the player links a character from in game — see below.
 
 ## Authentication
 
@@ -81,6 +80,84 @@ TTL.
 **Freshness comes from mtimes.** The `timestamp` inside the mod's exports is
 in-game time — it reads 1993 and stops whenever the world is paused. Staleness
 is judged by the file's mtime, never by its contents.
+
+## Linking an account to a character
+
+Registration never asks for a PZ name. Instead:
+
+1. A signed-in player opens `/character` and presses **Get a code**. The API
+   issues a six-character one-time code, good for 30 minutes.
+2. In game they type `/account register <code>`.
+3. The mod records the claim; this stack picks it up within five seconds,
+   stamps the character's name onto the account, and answers.
+4. The page they left open flips to their character on its own — it polls the
+   session while a code is on screen.
+
+A code rather than an email address on purpose: whatever is typed goes into the
+chat channel and the server log, where other players can read it. Codes use an
+alphabet with no `I`, `L`, `O`, `0` or `1`, so nothing is lost reading one off a
+second monitor.
+
+### The file contract (mod side not written yet)
+
+**`/account register` does not exist in KnoxRelay today.** The web half is
+finished and tested against the contract below; the command still has to be
+added to the mod. The channel mirrors the mod's own request/result idiom with
+the direction reversed — the mod writes the requests, this stack answers.
+
+**The mod writes `Lua/account_links.json`:**
+
+```json
+{
+  "version": 1,
+  "updated_at": "1993-07-14T10:00:00",
+  "requests": [
+    {
+      "id": "unique-per-claim",
+      "code": "NYUY2Z",
+      "username": "pike",
+      "steam_id": "76561198000000001",
+      "requested_at": "1993-07-14T10:00:00"
+    }
+  ]
+}
+```
+
+`id` is what makes this safe to read twice: any id that already has a result is
+skipped, exactly as `KR_Orders` skips delivered ids. `steam_id` and
+`requested_at` are optional. The code may be typed in any case.
+
+**This stack writes `Lua/account_link_results.json`:**
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-08-12T07:33:20Z",
+  "results": [
+    { "id": "unique-per-claim", "username": "pike", "status": "linked", "at": "2026-08-12T07:33:20Z" }
+  ]
+}
+```
+
+| `status` | What to tell the player |
+| --- | --- |
+| `linked` | Their account now carries this character |
+| `unknown_code` | No such code — mistyped, or never issued |
+| `expired` | Older than 30 minutes; get a fresh one |
+| `already_claimed` | That code has been used once already |
+| `account_already_linked` | The account behind the code already has a character |
+| `name_taken` | Another account already claimed this character name |
+
+Two rules worth honouring:
+
+- **The mod owns the request file.** This stack only reads it, and never deletes
+  from it. Answered entries should be pruned mod-side, or the file grows forever.
+- **A rejection does not burn the code.** Only `linked` consumes it, so a player
+  who hits `name_taken` can try again on another character with the same code.
+
+The ledger is capped at 200 entries and written to a temporary file that is then
+renamed, so the mod never reads a half-written one. `web-api` therefore mounts
+the bridge directory read-write, unlike the rest of the game data.
 
 ## Running it
 

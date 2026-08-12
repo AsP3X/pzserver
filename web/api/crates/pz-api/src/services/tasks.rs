@@ -1,12 +1,15 @@
 //! Background loops: folding the mod's export into Postgres, and sampling
 //! population over time.
 
+use std::collections::HashSet;
 use std::time::SystemTime;
 
+use chrono::Utc;
 use pz_bridge::lua::{PLAYER_STATS_FILE, StatsPlayer};
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
+use crate::services::link::{self, ClaimOutcome};
 use crate::state::AppState;
 
 /// How long sampled population history is kept.
@@ -16,14 +19,123 @@ const SAMPLE_RETENTION_DAYS: i32 = 30;
 /// plenty.
 const SESSION_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
 
+/// A player standing at the keyboard is waiting for this, so it runs often.
+const ACCOUNT_LINK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Start every background loop. Handles are returned so `main` can abort them
 /// on shutdown.
 pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
     vec![
         tokio::spawn(stats_sync_loop(state.clone())),
         tokio::spawn(status_sample_loop(state.clone())),
+        tokio::spawn(account_link_loop(state.clone())),
         tokio::spawn(session_cleanup_loop(state)),
     ]
+}
+
+/// Claim the account-link codes players have typed in game.
+///
+/// The mod appends to `account_links.json`; every claim that gets an answer is
+/// recorded in `account_link_results.json` under the same id, and ids that
+/// already have a result are skipped. That is what makes a request file read
+/// twice link only once — the same rule the mod applies to the delivery queue.
+async fn account_link_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(ACCOUNT_LINK_INTERVAL);
+    let channel = pz_bridge::LinkChannel::new(&state.config.lua_bridge_path);
+
+    loop {
+        ticker.tick().await;
+
+        let requests = match channel.requests().await {
+            Ok(requests) => requests.requests,
+            Err(error) => {
+                tracing::warn!(%error, "account link requests unreadable");
+                continue;
+            }
+        };
+
+        if requests.is_empty() {
+            continue;
+        }
+
+        let mut ledger = match channel.results().await {
+            Ok(ledger) => ledger,
+            Err(error) => {
+                // Without the ledger we cannot tell which claims were already
+                // answered, and guessing would risk linking twice.
+                tracing::error!(%error, "account link ledger unreadable; skipping this pass");
+                continue;
+            }
+        };
+
+        let answered: HashSet<String> = ledger
+            .results
+            .iter()
+            .map(|result| result.id.clone())
+            .collect();
+
+        let mut new_results = Vec::new();
+
+        for request in requests {
+            if answered.contains(&request.id) {
+                continue;
+            }
+
+            let outcome = match link::claim(&state.db, &request.code, &request.username).await {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    // Left unanswered on purpose: no result means the next pass
+                    // tries again, which is what a transient database error
+                    // deserves.
+                    tracing::error!(%error, id = %request.id, "account link claim failed");
+                    continue;
+                }
+            };
+
+            if outcome.is_success() {
+                tracing::info!(username = %request.username, "linked an account to a character");
+            } else {
+                tracing::info!(
+                    username = %request.username,
+                    outcome = ?outcome,
+                    "rejected an account link",
+                );
+            }
+
+            new_results.push(pz_bridge::LinkResult {
+                id: request.id,
+                username: request.username,
+                status: status_label(outcome).to_owned(),
+                at: Utc::now().to_rfc3339(),
+            });
+        }
+
+        if new_results.is_empty() {
+            continue;
+        }
+
+        ledger.results.extend(new_results);
+        ledger.updated_at = Utc::now().to_rfc3339();
+
+        if let Err(error) = channel.write_results(ledger).await {
+            // The links themselves are committed; only the reply failed. The
+            // ids stay unanswered, so the next pass retries and the claim comes
+            // back as already_claimed — which the mod can still report.
+            tracing::error!(%error, "could not write the account link ledger");
+        }
+    }
+}
+
+/// The wire form of an outcome, matching its serde representation.
+fn status_label(outcome: ClaimOutcome) -> &'static str {
+    match outcome {
+        ClaimOutcome::Linked => "linked",
+        ClaimOutcome::UnknownCode => "unknown_code",
+        ClaimOutcome::Expired => "expired",
+        ClaimOutcome::AlreadyClaimed => "already_claimed",
+        ClaimOutcome::AccountAlreadyLinked => "account_already_linked",
+        ClaimOutcome::NameTaken => "name_taken",
+    }
 }
 
 /// Clear out sessions whose expiry has passed.
@@ -40,6 +152,12 @@ async fn session_cleanup_loop(state: AppState) {
             Ok(0) => {}
             Ok(removed) => tracing::info!(sessions = removed, "pruned expired sessions"),
             Err(error) => tracing::error!(%error, "failed to prune expired sessions"),
+        }
+
+        match link::prune_codes(&state.db).await {
+            Ok(0) => {}
+            Ok(removed) => tracing::info!(codes = removed, "pruned expired link codes"),
+            Err(error) => tracing::error!(%error, "failed to prune expired link codes"),
         }
     }
 }

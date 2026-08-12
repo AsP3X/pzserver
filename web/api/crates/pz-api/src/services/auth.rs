@@ -32,7 +32,9 @@ const MAX_USERNAME_LENGTH: usize = 50;
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct User {
     pub id: Uuid,
-    pub username: String,
+    /// The PZ name, once a character has been linked from in game. `None`
+    /// until then: registration does not ask for it.
+    pub username: Option<String>,
     pub email: String,
     pub role: String,
     pub steam_id: Option<String>,
@@ -46,16 +48,12 @@ struct Credentials {
 }
 
 /// Register a new account. Returns the created user.
-pub async fn register(
-    db: &PgPool,
-    username: &str,
-    email: &str,
-    password: &str,
-) -> Result<User, ApiError> {
-    let username = username.trim();
+///
+/// No username: the PZ name is stamped on later by the in-game link command,
+/// so a fresh account has an email and nothing else to identify it.
+pub async fn register(db: &PgPool, email: &str, password: &str) -> Result<User, ApiError> {
     let email = email.trim();
 
-    validate_username(username)?;
     validate_email(email)?;
     validate_password(password)?;
 
@@ -63,12 +61,11 @@ pub async fn register(
 
     let user = sqlx::query_as::<_, User>(
         r#"
-        INSERT INTO users (username, email, password_hash)
-        VALUES ($1, $2, $3)
+        INSERT INTO users (email, password_hash)
+        VALUES ($1, $2)
         RETURNING id, username, email, role, steam_id, created_at
         "#,
     )
-    .bind(username)
     .bind(email)
     .bind(&password_hash)
     .fetch_one(db)
@@ -87,7 +84,7 @@ fn taken_field(error: sqlx::Error) -> ApiError {
     match db_error.constraint() {
         Some("users_username_lower_key") => ApiError::Conflict {
             field: "username",
-            message: "That name is already taken.".to_owned(),
+            message: "That character is already linked to another account.".to_owned(),
         },
         Some("users_email_lower_key") => ApiError::Conflict {
             field: "email",
@@ -97,20 +94,22 @@ fn taken_field(error: sqlx::Error) -> ApiError {
     }
 }
 
-/// Check a username and password, returning the user when they match.
+/// Check an email and password, returning the user when they match.
 ///
-/// Lookups are case-insensitive on the username, and a miss still pays for a
-/// hash verification so that "no such user" and "wrong password" take the same
-/// time — otherwise the endpoint answers whether an account exists.
+/// Email rather than username, because a freshly registered account has no
+/// username at all until a character is linked. Lookups are case-insensitive,
+/// and a miss still pays for a hash verification so that "no such account" and
+/// "wrong password" take the same time — otherwise the endpoint answers whether
+/// an address is registered.
 pub async fn authenticate(
     db: &PgPool,
-    username: &str,
+    email: &str,
     password: &str,
 ) -> Result<Option<User>, ApiError> {
     let credentials = sqlx::query_as::<_, Credentials>(
-        "SELECT id, password_hash FROM users WHERE lower(username) = lower($1)",
+        "SELECT id, password_hash FROM users WHERE lower(email) = lower($1)",
     )
-    .bind(username.trim())
+    .bind(email.trim())
     .fetch_optional(db)
     .await?;
 
@@ -264,6 +263,10 @@ pub async fn prune_sessions(db: &PgPool) -> Result<u64, ApiError> {
 /// Mirrors what the PHP stack's entrypoint does, so a fresh deployment has a
 /// way in without anyone opening a database console. Does nothing once any
 /// admin exists, so it cannot be used to reset a forgotten password.
+///
+/// This is the one account whose username is set without an in-game claim:
+/// `ADMIN_USERNAME` pre-links the operator's own character. Everyone else gets
+/// their name from `/account register`.
 pub async fn ensure_admin(
     db: &PgPool,
     username: &str,

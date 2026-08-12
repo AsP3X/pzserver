@@ -9,7 +9,7 @@ import { useRedirectSignedIn } from '@/lib/auth-guards'
 import { splitError } from '@/lib/form-error'
 import { useTranslation } from '@/i18n/use-translation'
 
-const FIELDS = ['username', 'email', 'password'] as const
+const FIELDS = ['email', 'password'] as const
 
 /** Mirrors the API's floor, so the obvious case fails without a round trip. */
 const MIN_PASSWORD_LENGTH = 10
@@ -21,7 +21,6 @@ export function RegisterPage() {
   useRedirectSignedIn()
   const register = useRegister()
 
-  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [tooShort, setTooShort] = useState(false)
@@ -37,10 +36,7 @@ export function RegisterPage() {
     }
 
     setTooShort(false)
-    register.mutate(
-      { username, email, password },
-      { onSuccess: () => void navigate({ to: '/' }) },
-    )
+    register.mutate({ email, password }, { onSuccess: () => void navigate({ to: '/character' }) })
   }
 
   return (
@@ -61,24 +57,13 @@ export function RegisterPage() {
         {errors.form ? <FormError>{errors.form}</FormError> : null}
 
         <Field
-          label={t('auth.username')}
-          name="username"
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-          autoComplete="username"
-          autoFocus
-          required
-          hint={t('auth.username_hint')}
-          error={errors.fields.username}
-        />
-
-        <Field
           label={t('auth.email')}
           name="email"
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           autoComplete="email"
+          autoFocus
           required
           error={errors.fields.email}
         />
@@ -98,6 +83,9 @@ export function RegisterPage() {
               : errors.fields.password
           }
         />
+
+        {/* No name field: the character is attached from in game afterwards. */}
+        <p className="text-xs leading-relaxed text-dust">{t('auth.name_comes_later')}</p>
 
         <Button type="submit" disabled={register.isPending} className="mt-1 w-full">
           {register.isPending ? t('auth.creating_account') : t('auth.create_account')}

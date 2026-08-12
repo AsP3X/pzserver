@@ -119,7 +119,8 @@ export type UserRole = 'super_admin' | 'admin' | 'moderator' | 'player'
 
 export interface User {
   id: string
-  username: string
+  /** The PZ name, once a character is linked from in game. Null until then. */
+  username: string | null
   email: string
   role: UserRole
   steam_id: string | null
@@ -136,14 +137,19 @@ export interface SessionResponse {
 }
 
 export interface RegisterInput {
-  username: string
   email: string
   password: string
 }
 
 export interface LoginInput {
-  username: string
+  email: string
   password: string
+}
+
+export interface LinkCode {
+  code: string
+  expires_at: string
+  lifetime_minutes: number
 }
 
 export interface ChangePasswordInput {
@@ -237,6 +243,8 @@ export const api = {
   currentUser: () => request<MeResponse>('/api/v1/auth/me'),
 
   myCharacter: () => request<MyCharacterResponse>('/api/v1/me/character'),
+
+  issueLinkCode: () => post<LinkCode>('/api/v1/me/link-code', {}),
 
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),

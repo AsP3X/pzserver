@@ -9,7 +9,7 @@ import { useRedirectSignedIn } from '@/lib/auth-guards'
 import { splitError } from '@/lib/form-error'
 import { useTranslation } from '@/i18n/use-translation'
 
-const FIELDS = ['username', 'password'] as const
+const FIELDS = ['email', 'password'] as const
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -18,7 +18,7 @@ export function LoginPage() {
   useRedirectSignedIn()
   const login = useLogin()
 
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
   const errors = splitError(login.error, t('auth.unexpected_error'), FIELDS)
@@ -26,10 +26,7 @@ export function LoginPage() {
   function submit(event: FormEvent) {
     event.preventDefault()
 
-    login.mutate(
-      { username, password },
-      { onSuccess: () => void navigate({ to: '/' }) },
-    )
+    login.mutate({ email, password }, { onSuccess: () => void navigate({ to: '/' }) })
   }
 
   return (
@@ -50,14 +47,15 @@ export function LoginPage() {
         {errors.form ? <FormError>{errors.form}</FormError> : null}
 
         <Field
-          label={t('auth.username')}
-          name="username"
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-          autoComplete="username"
+          label={t('auth.email')}
+          name="email"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          autoComplete="email"
           autoFocus
           required
-          error={errors.fields.username}
+          error={errors.fields.email}
         />
 
         <Field

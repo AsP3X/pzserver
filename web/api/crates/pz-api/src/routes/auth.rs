@@ -26,14 +26,13 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct RegisterRequest {
-    username: String,
     email: String,
     password: String,
 }
 
 #[derive(Deserialize)]
 struct LoginRequest {
-    username: String,
+    email: String,
     password: String,
 }
 
@@ -54,9 +53,11 @@ async fn register(
     headers: HeaderMap,
     Json(body): Json<RegisterRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    let user = auth::register(&state.db, &body.username, &body.email, &body.password).await?;
+    let user = auth::register(&state.db, &body.email, &body.password).await?;
 
-    tracing::info!(username = %user.username, "account registered");
+    // Logged by id: the account has no username yet, and the log is not the
+    // place for an email address.
+    tracing::info!(user_id = %user.id, "account registered");
 
     let jar = start_session(&state, jar, &user, &headers).await?;
 
@@ -69,24 +70,25 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    if !state.login_limiter.is_allowed(&body.username) {
-        tracing::warn!(username = %body.username, "login rate limited");
+    // Keyed by email now, since that is what identifies an account.
+    if !state.login_limiter.is_allowed(&body.email) {
+        tracing::warn!("login rate limited");
 
         return Err(ApiError::TooManyRequests);
     }
 
-    let Some(user) = auth::authenticate(&state.db, &body.username, &body.password).await? else {
-        state.login_limiter.record_failure(&body.username);
+    let Some(user) = auth::authenticate(&state.db, &body.email, &body.password).await? else {
+        state.login_limiter.record_failure(&body.email);
 
-        // Deliberately the same answer for an unknown name and a wrong
+        // Deliberately the same answer for an unknown address and a wrong
         // password: anything else tells a stranger which accounts exist.
         return Err(ApiError::Validation(
             "Those details do not match an account.".to_owned(),
         ));
     };
 
-    state.login_limiter.clear(&body.username);
-    tracing::info!(username = %user.username, "login");
+    state.login_limiter.clear(&body.email);
+    tracing::info!(user_id = %user.id, "login");
 
     let jar = start_session(&state, jar, &user, &headers).await?;
 
@@ -165,7 +167,7 @@ async fn change_password(
     .await?;
 
     tracing::info!(
-        username = %user.username,
+        user_id = %user.id,
         revoked_sessions = revoked,
         "password changed",
     );

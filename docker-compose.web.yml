@@ -49,9 +49,15 @@ services:
       web-db:
         condition: service_healthy
     volumes:
-      # The mod's JSON exports. Read-only: this stack observes the bridge, the
-      # PHP stack still owns writing to it.
-      - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge:ro
+      # The mod's JSON exports, plus the account-link channel. Writable, because
+      # answering a /account register claim means writing
+      # account_link_results.json back for the mod to read. Everything else here
+      # is still observe-only.
+      #
+      # The game container writes this directory as its own uid, so entries need
+      # to stay world-writable — the PHP stack's zomboid:heal-lua-bridge is what
+      # keeps them that way.
+      - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
       # server.ini, for map name and player cap.
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data:ro
     environment:

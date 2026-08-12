@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod character;
+pub mod link;
 pub mod rate_limit;
 pub mod site;
 pub mod stats;
