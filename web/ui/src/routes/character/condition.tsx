@@ -3,7 +3,8 @@ import { Droplet, Snowflake, Syringe, Thermometer } from 'lucide-react'
 import { Meter } from '@/components/ui/meter'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { cn } from '@/lib/cn'
-import { bodyPartKey, coldestPart, derivePartLabel, temperatureState, woundKey } from '@/lib/body'
+import { coldestPart, temperatureState } from '@/lib/body'
+import { useGameVocabulary } from '@/routes/character/vocabulary'
 import { formatRelativeTime } from '@/lib/format'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
@@ -12,30 +13,6 @@ import type { TemperatureState } from '@/lib/body'
 
 /** A part is worth listing once it is off full health or carrying a wound. */
 const INTACT = 100
-
-/**
- * Translate a name that came from the game.
- *
- * Body parts and wound kinds arrive as English strings from the mod. Known ones
- * have translations; anything the enum grew since falls back to the raw name so
- * a new part shows up as itself rather than vanishing.
- */
-function useGameVocabulary() {
-  const { t } = useTranslation()
-
-  return {
-    part: (name: string) => {
-      const key = bodyPartKey(name)
-
-      return key ? t(key) : derivePartLabel(name)
-    },
-    wound: (kind: string) => {
-      const key = woundKey(kind)
-
-      return key ? t(key) : kind
-    },
-  }
-}
 
 interface ConditionProps {
   character: Character

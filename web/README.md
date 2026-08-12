@@ -20,7 +20,7 @@ web/
 | Public endpoints | `/api/health`, `/api/health/detailed`, `/api/v1/{site,server/status,server/history,stats/summary,stats/leaderboard}` |
 | Localisation | English and German, in the UI strings and in the admin-editable site copy (`GET /api/v1/site?locale=de`) |
 | Auth | `/api/v1/auth/{register,login,logout,me,password}` — Argon2id, server-side sessions, per-account login throttling |
-| Player portal | `/api/v1/me/character` — the signed-in account's own character, its condition and its body temperature |
+| Player portal | `/api/v1/me/character` — the signed-in account's own character plus the mod's full vitals heartbeat |
 | Game server integration | Source RCON client, Lua bridge readers, `server.ini` parser, Docker status via the socket proxy |
 | Background tasks | Player-stats sync from the mod export, population sampling, expired-session cleanup |
 | UI | Design system, i18n (en/de), landing page, sign in / register / account, character |
@@ -178,16 +178,34 @@ the bridge directory read-write, unlike the rest of the game data.
   Postgres. Kills, hours, profession, skills, traits and a health summary. This
   is what persists when nobody is online.
 - **The vitals heartbeat**, `Lua/vitals/<username>.json`, written per player
-  while they are connected. Per-part health with wound types, and the
-  thermoregulator's core and per-part skin temperatures.
+  while they are connected. Everything the mod collects: per-part health and
+  wounds, core and per-part skin temperature, needs, equipped weapon, clothing
+  with its bite and scratch defence, carried weight, skills with XP progress,
+  and learned recipes.
 
-The heartbeat file outlives the session, so the condition panel is labelled with
-the file's mtime — it is "last known", not "now". Only parts that are hurt are
-listed: nobody needs to read seventeen rows of 100%.
+The heartbeat file outlives the session, so the panels are labelled with the
+file's mtime — "last known", not "now". Only parts that are hurt are listed:
+nobody needs to read seventeen rows of 100%.
 
-Temperature bands (freezing / cold / normal / warm / overheating) approximate
-where PZ shows its own moodles; the game exposes no thresholds, so they are read
-off normal body temperature rather than taken from the source.
+**The body map** is a pair of paper-dolls, condition and warmth, side by side
+rather than behind a toggle: a cold hand and a bitten hand want different
+responses, and reading them one after the other loses the comparison. The
+silhouette is the game's own, arriving as one alpha mask per part in
+`src/lib/body-sprites.ts` and tinted through a CSS mask — the shape is theirs,
+every colour is ours. That file is generated data copied from the PHP stack;
+regenerating it needs `scripts/extract-body-sprites.py` and a client install.
+
+Every part carries its number as well as its colour, and the ink is chosen per
+band so it reads on the fill behind it. That is not polish: the palettes run
+green to red, colour alone fails the commonest form of colour blindness, and the
+number is what such a reader is left with.
+
+Temperature bands approximate where PZ shows its own moodles; the game exposes
+no thresholds, so they are read off normal body temperature rather than taken
+from the source.
+
+Skills prefer the heartbeat, which carries XP progress toward the next level,
+and fall back to the levels Postgres kept when no heartbeat exists.
 
 ## Running it
 

@@ -19,14 +19,156 @@ use serde::{Deserialize, Serialize};
 /// Preferred location, one file per player.
 const DIRECTORY: &str = "vitals";
 
+/// Everything one heartbeat carries.
+///
+/// Every panel is optional: the mod builds each inside its own `pcall`, so a
+/// collector that fails leaves its key out rather than taking the file with it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlayerVitals {
+    #[serde(default)]
+    pub info: Option<CharacterInfo>,
     #[serde(default)]
     pub health: Option<BodyHealth>,
     #[serde(default)]
     pub wounds: Option<Vec<Wound>>,
     #[serde(default)]
     pub temperature: Option<BodyTemperature>,
+    #[serde(default)]
+    pub moodles: Option<Moodles>,
+    #[serde(default)]
+    pub weapon: Option<Weapon>,
+    #[serde(default)]
+    pub clothing: Option<Clothing>,
+    #[serde(default)]
+    pub encumbrance: Option<Encumbrance>,
+    /// Perk name to level and XP progress. Richer than the level-only map in
+    /// `player_stats`, which is why the character page prefers this one.
+    #[serde(default)]
+    pub skills: Option<BTreeMap<String, SkillProgress>>,
+    #[serde(default)]
+    pub recipes: Option<Vec<Recipe>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterInfo {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub profession: Option<String>,
+    #[serde(default)]
+    pub traits: Option<Vec<String>>,
+    /// Body weight in kilograms, not carried weight.
+    #[serde(default)]
+    pub weight: Option<f64>,
+    #[serde(default)]
+    pub kills: Option<i64>,
+    #[serde(default)]
+    pub hours_survived: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillProgress {
+    #[serde(default)]
+    pub level: i32,
+    /// Progress toward the next level, as the mod reports it.
+    #[serde(default)]
+    pub xp: f64,
+}
+
+/// Needs and afflictions, each 0–1 unless noted.
+///
+/// All of them count up as things get worse except `endurance`, which is the
+/// reserve you spend — a full bar there is good news.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Moodles {
+    #[serde(default)]
+    pub hunger: Option<f64>,
+    #[serde(default)]
+    pub thirst: Option<f64>,
+    #[serde(default)]
+    pub fatigue: Option<f64>,
+    #[serde(default)]
+    pub endurance: Option<f64>,
+    #[serde(default)]
+    pub stress: Option<f64>,
+    #[serde(default)]
+    pub panic: Option<f64>,
+    #[serde(default)]
+    pub boredom: Option<f64>,
+    #[serde(default)]
+    pub unhappiness: Option<f64>,
+    #[serde(default)]
+    pub pain: Option<f64>,
+    #[serde(default)]
+    pub wetness: Option<f64>,
+    #[serde(default)]
+    pub drunk: Option<f64>,
+    #[serde(default)]
+    pub sickness: Option<f64>,
+    #[serde(default)]
+    pub food_sickness: Option<f64>,
+    #[serde(default)]
+    pub has_cold: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Weapon {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 0–100.
+    #[serde(default)]
+    pub condition: Option<f64>,
+    #[serde(default)]
+    pub sharpness: Option<f64>,
+    #[serde(default)]
+    pub attachments: Option<Vec<String>>,
+    /// Rounds loaded, for firearms.
+    #[serde(default)]
+    pub ammo: Option<i64>,
+    #[serde(default)]
+    pub chamber: Option<bool>,
+    #[serde(default)]
+    pub jam: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Clothing {
+    #[serde(default)]
+    pub items: Vec<ClothingItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClothingItem {
+    #[serde(default)]
+    pub slot: String,
+    #[serde(default)]
+    pub name: String,
+    /// 0–100.
+    #[serde(default)]
+    pub condition: f64,
+    #[serde(default)]
+    pub holes: i64,
+    /// Bite and scratch resistance, as percentages.
+    #[serde(default)]
+    pub bite: f64,
+    #[serde(default)]
+    pub scratch: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Encumbrance {
+    #[serde(default)]
+    pub current: Option<f64>,
+    #[serde(default)]
+    pub capacity: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Recipe {
+    pub name: String,
+    /// Real time, recorded by the mod when the recipe was learned.
+    #[serde(default)]
+    pub learned_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,8 +338,24 @@ mod tests {
                 "Hand_L": { "skin": 21.4, "insulation": 0.05 }
             }
         },
-        "moodles": { "hunger": 0.2 },
-        "clothing": {}
+        "info": {
+            "name": "rook", "profession": "Burglar", "traits": ["Brave"],
+            "weight": 81.4, "kills": 2847, "hours_survived": 412.5
+        },
+        "moodles": { "hunger": 0.2, "endurance": 0.9, "has_cold": false },
+        "weapon": {
+            "name": "Crowbar", "condition": 64, "sharpness": 0,
+            "attachments": [], "ammo": null, "chamber": false, "jam": false
+        },
+        "clothing": {
+            "items": [
+                { "slot": "Jacket", "name": "Leather Jacket", "condition": 78,
+                  "holes": 1, "bite": 42, "scratch": 60 }
+            ]
+        },
+        "encumbrance": { "current": 7.3, "capacity": 12.0 },
+        "skills": { "Nimble": { "level": 6, "xp": 0.42 } },
+        "recipes": [{ "name": "Make Bandage", "learned_at": "2026-08-11T09:00:00Z" }]
     }"#;
 
     fn reader() -> (tempfile::TempDir, VitalsReader) {
@@ -239,14 +397,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignores_the_panels_this_page_does_not_use() {
+    async fn reads_every_panel_the_mod_writes() {
         let (dir, reader) = reader();
         std::fs::write(dir.path().join("vitals_rook.json"), HEARTBEAT).expect("write");
 
-        // moodles and clothing are in the file and simply not deserialised.
-        let read = reader.read("rook").await.expect("read").expect("present");
+        let vitals = reader
+            .read("rook")
+            .await
+            .expect("read")
+            .expect("present")
+            .vitals;
 
-        assert_eq!(read.vitals.wounds.expect("wounds").len(), 1);
+        assert_eq!(
+            vitals.info.expect("info").profession.as_deref(),
+            Some("Burglar")
+        );
+        assert_eq!(vitals.moodles.expect("moodles").hunger, Some(0.2));
+        assert_eq!(
+            vitals.weapon.expect("weapon").name.as_deref(),
+            Some("Crowbar")
+        );
+        assert_eq!(vitals.clothing.expect("clothing").items.len(), 1);
+        assert_eq!(
+            vitals.encumbrance.expect("encumbrance").capacity,
+            Some(12.0)
+        );
+        assert_eq!(vitals.skills.expect("skills")["Nimble"].level, 6);
+        assert_eq!(vitals.recipes.expect("recipes").len(), 1);
+        assert_eq!(vitals.wounds.expect("wounds").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_collector_the_mod_dropped_leaves_its_panel_empty() {
+        let (dir, reader) = reader();
+        // The mod builds each panel in its own pcall; a failed one is absent.
+        std::fs::write(
+            dir.path().join("vitals_rook.json"),
+            r#"{"health":{"overall":50,"parts":{}}}"#,
+        )
+        .expect("write");
+
+        let vitals = reader
+            .read("rook")
+            .await
+            .expect("read")
+            .expect("present")
+            .vitals;
+
+        assert!(vitals.moodles.is_none());
+        assert!(vitals.weapon.is_none());
+        assert_eq!(vitals.health.expect("health").overall, 50.0);
     }
 
     #[tokio::test]

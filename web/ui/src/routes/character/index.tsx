@@ -3,7 +3,16 @@ import { Clock, Crosshair, Hourglass, Skull } from 'lucide-react'
 
 import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { LinkButton } from '@/components/ui/button'
+import { BodyMap } from '@/routes/character/body-map'
 import { Condition } from '@/routes/character/condition'
+import {
+  ClothingPanel,
+  EncumbrancePanel,
+  MoodlesPanel,
+  RecipesPanel,
+  SkillsPanel,
+  WeaponPanel,
+} from '@/routes/character/panels'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatTile } from '@/components/ui/stat-tile'
@@ -117,12 +126,43 @@ function CharacterDetail({
         </div>
       </Panel>
 
+      {body?.health?.parts && Object.keys(body.health.parts).length > 0 ? (
+        <BodyMap
+          parts={body.health.parts}
+          temperature={body.temperature?.parts}
+          overall={body.health.overall}
+        />
+      ) : null}
+
       <Condition character={character} body={body} />
 
       <div className="grid gap-8 lg:grid-cols-2">
-        <Skills skills={skills} />
+        {body?.moodles ? <MoodlesPanel moodles={body.moodles} /> : null}
+        {body?.weapon ? <WeaponPanel weapon={body.weapon} /> : null}
+        {body?.clothing ? <ClothingPanel items={body.clothing.items} /> : null}
+        {body?.encumbrance ? (
+          <EncumbrancePanel
+            encumbrance={body.encumbrance}
+            bodyWeight={body.info?.weight}
+          />
+        ) : null}
+      </div>
+
+      <div className="grid gap-8 lg:grid-cols-2">
+        {/*
+          The heartbeat's skills carry XP progress toward the next level; the
+          stored ones are levels alone. Prefer the richer source when the mod
+          has reported recently, and fall back to what Postgres kept.
+        */}
+        {body?.skills && Object.keys(body.skills).length > 0 ? (
+          <SkillsPanel skills={body.skills} />
+        ) : (
+          <Skills skills={skills} />
+        )}
         <Traits traits={traits} />
       </div>
+
+      {body?.recipes ? <RecipesPanel recipes={body.recipes} /> : null}
     </div>
   )
 }

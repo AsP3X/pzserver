@@ -128,8 +128,78 @@ export interface BodyPartTemperature {
   insulation: number
 }
 
+export interface CharacterInfo {
+  name: string | null
+  profession: string | null
+  traits: string[] | null
+  /** Body weight in kilograms, not carried weight. */
+  weight: number | null
+  kills: number | null
+  hours_survived: number | null
+}
+
+export interface SkillProgress {
+  level: number
+  /** Progress toward the next level, 0–1. */
+  xp: number
+}
+
+/**
+ * Needs and afflictions, each 0–1.
+ *
+ * All count up as things get worse except `endurance`, which is the reserve you
+ * spend — a full bar there is good news.
+ */
+export interface Moodles {
+  hunger: number | null
+  thirst: number | null
+  fatigue: number | null
+  endurance: number | null
+  stress: number | null
+  panic: number | null
+  boredom: number | null
+  unhappiness: number | null
+  pain: number | null
+  wetness: number | null
+  drunk: number | null
+  sickness: number | null
+  food_sickness: number | null
+  has_cold: boolean | null
+}
+
+export interface Weapon {
+  name: string | null
+  condition: number | null
+  sharpness: number | null
+  attachments: string[] | null
+  ammo: number | null
+  chamber: boolean | null
+  jam: boolean | null
+}
+
+export interface ClothingItem {
+  slot: string
+  name: string
+  condition: number
+  holes: number
+  /** Bite and scratch resistance, as percentages. */
+  bite: number
+  scratch: number
+}
+
+export interface Encumbrance {
+  current: number | null
+  capacity: number | null
+}
+
+export interface Recipe {
+  name: string
+  learned_at: string | null
+}
+
 /** The mod's per-player heartbeat: richer than the summary on the character. */
 export interface PlayerBody {
+  info: CharacterInfo | null
   health: { overall: number; parts: Record<string, BodyPartHealth> } | null
   wounds: BodyWound[] | null
   temperature: {
@@ -137,6 +207,12 @@ export interface PlayerBody {
     body_heat: number
     parts: Record<string, BodyPartTemperature>
   } | null
+  moodles: Moodles | null
+  weapon: Weapon | null
+  clothing: { items: ClothingItem[] } | null
+  encumbrance: Encumbrance | null
+  skills: Record<string, SkillProgress> | null
+  recipes: Recipe[] | null
   /** The file outlives the session, so this says how live the reading is. */
   reported_at: string | null
 }
