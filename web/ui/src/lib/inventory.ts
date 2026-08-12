@@ -5,6 +5,14 @@ import type { InventoryContainer, InventoryItem } from '@/lib/api'
 /** The container id the bridge uses for the player's own pockets. */
 export const POCKETS = 'inventory'
 
+/**
+ * Tab id for the everything-at-once view.
+ *
+ * Empty rather than a name so it can never collide with a container id coming
+ * off the bridge.
+ */
+export const ALL_ITEMS = ''
+
 export interface StackedItem {
   full_type: string
   name: string
@@ -15,6 +23,8 @@ export interface StackedItem {
   equipped: boolean
   /** Container id this stack opens into, when the item is a bag. */
   opens: string | null
+  /** Container ids this stack was gathered from, in the order first seen. */
+  where: string[]
 }
 
 export interface ContainerGroup {
@@ -48,6 +58,7 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
         condition: item.condition,
         equipped: item.equipped,
         opens: item.contains,
+        where: [item.container_id],
       })
 
       continue
@@ -56,6 +67,10 @@ export function stackItems(items: InventoryItem[]): StackedItem[] {
     existing.count += item.count
     existing.equipped ||= item.equipped
     existing.opens ??= item.contains
+
+    if (!existing.where.includes(item.container_id)) {
+      existing.where.push(item.container_id)
+    }
 
     if (item.condition !== null) {
       existing.condition =
