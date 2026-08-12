@@ -37,6 +37,16 @@ export const leaderboardQuery = queryOptions({
   staleTime: 60_000,
 })
 
+/** The signed-in player's own character. Polled while the page is open. */
+export const myCharacterQuery = queryOptions({
+  queryKey: ['me', 'character'],
+  queryFn: api.myCharacter,
+  // The mod rewrites its export every ~25 real seconds on a running world.
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  staleTime: 15_000,
+})
+
 /**
  * Site copy for one locale. Keyed by locale so switching language swaps to a
  * separately cached copy instead of refetching over the same entry.

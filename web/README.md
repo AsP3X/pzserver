@@ -20,12 +20,18 @@ web/
 | Public endpoints | `/api/health`, `/api/health/detailed`, `/api/v1/{site,server/status,server/history,stats/summary,stats/leaderboard}` |
 | Localisation | English and German, in the UI strings and in the admin-editable site copy (`GET /api/v1/site?locale=de`) |
 | Auth | `/api/v1/auth/{register,login,logout,me,password}` — Argon2id, server-side sessions, per-username login throttling |
+| Player portal | `/api/v1/me/character` — the signed-in account's own character, joined to the game on username |
 | Game server integration | Source RCON client, Lua bridge readers, `server.ini` parser, Docker status via the socket proxy |
 | Background tasks | Player-stats sync from the mod export, population sampling, expired-session cleanup |
-| UI | Design system, i18n (en/de), landing page, sign in / register / account |
+| UI | Design system, i18n (en/de), landing page, sign in / register / account, character |
 
-Not built yet: any admin surface, the player portal, and the shop. The old
-stack still owns all of that.
+Not built yet: any admin surface, the rest of the player portal (inventory, map,
+vault, reports), and the shop. The old stack still owns all of that.
+
+**Accounts are joined to characters by username.** That is why registration asks
+for the name you play under, and why the lookup is case-insensitive on both
+sides. An account with no matching character is a normal state — someone who
+registered before joining — and the character page says so rather than erroring.
 
 ## Authentication
 

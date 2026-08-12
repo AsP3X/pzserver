@@ -82,6 +82,39 @@ export interface SiteSettings {
   default_locale: string
 }
 
+export interface CharacterVitals {
+  health: number | null
+  bleeding_parts: number
+  infected: boolean
+  has_cold: boolean
+}
+
+export interface CharacterTrait {
+  id: string
+  label: string
+}
+
+export interface Character {
+  username: string
+  zombie_kills: number
+  hours_survived: number
+  profession: string | null
+  /** Perk name to level. Untrained perks are absent, not zero. */
+  skills: Record<string, number>
+  /** Absent on KnoxRelay builds older than 1.3. */
+  traits: CharacterTrait[] | null
+  vitals: CharacterVitals | null
+  is_dead: boolean
+  rank: number
+  last_synced_at: string
+}
+
+export interface MyCharacterResponse {
+  /** Null when the account has never been seen in game. */
+  character: Character | null
+  online: boolean
+}
+
 export type UserRole = 'super_admin' | 'admin' | 'moderator' | 'player'
 
 export interface User {
@@ -202,6 +235,8 @@ export const api = {
     request<SiteSettings>(`/api/v1/site?locale=${encodeURIComponent(locale)}`),
 
   currentUser: () => request<MeResponse>('/api/v1/auth/me'),
+
+  myCharacter: () => request<MyCharacterResponse>('/api/v1/me/character'),
 
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),

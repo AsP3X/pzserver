@@ -8,6 +8,7 @@ import { createRootRoute, createRoute, createRouter } from '@tanstack/react-rout
 
 import { RootLayout } from '@/components/layout/root-layout'
 import { AccountPage } from '@/routes/account'
+import { CharacterPage } from '@/routes/character'
 import { LandingPage } from '@/routes/landing'
 import { LoginPage } from '@/routes/auth/login'
 import { RegisterPage } from '@/routes/auth/register'
@@ -32,6 +33,12 @@ const registerRoute = createRoute({
   component: RegisterPage,
 })
 
+const characterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/character',
+  component: CharacterPage,
+})
+
 const accountRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/account',
@@ -43,6 +50,7 @@ export const router = createRouter({
     indexRoute,
     loginRoute,
     registerRoute,
+    characterRoute,
     accountRoute,
   ]),
   defaultPreload: 'intent',

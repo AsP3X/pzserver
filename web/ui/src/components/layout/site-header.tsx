@@ -90,6 +90,12 @@ function AccountControls({ onLanding }: { onLanding: boolean }) {
   return (
     <>
       <Link
+        to="/character"
+        className="hidden font-mono text-xs tracking-widest text-smoke uppercase transition-colors hover:text-hazard sm:block"
+      >
+        {t('nav.character')}
+      </Link>
+      <Link
         to="/account"
         className="hidden font-mono text-xs tracking-widest text-bone uppercase transition-colors hover:text-hazard sm:block"
       >

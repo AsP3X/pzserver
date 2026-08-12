@@ -10,19 +10,22 @@ BEGIN;
 
 TRUNCATE player_stats, game_events, server_status_samples RESTART IDENTITY;
 
-INSERT INTO player_stats (username, zombie_kills, hours_survived, profession, skills, traits, is_dead) VALUES
-    ('rook',        2847, 412.5, 'Police Officer', '{"Aiming": 7, "Reloading": 6, "Sprinting": 4}', '[{"id":"Brave","label":"Brave"}]', false),
-    ('vesper',       931, 508.0, 'Nurse',          '{"Doctor": 8, "Cooking": 5}',                   '[{"id":"Fast Healer","label":"Fast Healer"}]', false),
-    ('marlowe',     1994, 288.5, 'Burglar',        '{"Lightfooted": 7, "Nimble": 6}',               '[]', false),
-    ('pike',         612, 190.0, 'Fisherman',      '{"Fishing": 6, "Foraging": 5}',                 '[]', false),
-    ('sable',       3310, 355.5, 'Veteran',        '{"Aiming": 9, "Maintenance": 5}',               '[{"id":"Desensitized","label":"Desensitized"}]', false),
-    ('halden',       458, 121.0, 'Chef',           '{"Cooking": 7}',                                '[]', true),
-    ('mercer',      1205, 244.5, 'Carpenter',      '{"Carpentry": 8, "Strength": 6}',               '[]', false),
-    ('quinn',        789, 167.5, 'Park Ranger',    '{"Foraging": 8, "Trapping": 6}',                '[]', false),
-    ('brandt',      2103, 301.0, 'Mechanic',       '{"Mechanics": 8, "Electrical": 4}',             '[]', false),
-    ('odette',       344,  88.5, 'Student',        '{"Sprinting": 3}',                              '[]', true),
-    ('cutter',      1567, 276.0, 'Construction Worker', '{"Strength": 8, "Fitness": 6}',            '[]', false),
-    ('ferris',       902, 203.5, 'Doctor',         '{"Doctor": 9, "First Aid": 7}',                 '[]', false);
+-- vitals mirrors what KR_Progress exports: overall health, bleeding parts, the
+-- zombie infection flag and the common cold. Values here are spread across the
+-- healthy/hurt/critical bands so the character page's meter can be seen in each.
+INSERT INTO player_stats (username, zombie_kills, hours_survived, profession, skills, traits, vitals, is_dead) VALUES
+    ('rook',        2847, 412.5, 'Police Officer', '{"Aiming": 7, "Reloading": 6, "Sprinting": 4}', '[{"id":"Brave","label":"Brave"}]', '{"health": 92.4, "bleeding_parts": 0, "infected": false, "has_cold": false}', false),
+    ('vesper',       931, 508.0, 'Nurse',          '{"Doctor": 8, "Cooking": 5}',                   '[{"id":"Fast Healer","label":"Fast Healer"}]', '{"health": 100.0, "bleeding_parts": 0, "infected": false, "has_cold": false}', false),
+    ('marlowe',     1994, 288.5, 'Burglar',        '{"Lightfooted": 7, "Nimble": 6}',               '[]', '{"health": 54.0, "bleeding_parts": 2, "infected": false, "has_cold": true}', false),
+    ('pike',         612, 190.0, 'Fisherman',      '{"Fishing": 6, "Foraging": 5}',                 '[]', '{"health": 88.0, "bleeding_parts": 0, "infected": false, "has_cold": true}', false),
+    ('sable',       3310, 355.5, 'Veteran',        '{"Aiming": 9, "Maintenance": 5}',               '[{"id":"Desensitized","label":"Desensitized"}]', '{"health": 71.5, "bleeding_parts": 1, "infected": false, "has_cold": false}', false),
+    ('halden',       458, 121.0, 'Chef',           '{"Cooking": 7}',                                '[]', '{"health": 0.0, "bleeding_parts": 4, "infected": true, "has_cold": false}', true),
+    ('mercer',      1205, 244.5, 'Carpenter',      '{"Carpentry": 8, "Strength": 6}',               '[]', '{"health": 96.0, "bleeding_parts": 0, "infected": false, "has_cold": false}', false),
+    ('quinn',        789, 167.5, 'Park Ranger',    '{"Foraging": 8, "Trapping": 6}',                '[]', '{"health": 22.5, "bleeding_parts": 3, "infected": true, "has_cold": false}', false),
+    ('brandt',      2103, 301.0, 'Mechanic',       '{"Mechanics": 8, "Electrical": 4}',             '[]', '{"health": 83.0, "bleeding_parts": 0, "infected": false, "has_cold": false}', false),
+    ('odette',       344,  88.5, 'Student',        '{"Sprinting": 3}',                              '[]', '{"health": 0.0, "bleeding_parts": 2, "infected": false, "has_cold": false}', true),
+    ('cutter',      1567, 276.0, 'Construction Worker', '{"Strength": 8, "Fitness": 6}',            '[]', '{"health": 100.0, "bleeding_parts": 0, "infected": false, "has_cold": false}', false),
+    ('ferris',       902, 203.5, 'Doctor',         '{"Doctor": 9, "First Aid": 7}',                 '[]', '{"health": 64.0, "bleeding_parts": 1, "infected": false, "has_cold": false}', false);
 
 -- Deaths and PvP, spread across the last three weeks.
 INSERT INTO game_events (event_type, player, detail, x, y, z, occurred_at)

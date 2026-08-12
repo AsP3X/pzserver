@@ -13,6 +13,33 @@ export function formatNumber(value: number, locale: string): string {
  * are consistent everywhere and still fit the stat tiles.
  */
 
+const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ['year', 31_536_000],
+  ['month', 2_592_000],
+  ['day', 86_400],
+  ['hour', 3600],
+  ['minute', 60],
+]
+
+/**
+ * "2 hours ago", in the viewer's language.
+ *
+ * Unlike compact notation, `RelativeTimeFormat` has complete CLDR data for both
+ * locales, so this is safe to lean on.
+ */
+export function formatRelativeTime(iso: string, locale: string): string {
+  const elapsed = (new Date(iso).getTime() - Date.now()) / 1000
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+
+  for (const [unit, seconds] of RELATIVE_UNITS) {
+    if (Math.abs(elapsed) >= seconds) {
+      return formatter.format(Math.round(elapsed / seconds), unit)
+    }
+  }
+
+  return formatter.format(Math.round(elapsed), 'second')
+}
+
 interface UptimeUnits {
   days: string
   hours: string
