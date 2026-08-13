@@ -71,8 +71,12 @@ pub fn session_cookie(
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        // Browsers treat localhost as a secure origin, so this stays true in
-        // local development too.
+        // Not "browsers treat localhost as secure, so leave this on" — which is
+        // what stood here, and is only true of Chromium. Safari refuses a
+        // Secure cookie over http on any host, localhost included, so the login
+        // succeeded, the cookie was silently dropped, and every request after
+        // it came back signed out. Serving over plain http means turning this
+        // off via SESSION_COOKIE_SECURE; it must be on behind HTTPS.
         .secure(secure)
         .expires(expiry)
         .build())
