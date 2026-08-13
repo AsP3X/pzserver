@@ -35,7 +35,9 @@ struct RegisterRequest {
 
 #[derive(Deserialize)]
 struct LoginRequest {
-    email: String,
+    /// The in-game name. Signing up collects an email as well, but this is
+    /// what you sign in with.
+    username: String,
     password: String,
 }
 
@@ -71,24 +73,28 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    // Keyed by email now, since that is what identifies an account.
-    if !state.login_limiter.is_allowed(&body.email) {
+    // Throttled per account, keyed by whatever was typed into the name box.
+    // Lower-cased so that varying the capitalisation is not a way to buy
+    // another eight attempts against the same account.
+    let attempted = body.username.trim().to_lowercase();
+
+    if !state.login_limiter.is_allowed(&attempted) {
         tracing::warn!("login rate limited");
 
         return Err(ApiError::TooManyRequests);
     }
 
-    let Some(user) = auth::authenticate(&state.db, &body.email, &body.password).await? else {
-        state.login_limiter.record_failure(&body.email);
+    let Some(user) = auth::authenticate(&state.db, &body.username, &body.password).await? else {
+        state.login_limiter.record_failure(&attempted);
 
-        // Deliberately the same answer for an unknown address and a wrong
+        // Deliberately the same answer for an unknown name and a wrong
         // password: anything else tells a stranger which accounts exist.
         return Err(ApiError::Validation(
             "Those details do not match an account.".to_owned(),
         ));
     };
 
-    state.login_limiter.clear(&body.email);
+    state.login_limiter.clear(&attempted);
     tracing::info!(username = %user.username, "login");
 
     let jar = start_session(&state, jar, &user, &headers).await?;

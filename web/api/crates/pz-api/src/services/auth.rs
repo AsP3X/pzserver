@@ -108,22 +108,27 @@ fn taken_field(error: sqlx::Error) -> ApiError {
     }
 }
 
-/// Check an email and password, returning the user when they match.
+/// Check a username and password, returning the user when they match.
 ///
-/// Email rather than username, because a freshly registered account has no
-/// username at all until a character is linked. Lookups are case-insensitive,
-/// and a miss still pays for a hash verification so that "no such account" and
-/// "wrong password" take the same time — otherwise the endpoint answers whether
-/// an address is registered.
+/// The in-game name rather than the email address. Signing up still collects
+/// an address, but nobody wants to type one at a login box — and since
+/// registration became in-game-only every account has a username from the
+/// moment it exists, which is what made this possible.
+///
+/// Matched case-insensitively against the same expression as
+/// `users_username_lower_key`, so the lookup uses that index and a player who
+/// capitalises differently than the game does still gets in. A miss still pays
+/// for a hash verification so that "no such account" and "wrong password" take
+/// the same time — otherwise the endpoint answers whether a name is registered.
 pub async fn authenticate(
     db: &PgPool,
-    email: &str,
+    username: &str,
     password: &str,
 ) -> Result<Option<User>, ApiError> {
     let credentials = sqlx::query_as::<_, Credentials>(
-        "SELECT id, password_hash FROM users WHERE lower(email) = lower($1)",
+        "SELECT id, password_hash FROM users WHERE lower(username) = lower($1)",
     )
-    .bind(email.trim())
+    .bind(username.trim())
     .fetch_optional(db)
     .await?;
 

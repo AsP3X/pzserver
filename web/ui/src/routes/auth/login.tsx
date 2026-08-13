@@ -9,7 +9,7 @@ import { useRedirectSignedIn } from '@/lib/auth-guards'
 import { splitError } from '@/lib/form-error'
 import { useTranslation } from '@/i18n/use-translation'
 
-const FIELDS = ['email', 'password'] as const
+const FIELDS = ['username', 'password'] as const
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -18,7 +18,7 @@ export function LoginPage() {
   useRedirectSignedIn()
   const login = useLogin()
 
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
 
   const errors = splitError(login.error, t('auth.unexpected_error'), FIELDS)
@@ -26,7 +26,7 @@ export function LoginPage() {
   function submit(event: FormEvent) {
     event.preventDefault()
 
-    login.mutate({ email, password }, { onSuccess: () => void navigate({ to: '/' }) })
+    login.mutate({ username, password }, { onSuccess: () => void navigate({ to: '/' }) })
   }
 
   return (
@@ -46,16 +46,22 @@ export function LoginPage() {
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         {errors.form ? <FormError>{errors.form}</FormError> : null}
 
+        {/* The in-game name, not the address. Signing up still asks for an
+            email; typing one at a login box is just slower. */}
         <Field
-          label={t('auth.email')}
-          name="email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          autoComplete="email"
+          label={t('auth.username')}
+          name="username"
+          type="text"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          hint={t('auth.username_hint')}
+          autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           autoFocus
           required
-          error={errors.fields.email}
+          error={errors.fields.username}
         />
 
         <Field

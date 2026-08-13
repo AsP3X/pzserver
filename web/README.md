@@ -91,16 +91,28 @@ The cookie is `HttpOnly`, `SameSite=Lax`, `Secure`, and expires with the row it
 points at. `SameSite=Lax` is the CSRF defence: the browser will not attach it to
 a cross-site POST, and every state-changing endpoint is a POST.
 
-Signing in uses the email address, not the PZ name — the name identifies a
-character, and one person may hold several.
+Signing in uses the PZ name, not the email address. Registration still collects
+an address — it is the only way to reach an account holder — but typing one at a
+login box is slower than typing the name you already know, and since sign-up
+became in-game-only every account has a name from the moment it exists.
 
-Passwords are Argon2id with per-password salts. A login for an unknown address
+One account is one character. Somebody who plays two survivors holds two
+accounts and signs into whichever they mean by naming it, which is the same
+question the email form asked less directly.
+
+The lookup matches `lower(username)`, the same expression as
+`users_username_lower_key`, so it uses that index and capitalising differently
+than the game does still gets you in.
+
+Passwords are Argon2id with per-password salts. A login for an unknown name
 still pays for a hash verification, so response time does not reveal which
 accounts exist, and both failure modes return the same message.
 
-Failed logins are throttled per address (8 per 15 minutes by default). The
-counter is per account rather than per network address because the API only ever
-sees nginx's; add per-address limiting at the edge alongside it.
+Failed logins are throttled per name (8 per 15 minutes by default), lower-cased
+so that varying the capitalisation is not a way to buy another eight attempts
+against one account. The counter is per account rather than per network address
+because the API only ever sees nginx's; add per-address limiting at the edge
+alongside it.
 
 The first administrator is created on boot from `ADMIN_USERNAME` /
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` — the same variables the PHP stack's entrypoint

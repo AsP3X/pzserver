@@ -346,7 +346,8 @@ export interface RegisterInput {
 }
 
 export interface LoginInput {
-  email: string
+  /** The in-game name. Registration collects an email too; login does not. */
+  username: string
   password: string
 }
 
