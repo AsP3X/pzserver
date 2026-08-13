@@ -98,6 +98,14 @@ on a restart and not before:
 make restart
 ```
 
+> Until 2026-08-13 this only ran for IDs whose directory was **missing**, so an
+> already-downloaded mod was pinned to whatever version arrived first and a
+> published update never reached the server. Knox Relay masked it — the image
+> also stages a copy and overwrites a stale one, which is what
+> `Seeded Knox Relay … from the image` means in the boot log — but no other mod
+> got that rescue. Set `PZ_SKIP_WORKSHOP_SYNC=true` to trade freshness back for
+> a faster boot.
+
 Two things lag behind the restart:
 
 - Per-player inventory snapshots on disk keep their old values until each player's

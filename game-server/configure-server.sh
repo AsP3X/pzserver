@@ -238,46 +238,117 @@ elif [ -r "$MOD_STATE_BACKUP" ]; then
     fi
 fi
 
-# Download missing Workshop mods via SteamCMD.
+# Sync Workshop mods via SteamCMD.
 # The base SteamCMD script only updates the dedicated server (app 380870) and
 # does NOT pull Workshop items. PZ B42 only loads mods present in the local
 # Workshop cache, so any ID added via the web UI must be downloaded here
 # before start_server runs — otherwise PZ silently drops the mod and may
 # prune Mods= back to empty on its next ini rewrite.
+#
+# Every configured id is handed to SteamCMD on every boot, not just the ones
+# whose directory is missing. Downloading only what was absent meant a mod was
+# pinned forever to whatever version happened to arrive first: publish an
+# update, restart, and the server kept running the old one with nothing in the
+# log to say so. Knox Relay hid this for a long time because it is also staged
+# into the image further down, which quietly replaced the stale copy — a
+# rescue no other mod gets.
+#
+# +workshop_download_item is already the right shape for this: it is a no-op
+# when the local copy is current and fetches the difference when it is not.
+# The cost is a SteamCMD round trip on every start, which PZ_SKIP_WORKSHOP_SYNC
+# exists to opt out of when boot time matters more than freshness.
 PZ_WORKSHOP_APP_ID="108600"
 WORKSHOP_CACHE_ROOT="${PZ_INSTALL_DIR}/steamapps/workshop/content/${PZ_WORKSHOP_APP_ID}"
 
 # Re-read the final WorkshopItems= so we cover every restore path above.
 CURRENT_WORKSHOP_LINE=$(grep -m1 "^WorkshopItems=" "$INI_FILE" | sed 's/^WorkshopItems=//' || true)
-MISSING_WORKSHOP_IDS=()
+WORKSHOP_IDS=()
 if [ -n "$CURRENT_WORKSHOP_LINE" ]; then
     IFS=';' read -ra WS_IDS <<< "$CURRENT_WORKSHOP_LINE"
     for wid in "${WS_IDS[@]}"; do
         wid="$(echo "$wid" | tr -d '[:space:]')"
         if [ -z "$wid" ]; then continue; fi
-        if [ ! -d "$WORKSHOP_CACHE_ROOT/$wid" ]; then
-            MISSING_WORKSHOP_IDS+=("$wid")
-        fi
+        WORKSHOP_IDS+=("$wid")
     done
 fi
 
-if [ "${#MISSING_WORKSHOP_IDS[@]}" -gt 0 ]; then
-    echo "[configure-server] Downloading ${#MISSING_WORKSHOP_IDS[@]} Workshop mod(s) via SteamCMD: ${MISSING_WORKSHOP_IDS[*]}"
-    STEAMCMD_BIN="$(command -v steamcmd.sh || echo /home/root/.local/steamcmd/steamcmd.sh)"
-    SCMD_ARGS=("+force_install_dir" "$PZ_INSTALL_DIR" "+login" "anonymous")
-    for wid in "${MISSING_WORKSHOP_IDS[@]}"; do
-        SCMD_ARGS+=("+workshop_download_item" "$PZ_WORKSHOP_APP_ID" "$wid")
-    done
-    SCMD_ARGS+=("+quit")
-    if "$STEAMCMD_BIN" "${SCMD_ARGS[@]}"; then
-        echo "[configure-server] Workshop download complete."
-    else
-        echo "[configure-server] WARNING: SteamCMD workshop download exited non-zero — some mods may be missing."
-    fi
+if [ "${#WORKSHOP_IDS[@]}" -eq 0 ]; then
+    echo "[configure-server] No Workshop mods configured."
+elif [ "${PZ_SKIP_WORKSHOP_SYNC:-false}" = "true" ]; then
+    # Deliberate opt-out, so it reads as a choice in the log rather than as the
+    # silence a skipped download used to produce.
+    echo "[configure-server] PZ_SKIP_WORKSHOP_SYNC=true — not checking Steam for mod updates."
 else
+    echo "[configure-server] Syncing ${#WORKSHOP_IDS[@]} Workshop mod(s) via SteamCMD: ${WORKSHOP_IDS[*]}"
     # Name the root: an empty scan used to look identical to a genuinely warm
     # cache, which is how a wrong PZ_INSTALL_DIR hid for so long.
-    echo "[configure-server] All Workshop mods already cached in ${WORKSHOP_CACHE_ROOT}."
+    echo "[configure-server] Workshop cache root: ${WORKSHOP_CACHE_ROOT}"
+    # The two base images put SteamCMD in different places and neither one has
+    # it on PATH, so look in the known locations rather than trusting a single
+    # hard-coded fallback. The old fallback pointed at
+    # /home/root/.local/steamcmd/steamcmd.sh, which exists in neither image —
+    # it went unnoticed because this branch only ever ran for a mod that was
+    # missing, and once a mod is downloaded it never was again.
+    STEAMCMD_BIN=""
+    for candidate in \
+        "${PZ_STEAMCMD_BIN:-}" \
+        "$(command -v steamcmd.sh 2>/dev/null || true)" \
+        "$(command -v steamcmd 2>/dev/null || true)" \
+        "${PZ_STEAM_HOME}/Steam/steamcmd.sh" \
+        "/home/steam/Steam/steamcmd.sh" \
+        "/opt/steamcmd/steamcmd.sh" \
+        "/home/root/.local/steamcmd/steamcmd.sh"
+    do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            STEAMCMD_BIN="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$STEAMCMD_BIN" ]; then
+        # Say so loudly. Silence here is what let a stale mod look like a
+        # healthy one for as long as it did.
+        echo "[configure-server] WARNING: SteamCMD not found — cannot check Steam for mod" \
+             "updates. Mods will run at whatever version is already cached." \
+             "Set PZ_STEAMCMD_BIN to its path."
+    else
+        SCMD_ARGS=("+force_install_dir" "$PZ_INSTALL_DIR" "+login" "anonymous")
+        for wid in "${WORKSHOP_IDS[@]}"; do
+            SCMD_ARGS+=("+workshop_download_item" "$PZ_WORKSHOP_APP_ID" "$wid")
+        done
+        SCMD_ARGS+=("+quit")
+
+        # Output is captured so a failure can be explained rather than just
+        # reported. Not fatal either way: a cached copy from a previous boot
+        # beats refusing to start because Steam was unreachable.
+        #
+        # Redirected rather than piped through tee, because a pipeline reports
+        # the exit status of its *last* command — `steamcmd | tee` is always a
+        # success no matter how steamcmd did, which turned this check into a
+        # rubber stamp when it was first written that way.
+        SCMD_LOG="$(mktemp)"
+        SCMD_STATUS=0
+        "$STEAMCMD_BIN" "${SCMD_ARGS[@]}" > "$SCMD_LOG" 2>&1 || SCMD_STATUS=$?
+        cat "$SCMD_LOG"
+
+        if [ "$SCMD_STATUS" -eq 0 ]; then
+            echo "[configure-server] Workshop sync complete."
+        elif grep -qE 'qemu-i386|ld-linux\.so\.2|Exec format error' "$SCMD_LOG"; then
+            # SteamCMD ships as a 32-bit x86 binary. On the ARM64 image there is
+            # no loader for it, so Workshop downloads cannot happen here at all
+            # — which is exactly why Knox Relay is staged into the image and
+            # copied over the cache further down.
+            echo "[configure-server] SteamCMD cannot run on $(uname -m) (it is a 32-bit x86" \
+                 "binary), so Workshop mods are not downloadable on this image."
+            echo "[configure-server] Knox Relay is supplied by the image instead." \
+                 "ANY OTHER Workshop mod must be pre-seeded into the cache or run on AMD64."
+        else
+            echo "[configure-server] WARNING: SteamCMD workshop sync exited non-zero —" \
+                 "mods may be missing or stale."
+            tail -5 "$SCMD_LOG" | sed 's/^/[configure-server]   /'
+        fi
+        rm -f "$SCMD_LOG"
+    fi
 fi
 
 # Surface PZ Build 42 mod manifests so the server can discover them.

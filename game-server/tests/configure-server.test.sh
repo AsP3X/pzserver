@@ -261,9 +261,9 @@ assert_explicit_override
 
 # --- What the wrong root silently broke on ARM64 -----------------------------
 
-# A mod already in the ARM64 Workshop cache must be reported cached, get its B42
-# manifest surfaced to the mod root, and be linked into Zomboid/mods/. With the
-# AMD64 default all three of these quietly did nothing.
+# A mod already in the ARM64 Workshop cache must still be re-checked against
+# Steam, get its B42 manifest surfaced to the mod root, and be linked into
+# Zomboid/mods/. With the AMD64 default all three of these quietly did nothing.
 assert_cached_arm64_mod_pipeline() {
     local home cfg args out mod_dir
     home="$(mktemp -d)"
@@ -275,11 +275,17 @@ assert_cached_arm64_mod_pipeline() {
 
     out="$(WORKSHOP_IDS=3777446787 run_configure "$home" "$cfg" "$args")"
 
-    if [ ! -s "$args" ]; then
-        ok "cached ARM64 Workshop mod triggers no SteamCMD download"
+    # An already-cached mod used to be skipped, which pinned it forever to the
+    # version that happened to arrive first: publishing an update and
+    # restarting kept the old copy, with nothing in the log to say so.
+    # workshop_download_item is a no-op when the local copy is current, so
+    # asking every boot costs a round trip and buys correctness.
+    # One argument per line in the capture, so flatten before matching.
+    if tr '\n' ' ' < "$args" | grep -q '+workshop_download_item 108600 3777446787'; then
+        ok "cached Workshop mod is still re-checked against Steam"
     else
-        ng "cached ARM64 Workshop mod triggers no SteamCMD download" \
-           "steamcmd ran with: $(tr '\n' ' ' < "$args")"
+        ng "cached Workshop mod is still re-checked against Steam" \
+           "steamcmd ran with: $(tr '\n' ' ' < "$args" 2>/dev/null)"
     fi
 
     if [ -f "$mod_dir/mod.info" ]; then
