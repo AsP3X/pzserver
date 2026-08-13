@@ -90,7 +90,7 @@
   "character.infection": "Infektion",
   "character.injuries": "Verletzungen",
   "character.last_seen": "Zuletzt gesehen",
-  "character.never_played_body": "Für :username wurde noch nichts erfasst. Tritt dem Server mit genau diesem Namen bei, dann erscheint dein Charakter hier innerhalb von ein bis zwei Minuten.",
+  "character.never_played_body": "Für :username wurde noch nichts erfasst. Geh mit genau diesem Namen auf den Server — deine Vitalwerte erscheinen binnen Sekunden, Kills und Stunden folgen mit dem nächsten Export des Servers.",
   "character.never_played_title": "Noch kein Charakter",
   "character.no_injuries": "Keine Verletzungen — alle Körperteile intakt",
   "character.no_profession": "Kein Beruf",

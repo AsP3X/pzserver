@@ -126,11 +126,30 @@ pub struct Death {
     pub zombie_kills: i32,
     /// Unix seconds, from the real clock rather than the in-game calendar.
     /// This is the half of the dedup key that makes a death identifiable.
-    #[serde(default)]
+    ///
+    /// Read through a float, because the mod writes one. `os.time()` returns a
+    /// number with a fractional part under LuaJIT and the codec prints it as
+    /// `1786622231.04`, which a plain `i64` field rejects — taking the whole
+    /// export down with it, not just the one entry, so a single death made
+    /// every death unreadable.
+    #[serde(default, deserialize_with = "unix_seconds")]
     pub occurred_at: i64,
     /// The in-game date it happened on — 1993, and worth showing as such.
     #[serde(default)]
     pub world_time: Option<String>,
+}
+
+/// Accept a timestamp written as either an integer or a float.
+///
+/// Truncated rather than rounded: these are whole seconds with Lua's rounding
+/// noise on the end, and the fraction carries no information. The value is the
+/// dedup key for a death, so it has to land on the same integer every time the
+/// same export is read.
+fn unix_seconds<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(f64::deserialize(deserializer)?.trunc() as i64)
 }
 
 /// A read of one export, paired with the mtime it was read at.
@@ -308,5 +327,40 @@ mod tests {
         };
 
         assert!(!read.is_stale(Duration::from_secs(120)));
+    }
+
+    /// The mod writes os.time() straight through, and under LuaJIT that is a
+    /// float. A single fractional timestamp used to reject the entire export,
+    /// which is how every death on the server went missing at once — the only
+    /// trace was one warning line per sync in the API log.
+    #[tokio::test]
+    async fn a_death_stamped_with_a_float_still_parses() {
+        let export: DeathsExport = serde_json::from_str(
+            r#"{"deaths":[{"username":"AsP3X","cause":"infection","x":10771,"y":10270,
+                "z":0,"hours_survived":1.2,"zombie_kills":0,
+                "occurred_at":1786622231.04,"world_time":"1993-07-08T11:50:00"}]}"#,
+        )
+        .expect("a float timestamp must not sink the export");
+
+        assert_eq!(export.deaths.len(), 1);
+        // Truncated, so re-reading the same export always dedups to one row.
+        assert_eq!(export.deaths[0].occurred_at, 1_786_622_231);
+    }
+
+    #[tokio::test]
+    async fn a_death_stamped_with_an_integer_still_parses() {
+        let export: DeathsExport =
+            serde_json::from_str(r#"{"deaths":[{"username":"rook","occurred_at":1786622231}]}"#)
+                .expect("integers were always fine and must stay so");
+
+        assert_eq!(export.deaths[0].occurred_at, 1_786_622_231);
+    }
+
+    /// One malformed entry must not cost the rest of the file.
+    #[tokio::test]
+    async fn an_empty_deaths_list_reads_as_no_deaths() {
+        let export: DeathsExport = serde_json::from_str(r#"{"deaths":[]}"#).expect("parse");
+
+        assert!(export.deaths.is_empty());
     }
 }

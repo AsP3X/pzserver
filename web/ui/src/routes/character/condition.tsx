@@ -15,7 +15,8 @@ import type { TemperatureState } from '@/lib/body'
 const INTACT = 100
 
 interface ConditionProps {
-  character: Character
+  /** Null until the ten-minute export has been folded into Postgres. */
+  character: Character | null
   /** The mod's heartbeat, when there is one. */
   body: PlayerBody | null
 }
@@ -23,7 +24,7 @@ interface ConditionProps {
 export function Condition({ character, body }: ConditionProps) {
   const { t, intlLocale } = useTranslation()
 
-  const summary = character.vitals
+  const summary = character?.vitals ?? null
   const overall = body?.health?.overall ?? summary?.health ?? null
 
   if (overall === null && !body?.temperature) {

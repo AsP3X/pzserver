@@ -90,7 +90,7 @@
   "character.infection": "Infection",
   "character.injuries": "Injuries",
   "character.last_seen": "Last seen",
-  "character.never_played_body": "Nothing has been recorded for :username. Join the server with that exact name and your character shows up here within a minute or two.",
+  "character.never_played_body": "Nothing has been recorded for :username yet. Join the server with that exact name — your vitals appear within seconds, and kills and hours follow on the server's next export.",
   "character.never_played_title": "No character yet",
   "character.no_injuries": "No injuries — every part intact",
   "character.no_profession": "No profession",

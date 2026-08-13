@@ -39,14 +39,20 @@ export function CharacterPage() {
 
         {isPending ? (
           <Skeleton className="h-64 w-full" />
-        ) : data?.character ? (
+        ) : data?.character || data?.body ? (
+          // Either source is enough. The heartbeat lands within seconds of
+          // joining; the player_stats row waits on the mod's ten-minute export
+          // and then a sync, so gating the page on the row alone showed a
+          // brand new survivor "nothing recorded" for several minutes while
+          // their vitals were already sitting on disk.
           <CharacterDetail
             character={data.character}
             online={data.online}
             body={data.body}
+            username={user?.username ?? ''}
           />
         ) : (
-          // Registered from in game, but the mod's export has not caught up yet.
+          // Registered from in game, but nothing has been exported at all yet.
           <NotSeenYet username={user?.username ?? ''} />
         )}
       </Container>
@@ -58,36 +64,56 @@ function CharacterDetail({
   character,
   online,
   body,
+  username,
 }: {
-  character: Character
+  /** Null until the mod's ten-minute export has been folded into Postgres. */
+  character: Character | null
   online: boolean
   body: PlayerBody | null
+  username: string
 }) {
   const { t, intlLocale } = useTranslation()
 
-  const skills = Object.entries(character.skills).sort(
+  // Prefer the stored row, fall back to the heartbeat. The two agree on
+  // everything they both carry; the row simply persists when nobody is online.
+  const profession = character?.profession ?? body?.info?.profession ?? null
+  const kills = character?.zombie_kills ?? body?.info?.kills ?? null
+  const hours = character?.hours_survived ?? body?.info?.hours_survived ?? null
+  const lastSeen = character?.last_synced_at ?? body?.reported_at ?? null
+  const isDead = character?.is_dead ?? false
+
+  const skills = Object.entries(
+    character?.skills ??
+      // The heartbeat carries level plus XP progress; only the level is needed here.
+      Object.fromEntries(
+        Object.entries(body?.skills ?? {}).map(([name, progress]) => [name, progress.level]),
+      ),
+  ).sort(
     ([leftName, leftLevel], [rightName, rightLevel]) =>
       rightLevel - leftLevel || leftName.localeCompare(rightName),
   )
-  const traits = character.traits ?? []
+
+  const traits =
+    character?.traits ??
+    (body?.info?.traits ?? []).map((label) => ({ id: label, label }))
 
   return (
     <div className="flex flex-col gap-8">
       <Panel bracketed>
         <PanelHeader
-          label={character.profession ?? t('character.no_profession')}
+          label={profession ?? t('character.no_profession')}
           action={
             <span
               className={cn(
                 'inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-xs tracking-wide uppercase',
-                character.is_dead
+                isDead
                   ? 'border-blood/40 bg-blood-soft text-blood'
                   : online
                     ? 'border-moss/40 bg-moss-soft text-moss'
                     : 'border-fence bg-ash-raised text-dust',
               )}
             >
-              {character.is_dead
+              {isDead
                 ? t('character.dead')
                 : online
                   ? t('character.online_now')
@@ -97,21 +123,27 @@ function CharacterDetail({
         />
 
         <div className="p-6">
-          <h3 className="display text-4xl text-bone">{character.username}</h3>
-          <p className="mt-2 font-mono text-xs text-dust">
-            {t('character.rank', { rank: character.rank })}
-          </p>
+          <h3 className="display text-4xl text-bone">
+            {character?.username ?? username}
+          </h3>
+          {/* Rank comes off the leaderboard, so it only exists once the row
+              does. Omitted rather than shown as zero. */}
+          {character ? (
+            <p className="mt-2 font-mono text-xs text-dust">
+              {t('character.rank', { rank: character.rank })}
+            </p>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 divide-x divide-y divide-fence border-t border-fence sm:grid-cols-3 sm:divide-y-0">
           <StatTile
             label={t('stats.zombie_kills')}
-            value={formatNumber(character.zombie_kills, intlLocale)}
+            value={kills === null ? '—' : formatNumber(kills, intlLocale)}
             icon={Crosshair}
           />
           <StatTile
             label={t('stats.hours_survived')}
-            value={formatNumber(character.hours_survived, intlLocale)}
+            value={hours === null ? '—' : formatNumber(hours, intlLocale)}
             icon={Hourglass}
           />
           {/* Not the rank — that is already stated above the tiles. When the
@@ -119,7 +151,7 @@ function CharacterDetail({
               anywhere else on the page. */}
           <StatTile
             label={t('character.last_seen')}
-            value={formatRelativeTime(character.last_synced_at, intlLocale)}
+            value={lastSeen === null ? '—' : formatRelativeTime(lastSeen, intlLocale)}
             icon={Clock}
             className="col-span-2 sm:col-span-1"
           />
