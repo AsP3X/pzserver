@@ -420,13 +420,19 @@ write_mod_info() {
     printf 'name=Knox Relay\nid=KnoxRelay\nmodversion=%s\n' "$2" > "$1/42/mod.info"
 }
 
-# assert_seeding <desc> <staged-version> <workshop-version> <expected-version> <link|copy>
-# An empty workshop-version means nothing is installed there at all. The last
-# argument separates "kept the Workshop symlink" from "seeded a real copy",
-# which the version alone cannot tell apart when the two agree.
+# assert_seeding <desc> <staged-version> <workshop-version> <expected-version>
+# An empty workshop-version means nothing is installed there at all.
+#
+# What is asserted is the version the *game* would load, read through the
+# symlink, and — when this is a Workshop mod — the version sitting in the
+# Workshop cache itself. Those are the same thing, and that is the point: the
+# seed used to write a real directory over Zomboid/mods/KnoxRelay and call it
+# done, but PZ resolves a mod named in WorkshopItems= out of the cache and never
+# opens the local mods dir. This suite passed throughout, because it looked in
+# the same wrong place the seed wrote to.
 assert_seeding() {
-    local desc="$1" staged="$2" workshop="$3" expected="$4" kind="$5"
-    local home cfg staged_dir live actual
+    local desc="$1" staged="$2" workshop="$3" expected="$4"
+    local home cfg staged_dir live actual cached
 
     home="$(mktemp -d)"
     cfg="$(mktemp -d)"
@@ -447,27 +453,38 @@ assert_seeding() {
     actual="$(sed -n 's/^modversion=//p' "$live/42/mod.info" 2>/dev/null | head -1)"
 
     if [ "$actual" != "$expected" ]; then
-        ng "$desc" "expected Knox Relay $expected in Zomboid/mods/, got ${actual:-<nothing>}"
-    elif [ "$kind" = link ] && [ ! -L "$live" ]; then
-        ng "$desc" "expected the Workshop symlink to survive, found a copy"
-    elif [ "$kind" = copy ] && [ -L "$live" ]; then
-        ng "$desc" "expected a seeded copy, found the Workshop symlink"
-    else
-        ok "$desc"
+        ng "$desc" "the game would load Knox Relay ${actual:-<nothing>}, expected $expected"
+        rm -rf "$home" "$cfg" "$staged_dir"
+        return
     fi
+
+    # The copy PZ actually resolves for a Workshop mod. Checking only through
+    # Zomboid/mods/ is what let the old bug hide.
+    if [ -n "$workshop" ]; then
+        cached="$(sed -n 's/^modversion=//p' \
+            "$home/pzserver/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay/42/mod.info" \
+            2>/dev/null | head -1)"
+        if [ "$cached" != "$expected" ]; then
+            ng "$desc" "the Workshop cache holds ${cached:-<nothing>}, expected $expected"
+            rm -rf "$home" "$cfg" "$staged_dir"
+            return
+        fi
+    fi
+
+    ok "$desc"
     rm -rf "$home" "$cfg" "$staged_dir"
 }
 
 assert_seeding "a newer staged Knox Relay replaces a stale Workshop download" \
-    1.7 1.5 1.7 copy
+    1.7 1.5 1.7
 assert_seeding "a newer Workshop Knox Relay is kept over an older staged one" \
-    1.5 1.7 1.7 link
+    1.5 1.7 1.7
 assert_seeding "an equal Workshop version is left in place" \
-    1.7 1.7 1.7 link
+    1.7 1.7 1.7
 assert_seeding "the staged copy seeds when no Workshop copy is installed" \
-    1.7 "" 1.7 copy
+    1.7 "" 1.7
 assert_seeding "version comparison is numeric, not lexical (1.10 beats 1.9)" \
-    1.10 1.9 1.10 copy
+    1.10 1.9 1.10
 
 echo "----------------------------------------"
 echo "Passed: ${pass}, Failed: ${fail}"

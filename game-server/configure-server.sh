@@ -423,7 +423,28 @@ fi
 # Only a strictly newer staged copy wins, so publishing a newer Workshop build
 # still takes precedence and this never pins the server to the image.
 KR_STAGED_DIR="${KR_STAGED_DIR:-/opt/knox-relay}"
-KR_LIVE_DIR="${ZOMBOID_MODS_DIR}/KnoxRelay"
+
+# Where the seed has to land.
+#
+# Not Zomboid/mods/KnoxRelay, which is what this used to write. Once an id is
+# in WorkshopItems=, PZ loads the mod out of the Workshop cache and ignores the
+# local mods directory entirely — so seeding there produced a perfectly correct
+# copy the game never opened. It looked like it worked because the Workshop
+# copy usually agreed; the moment it did not, the boot log said
+# "Seeded Knox Relay 1.11" and the server went on running 1.10.
+#
+# So the cache copy is the target when there is one, and the symlink planted
+# above follows it. Zomboid/mods is the target only when this is not a Workshop
+# mod at all. On AMD64 a later SteamCMD sync overwrites the cache again, which
+# is correct: Steam wins whenever it can actually run.
+KR_CACHE_DIR="${WORKSHOP_CACHE_ROOT}/${PZ_BRIDGE_WORKSHOP_ID:-3777446787}/mods/KnoxRelay"
+if [ -d "$KR_CACHE_DIR" ]; then
+    KR_LIVE_DIR="$KR_CACHE_DIR"
+    KR_LIVE_LABEL="the Workshop cache"
+else
+    KR_LIVE_DIR="${ZOMBOID_MODS_DIR}/KnoxRelay"
+    KR_LIVE_LABEL="Zomboid/mods"
+fi
 
 # Echo `modversion=` from a mod's B42 manifest, falling back to the root one.
 mod_version_of() {
@@ -445,8 +466,8 @@ if [ -d "$KR_STAGED_DIR" ]; then
         || { [ "$newest" = "$staged_version" ] && [ "$live_version" != "$staged_version" ]; }; then
         rm -rf "$KR_LIVE_DIR"
         cp -r "$KR_STAGED_DIR" "$KR_LIVE_DIR"
-        echo "[configure-server] Seeded Knox Relay ${staged_version:-?} from the image" \
-             "(replacing ${live_version:-nothing})"
+        echo "[configure-server] Seeded Knox Relay ${staged_version:-?} from the image into" \
+             "${KR_LIVE_LABEL} (replacing ${live_version:-nothing})"
     else
         echo "[configure-server] Keeping installed Knox Relay ${live_version}" \
              "(image stages ${staged_version:-nothing})"
