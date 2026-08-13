@@ -18,6 +18,7 @@ import { AdminLayout, PlayerLayout, PublicLayout } from '@/components/layout/lay
 import { AdminOverviewPage } from '@/routes/admin/overview'
 import { CharacterPage } from '@/routes/character'
 import { InventoryPage } from '@/routes/me/inventory'
+import { MapPage } from '@/routes/me/map'
 import { LandingPage } from '@/routes/landing'
 import { LoginPage } from '@/routes/auth/login'
 import { NotFoundPage } from '@/routes/not-found'
@@ -102,6 +103,12 @@ const inventoryRoute = createRoute({
   component: InventoryPage,
 })
 
+const mapRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/me/map',
+  component: MapPage,
+})
+
 const settingsRoute = createRoute({
   getParentRoute: () => playerLayout,
   path: '/me/settings',
@@ -156,6 +163,7 @@ export const router = createRouter({
       playerOverviewRoute,
       characterRoute,
       inventoryRoute,
+      mapRoute,
       settingsRoute,
     ]),
     adminLayout.addChildren([adminOverviewRoute]),

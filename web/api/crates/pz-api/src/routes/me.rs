@@ -19,6 +19,7 @@ pub fn routes() -> Router<AppState> {
         .route("/me/character", get(my_character))
         .route("/me/inventory", get(my_inventory))
         .route("/me/inventory/refresh", post(refresh_inventory))
+        .route("/me/position", get(my_position))
 }
 
 #[derive(Serialize)]
@@ -107,6 +108,71 @@ async fn my_inventory(
         reported_at: read
             .and_then(|read| read.reported_at)
             .map(DateTime::<Utc>::from),
+        online: character::is_online(&status.players, username),
+    }))
+}
+
+#[derive(Serialize)]
+struct PositionResponse {
+    /// `null` when the mod has never reported this character's position.
+    position: Option<Position>,
+    /// When the position export was last written. The file outlives the
+    /// session, so a position with an old stamp is where you logged out.
+    reported_at: Option<DateTime<Utc>>,
+    online: bool,
+}
+
+#[derive(Serialize)]
+struct Position {
+    x: f64,
+    y: f64,
+    z: i32,
+}
+
+/// Where the player was last seen.
+///
+/// Read out of the whole-server position export rather than a per-player file:
+/// the mod writes one `players_live.json` every thirty seconds and there is no
+/// per-character equivalent. An offline player is simply absent from it, which
+/// is why a position and `online: false` can both be true — that is the spot
+/// they logged out at, and saying so is more use than an empty map.
+async fn my_position(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<PositionResponse>> {
+    let username = user.username.as_str();
+    let status = state.status.current().await;
+
+    let read = match pz_bridge::LuaBridge::new(&state.config.lua_bridge_path)
+        .players_live()
+        .await
+    {
+        Ok(read) => read,
+        Err(error) => {
+            // The map still draws; it just has nobody on it.
+            tracing::warn!(%error, "position export unreadable");
+            None
+        }
+    };
+
+    let position = read.as_ref().and_then(|read| {
+        read.data
+            .players
+            .iter()
+            .find(|player| player.username.eq_ignore_ascii_case(username))
+            .map(|player| Position {
+                x: player.x,
+                y: player.y,
+                z: player.z,
+            })
+    });
+
+    Ok(Json(PositionResponse {
+        reported_at: position
+            .as_ref()
+            .and(read.and_then(|read| read.modified_at))
+            .map(DateTime::<Utc>::from),
+        position,
         online: character::is_online(&status.players, username),
     }))
 }

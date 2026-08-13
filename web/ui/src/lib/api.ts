@@ -303,6 +303,13 @@ export interface MyInventoryResponse {
   online: boolean
 }
 
+export interface MyPositionResponse {
+  /** Null when the mod has never reported this character's position. */
+  position: { x: number; y: number; z: number } | null
+  reported_at: string | null
+  online: boolean
+}
+
 export interface MyCharacterResponse {
   /** Null when the account has never been seen in game. */
   character: Character | null
@@ -444,6 +451,8 @@ export const api = {
   myCharacter: () => request<MyCharacterResponse>('/api/v1/me/character'),
 
   myInventory: () => request<MyInventoryResponse>('/api/v1/me/inventory'),
+
+  myPosition: () => request<MyPositionResponse>('/api/v1/me/position'),
 
   refreshInventory: () => post<void>('/api/v1/me/inventory/refresh', {}),
 

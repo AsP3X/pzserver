@@ -72,6 +72,19 @@ export const obituarySummaryQuery = queryOptions({
   staleTime: 60_000,
 })
 
+/**
+ * The player's own position. Polled on the mod's own cadence: it rewrites the
+ * position export every thirty real seconds, so asking faster only re-reads
+ * the same file.
+ */
+export const myPositionQuery = queryOptions({
+  queryKey: ['me', 'position'],
+  queryFn: api.myPosition,
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  staleTime: 15_000,
+})
+
 export const myCharacterQuery = queryOptions({
   queryKey: ['me', 'character'],
   queryFn: api.myCharacter,
