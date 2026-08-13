@@ -173,10 +173,16 @@ services:
     volumes:
       - ${PZ_REDIS_HOST:-./data/redis}:/data
     environment:
+      # The literal string "null" counts as no password, not as a password
+      # spelled n-u-l-l. Laravel's env() maps "null" to PHP null, so a
+      # REDIS_PASSWORD=null (which is what Laravel's own .env.example uses to
+      # mean "none") had the app connecting anonymously while this container
+      # was enforcing "null" as the actual secret — every request failing with
+      # NOAUTH while both files looked like they agreed.
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-    command: /bin/sh -c 'set -- --appendonly yes; [ -n "$$REDIS_PASSWORD" ] && set -- "$$@" --requirepass "$$REDIS_PASSWORD"; exec redis-server "$$@"'
+    command: /bin/sh -c 'set -- --appendonly yes; [ -n "$$REDIS_PASSWORD" ] && [ "$$REDIS_PASSWORD" != "null" ] && set -- "$$@" --requirepass "$$REDIS_PASSWORD"; exec redis-server "$$@"'
     healthcheck:
-      test: ["CMD-SHELL", 'if [ -n "$$REDIS_PASSWORD" ]; then REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping; else redis-cli ping; fi']
+      test: ["CMD-SHELL", 'if [ -n "$$REDIS_PASSWORD" ] && [ "$$REDIS_PASSWORD" != "null" ]; then REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping; else redis-cli ping; fi']
       interval: 10s
       timeout: 5s
       retries: 5
