@@ -75,7 +75,7 @@ export const PUBLIC_NAV: NavItem[] = [
   { to: '/status', label: 'nav.status', icon: Gauge },
   { to: '/rankings', label: 'nav.rankings', icon: Trophy },
   { to: '/news', label: 'nav.news', icon: Newspaper, planned: true },
-  { to: '/obituary', label: 'nav.obituary', icon: Skull, planned: true },
+  { to: '/obituary', label: 'nav.obituary', icon: Skull },
 ]
 
 // ── Player area ─────────────────────────────────────────────────────

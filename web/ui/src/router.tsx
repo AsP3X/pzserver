@@ -22,6 +22,7 @@ import { LandingPage } from '@/routes/landing'
 import { LoginPage } from '@/routes/auth/login'
 import { NotFoundPage } from '@/routes/not-found'
 import { PlayerOverviewPage } from '@/routes/me/overview'
+import { ObituaryPage } from '@/routes/obituary'
 import { RankingsPage } from '@/routes/rankings'
 import { RegisterPage } from '@/routes/auth/register'
 import { SettingsPage } from '@/routes/me/settings'
@@ -54,6 +55,12 @@ const rankingsRoute = createRoute({
   getParentRoute: () => publicLayout,
   path: '/rankings',
   component: RankingsPage,
+})
+
+const obituaryRoute = createRoute({
+  getParentRoute: () => publicLayout,
+  path: '/obituary',
+  component: ObituaryPage,
 })
 
 const loginRoute = createRoute({
@@ -141,6 +148,7 @@ export const router = createRouter({
       indexRoute,
       statusRoute,
       rankingsRoute,
+      obituaryRoute,
       loginRoute,
       registerRoute,
     ]),

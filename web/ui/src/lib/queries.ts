@@ -55,6 +55,23 @@ export const myInventoryQuery = queryOptions({
   staleTime: 5_000,
 })
 
+/**
+ * The obituary, newest first. Not polled: a death that landed while you were
+ * reading is not worth pulling the page out from under you, and the roll is
+ * paged by cursor so an insert mid-scroll would shift nothing anyway.
+ */
+export const obituaryQuery = queryOptions({
+  queryKey: ['obituary'],
+  queryFn: () => api.obituary(),
+  staleTime: 60_000,
+})
+
+export const obituarySummaryQuery = queryOptions({
+  queryKey: ['obituary', 'summary'],
+  queryFn: api.obituarySummary,
+  staleTime: 60_000,
+})
+
 export const myCharacterQuery = queryOptions({
   queryKey: ['me', 'character'],
   queryFn: api.myCharacter,

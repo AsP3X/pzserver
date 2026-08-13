@@ -20,6 +20,13 @@ pub const PLAYERS_LIVE_FILE: &str = "players_live.json";
 /// Character progression, rewritten on the mod's ten-in-game-minute hook.
 pub const PLAYER_STATS_FILE: &str = "player_stats.json";
 
+/// How each character died, appended by the mod as corpses are found.
+///
+/// A rolling window, not an archive: the mod keeps the most recent 200 and
+/// trims the front, so anything worth remembering has to be taken into
+/// Postgres before it rolls off.
+pub const DEATHS_FILE: &str = "deaths.json";
+
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
     #[error("bridge file {path} could not be read: {source}")]
@@ -89,6 +96,43 @@ pub struct StatsPlayer {
     pub is_dead: bool,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeathsExport {
+    #[serde(default)]
+    pub deaths: Vec<Death>,
+}
+
+/// One character's death, as the mod saw it happen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Death {
+    pub username: String,
+    /// `player`, `fire`, `infection` or `unknown` — the mod's own ranking.
+    #[serde(default)]
+    pub cause: Option<String>,
+    /// Present only when another player was credited with the kill.
+    #[serde(default)]
+    pub killer: Option<String>,
+    #[serde(default)]
+    pub weapon: Option<String>,
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
+    #[serde(default)]
+    pub z: i32,
+    #[serde(default)]
+    pub hours_survived: f64,
+    #[serde(default)]
+    pub zombie_kills: i32,
+    /// Unix seconds, from the real clock rather than the in-game calendar.
+    /// This is the half of the dedup key that makes a death identifiable.
+    #[serde(default)]
+    pub occurred_at: i64,
+    /// The in-game date it happened on — 1993, and worth showing as such.
+    #[serde(default)]
+    pub world_time: Option<String>,
+}
+
 /// A read of one export, paired with the mtime it was read at.
 #[derive(Debug, Clone)]
 pub struct BridgeRead<T> {
@@ -135,6 +179,11 @@ impl LuaBridge {
     /// Character progression, or `None` when the mod has never written the file.
     pub async fn player_stats(&self) -> Result<Option<BridgeRead<PlayerStatsExport>>, BridgeError> {
         self.read_export(PLAYER_STATS_FILE).await
+    }
+
+    /// Recent deaths, or `None` when nobody has died on this server yet.
+    pub async fn deaths(&self) -> Result<Option<BridgeRead<DeathsExport>>, BridgeError> {
+        self.read_export(DEATHS_FILE).await
     }
 
     /// When an export was last rewritten, without paying to parse it.

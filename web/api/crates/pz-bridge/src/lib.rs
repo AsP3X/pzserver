@@ -21,6 +21,8 @@ pub use docker::{ContainerState, ContainerStatus, DockerClient, DockerError};
 pub use ini::ServerIni;
 pub use inventory::{InventoryReader, InventorySnapshot};
 pub use links::{LinkChannel, LinkRequest, LinkResult, LinkResults};
-pub use lua::{LivePlayer, LuaBridge, PlayerStatsExport, PlayersLiveExport, StatsPlayer};
+pub use lua::{
+    Death, DeathsExport, LivePlayer, LuaBridge, PlayerStatsExport, PlayersLiveExport, StatsPlayer,
+};
 pub use player_file::PlayerFile;
 pub use vitals::{PlayerVitals, VitalsReader};

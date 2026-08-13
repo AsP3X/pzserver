@@ -37,6 +37,43 @@ export interface ServerStatus {
   connect: { host: string; port: number } | null
 }
 
+/**
+ * The mod's own ranking of what finished someone off. Anything else the export
+ * carries is shown as written rather than dropped — the dev seed says
+ * `zombie`, and a future mod build may tell more causes apart.
+ */
+export type DeathCause = 'player' | 'fire' | 'infection' | 'unknown'
+
+export interface Obit {
+  username: string
+  cause: DeathCause | string
+  /** Set only when another player was credited. */
+  killer: string | null
+  /** The item type as the game names it — `Base.Axe`, not "Fire Axe". */
+  weapon: string | null
+  hours_survived: number
+  zombie_kills: number
+  x: number | null
+  y: number | null
+  /** The in-game date, as the mod wrote it. Reads 1993. */
+  world_time: string | null
+  occurred_at: string
+}
+
+export interface ObituaryPage {
+  deaths: Obit[]
+  /** Cursor for the next page, or null at the end of the roll. */
+  next_before: string | null
+}
+
+export interface ObituarySummary {
+  total_deaths: number
+  total_pvp_deaths: number
+  longest_life: number
+  deadliest_survivor: string | null
+  deadliest_survivor_kills: number
+}
+
 export interface StatsSummary {
   total_players: number
   total_zombie_kills: number
@@ -380,6 +417,14 @@ function post<T>(path: string, body: unknown): Promise<T> {
 
 export const api = {
   serverStatus: () => request<ServerStatus>('/api/v1/server/status'),
+
+  obituary: (before?: string | null, limit = 25) =>
+    request<ObituaryPage>(
+      `/api/v1/obituary?limit=${limit}` +
+        (before ? `&before=${encodeURIComponent(before)}` : ''),
+    ),
+
+  obituarySummary: () => request<ObituarySummary>('/api/v1/obituary/summary'),
 
   serverHistory: (hours = 24) =>
     request<StatusSample[]>(`/api/v1/server/history?hours=${hours}`),

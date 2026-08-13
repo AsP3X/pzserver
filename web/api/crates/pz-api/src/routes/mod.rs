@@ -3,6 +3,7 @@
 mod auth;
 mod health;
 mod me;
+mod obituary;
 mod server;
 mod site;
 mod stats;
@@ -45,6 +46,7 @@ fn v1(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(auth::routes())
         .merge(me::routes())
+        .merge(obituary::routes())
         .merge(server::routes())
         .merge(site::routes())
         .merge(stats::routes())

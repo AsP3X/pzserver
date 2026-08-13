@@ -4,8 +4,8 @@
 use std::collections::HashSet;
 use std::time::SystemTime;
 
-use chrono::Utc;
-use pz_bridge::lua::{PLAYER_STATS_FILE, StatsPlayer};
+use chrono::{DateTime, Utc};
+use pz_bridge::lua::{DEATHS_FILE, Death, PLAYER_STATS_FILE, StatsPlayer};
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
@@ -27,6 +27,7 @@ const REGISTRATION_INTERVAL: std::time::Duration = std::time::Duration::from_sec
 pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
     vec![
         tokio::spawn(stats_sync_loop(state.clone())),
+        tokio::spawn(deaths_sync_loop(state.clone())),
         tokio::spawn(status_sample_loop(state.clone())),
         tokio::spawn(account_registration_loop(state.clone())),
         tokio::spawn(session_cleanup_loop(state)),
@@ -135,6 +136,139 @@ async fn sync_players(db: &PgPool, players: &[StatsPlayer]) -> Result<u64, sqlx:
 /// already have a result are skipped. That is what keeps a request file read
 /// twice from issuing two codes — the same rule the mod applies to the delivery
 /// queue.
+/// Take the mod's `deaths.json` into `game_events` whenever it changes.
+///
+/// The export is a rolling window of the most recent 200 deaths, trimmed from
+/// the front as it grows, and nothing else on this stack drains it. A death
+/// that is not imported before it rolls off is gone for good, which is why the
+/// obituary reads Postgres rather than the file.
+///
+/// Every pass is offered the whole window again, so the import leans on the
+/// unique indexes from migration 0007 rather than tracking what it has seen.
+/// The mtime gate is only there to keep an idle server from re-offering two
+/// hundred rows every few seconds.
+async fn deaths_sync_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(state.config.stats_sync_interval);
+    let bridge = pz_bridge::LuaBridge::new(&state.config.lua_bridge_path);
+
+    let mut last_synced: Option<SystemTime> = None;
+
+    loop {
+        ticker.tick().await;
+
+        let modified_at = bridge.modified_at(DEATHS_FILE).await;
+
+        if modified_at.is_none() || modified_at == last_synced {
+            continue;
+        }
+
+        let export = match bridge.deaths().await {
+            Ok(Some(read)) => read.data,
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::warn!(%error, "deaths export unreadable");
+                continue;
+            }
+        };
+
+        match import_deaths(&state.db, &export.deaths).await {
+            Ok(count) => {
+                last_synced = modified_at;
+
+                if count > 0 {
+                    tracing::info!(deaths = count, "imported deaths from the Lua bridge");
+                }
+            }
+            Err(error) => tracing::error!(%error, "failed to import deaths"),
+        }
+    }
+}
+
+/// Insert every death that is not already recorded. Returns how many were new.
+///
+/// A death credited to another player also becomes a `pvp_kill` event, filed
+/// under the killer. Both come off the same record: `pvp_kills.json` holds the
+/// killer's-eye view of the same events, and reading one file means one dedup
+/// key to reason about instead of two that can disagree.
+async fn import_deaths(db: &PgPool, deaths: &[Death]) -> Result<u64, sqlx::Error> {
+    let mut imported = 0;
+
+    for death in deaths {
+        if death.username.is_empty() || death.username == "unknown" {
+            continue;
+        }
+
+        // Without a real timestamp there is no key to deduplicate on, and the
+        // row would be re-inserted on every single pass.
+        let Some(occurred_at) = DateTime::from_timestamp(death.occurred_at, 0) else {
+            continue;
+        };
+
+        let killer = death
+            .killer
+            .as_deref()
+            .filter(|name| !name.is_empty() && *name != "unknown");
+
+        let detail = serde_json::json!({
+            "cause": death.cause.as_deref().unwrap_or("unknown"),
+            "killer": killer,
+            "weapon": death.weapon,
+            "hours_survived": death.hours_survived,
+            "zombie_kills": death.zombie_kills,
+            "world_time": death.world_time,
+        });
+
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO game_events (event_type, player, detail, x, y, z, occurred_at)
+            VALUES ('death', $1, $2, $3, $4, $5, $6)
+            ON CONFLICT (player, occurred_at) WHERE event_type = 'death' DO NOTHING
+            "#,
+        )
+        .bind(&death.username)
+        .bind(&detail)
+        .bind(death.x as f32)
+        .bind(death.y as f32)
+        .bind(death.z)
+        .bind(occurred_at)
+        .execute(db)
+        .await?;
+
+        if inserted.rows_affected() == 0 {
+            // Already imported, so the kill beside it is too.
+            continue;
+        }
+
+        imported += 1;
+
+        let Some(killer) = killer else {
+            continue;
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO game_events (event_type, player, detail, x, y, z, occurred_at)
+            VALUES ('pvp_kill', $1, $2, $3, $4, $5, $6)
+            ON CONFLICT (player, occurred_at, (detail ->> 'victim'))
+                WHERE event_type = 'pvp_kill' DO NOTHING
+            "#,
+        )
+        .bind(killer)
+        .bind(serde_json::json!({
+            "victim": death.username,
+            "weapon": death.weapon,
+        }))
+        .bind(death.x as f32)
+        .bind(death.y as f32)
+        .bind(death.z)
+        .bind(occurred_at)
+        .execute(db)
+        .await?;
+    }
+
+    Ok(imported)
+}
+
 async fn account_registration_loop(state: AppState) {
     let mut ticker = tokio::time::interval(REGISTRATION_INTERVAL);
     let channel = pz_bridge::LinkChannel::new(&state.config.lua_bridge_path);
