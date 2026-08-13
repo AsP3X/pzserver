@@ -79,6 +79,15 @@ services:
       - SETGID
       - DAC_OVERRIDE
     networks:
+      # Both memberships are required. pzserver-internal is declared
+      # `internal: true`, and Docker silently drops published ports on a
+      # container attached only to an internal network — the `ports:` entry
+      # above never binds and `docker port pz-app` returns nothing. Joining the
+      # non-internal proxy-network is what makes the publish take effect, so
+      # WEB_PROXY_MODE=local can reach the panel on 127.0.0.1:${APP_PORT}.
+      # Same reason web-ui joins both in docker-compose.web.yml.
+      - proxy-network
+      # Private: db, redis, RCON, docker-socket-proxy
       - pzserver-internal
 
   # ---------------------------------------------------------------------------

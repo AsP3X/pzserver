@@ -83,6 +83,58 @@ The long **Checking for available updates / Verifying installation** phase is St
 2. For remote access, make sure you ran: `make admin-expose`
 3. Check cloud firewall for ports 80/443
 4. Check logs: `make logs`
+5. If nothing is listening on the port at all, see [port never binds](#admin-panel-port-never-binds-docker-port-pz-app-is-empty) below
+
+## Admin panel port never binds (`docker port pz-app` is empty)
+
+Symptom: `pz-app` is up, but `http://localhost:8000` refuses the connection and the
+container shows no ports:
+
+```bash
+docker port pz-app
+```
+
+If that prints nothing — and `docker ps` shows an empty PORTS column for `pz-app` —
+the port was never published on the host. This is not a firewall issue; nothing is
+listening.
+
+**Cause.** `pzserver-internal` is declared `internal: true`. A container attached
+*only* to an internal network has its published ports **silently dropped** — no
+warning, no error, the `ports:` entry simply has no effect. Confirmed on Docker
+29.6.2.
+
+**Fix.** The service must also join a non-internal network. In `docker-compose.yml`
+the `app` service joins both:
+
+```yaml
+    networks:
+      - proxy-network      # non-internal: makes `ports:` actually bind
+      - pzserver-internal  # private: db, redis, RCON
+```
+
+If you are on an older checkout where `app` lists only `pzserver-internal`, add
+`proxy-network` above it, then recreate the container so it picks up the new
+network (a restart is not enough — network membership is set at creation):
+
+```bash
+make down && make up
+```
+
+This affected `WEB_PROXY_MODE=local` (the default). `caddy` and `npm` modes were
+unaffected in practice, because Caddy and the NPM alias both put a proxy on
+`proxy-network` in front of the app.
+
+**The same rule applies to any service you give a `ports:` entry.** Every published
+port in this project is on a non-internal network: `app`, `game-server`, `caddy`
+and `web-ui` join `proxy-network`; `web-db` in `docker-compose.web-dev.yml` joins
+the `pzweb-dev` bridge. Services with no published ports (`queue`, `db`, `redis`,
+`docker-socket-proxy`, `web-api`) stay internal-only on purpose.
+
+To check quickly that a published port really bound:
+
+```bash
+docker compose ps --format 'table {{.Name}}\t{{.Ports}}'
+```
 
 ## Want to start fresh
 
