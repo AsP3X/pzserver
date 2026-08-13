@@ -109,7 +109,11 @@ impl Config {
 
             status_cache_ttl: seconds("STATUS_CACHE_TTL", "5")?,
             status_sample_interval: seconds("STATUS_SAMPLE_INTERVAL", "300")?,
-            stats_sync_interval: seconds("STATS_SYNC_INTERVAL", "30")?,
+            // Five seconds, not thirty. Both sync loops gate on the export's
+            // mtime, so a tick with nothing new costs one stat() and no parse
+            // — there is nothing to save by waiting, and the page is read by
+            // somebody who is playing right now and expects to see themselves.
+            stats_sync_interval: seconds("STATS_SYNC_INTERVAL", "5")?,
             bridge_stale_after: seconds("BRIDGE_STALE_AFTER", "120")?,
         })
     }

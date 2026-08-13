@@ -1,5 +1,7 @@
 //! Endpoints scoped to the signed-in user.
 
+use std::time::Duration;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
@@ -87,28 +89,58 @@ struct InventoryResponse {
     online: bool,
 }
 
+/// How stale a snapshot may be before simply opening the page renews it.
+///
+/// The mod serves requests on its own tick, so asking more often than it can
+/// answer only rewrites the same request file. This is a little under the
+/// page's poll interval, so an open page keeps itself fresh without ever
+/// queueing twice for one answer.
+const SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(8);
+
 /// The player's last inventory snapshot.
+///
+/// Reading it also renews it. A snapshot only exists because somebody asked
+/// for one, and requiring that somebody to be a human pressing Refresh meant a
+/// player who never found the button had no inventory at all — and one who did
+/// press it got a reading that started going stale immediately. An open page
+/// now keeps itself current for as long as the player is in game.
 async fn my_inventory(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<InventoryResponse>> {
     let username = user.username.as_str();
     let status = state.status.current().await;
+    let online = character::is_online(&status.players, username);
 
-    let read = InventoryReader::new(&state.config.lua_bridge_path)
-        .read(username)
-        .await
-        .map_err(|error| {
-            tracing::warn!(%error, "inventory snapshot unreadable");
-            ApiError::Internal("inventory snapshot unreadable".to_owned())
-        })?;
+    let reader = InventoryReader::new(&state.config.lua_bridge_path);
+
+    let read = reader.read(username).await.map_err(|error| {
+        tracing::warn!(%error, "inventory snapshot unreadable");
+        ApiError::Internal("inventory snapshot unreadable".to_owned())
+    })?;
+
+    let stale = read
+        .as_ref()
+        .and_then(|read| read.reported_at)
+        .and_then(|at| at.elapsed().ok())
+        .is_none_or(|age| age > SNAPSHOT_MAX_AGE);
+
+    // Offline players are skipped because the mod drops requests for anyone
+    // not on its roster; the queue would just accumulate.
+    if online
+        && stale
+        && let Err(error) = reader.request_snapshot(username).await
+    {
+        // The reading we already have is still worth serving.
+        tracing::warn!(%error, "could not queue an inventory snapshot");
+    }
 
     Ok(Json(InventoryResponse {
         snapshot: read.as_ref().map(|read| read.data.clone()),
         reported_at: read
             .and_then(|read| read.reported_at)
             .map(DateTime::<Utc>::from),
-        online: character::is_online(&status.players, username),
+        online,
     }))
 }
 

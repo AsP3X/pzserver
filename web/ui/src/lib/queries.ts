@@ -73,25 +73,31 @@ export const obituarySummaryQuery = queryOptions({
 })
 
 /**
- * The player's own position. Polled on the mod's own cadence: it rewrites the
- * position export every thirty real seconds, so asking faster only re-reads
- * the same file.
+ * The player's own position.
+ *
+ * Positions are exported every twelve ticks, about thirty real seconds. Asking
+ * twice per export costs one file read and halves how long a moving player
+ * looks like they are standing still.
  */
 export const myPositionQuery = queryOptions({
   queryKey: ['me', 'position'],
   queryFn: api.myPosition,
-  refetchInterval: 30_000,
+  refetchInterval: 15_000,
   refetchIntervalInBackground: false,
-  staleTime: 15_000,
+  staleTime: 5_000,
 })
 
 export const myCharacterQuery = queryOptions({
   queryKey: ['me', 'character'],
   queryFn: api.myCharacter,
-  // The mod rewrites its export every ~25 real seconds on a running world.
-  refetchInterval: 30_000,
+  // The vitals heartbeat is rewritten every four in-game minutes — about ten
+  // real seconds — and this page is read by somebody playing right now, so it
+  // follows the heartbeat rather than the slower stats export.
+  refetchInterval: 10_000,
   refetchIntervalInBackground: false,
-  staleTime: 15_000,
+  // Below the poll interval, so a page returning to the foreground shows the
+  // current reading rather than whatever was cached when it was hidden.
+  staleTime: 5_000,
 })
 
 /**
