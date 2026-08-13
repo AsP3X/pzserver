@@ -145,23 +145,38 @@ end
 -- Hooking the chat box
 --------------------------------------------------------------------------
 
---- ISChat owns the text entry, so the command has to be taken off it before
---- the vanilla handler decides it is an unknown slash command. Hooked rather
---- than replaced: everything this file does not recognise falls straight
---- through to the original.
-local function hookChat()
-    if not ISChat or not ISChat.onCommandEntered then
-        print(LOG .. "WARNING: ISChat unavailable — /account will not work")
+--- Take the command off the chat box before vanilla ships it to the server.
+---
+--- The hook has to go on the *text entry*, not on ISChat. ISChat:createChildren
+--- does `self.textEntry.onCommandEntered = ISChat.onCommandEntered`, capturing
+--- the function by reference when the UI is built — so replacing
+--- ISChat.onCommandEntered afterwards changes a name nothing reads again, and
+--- the entry keeps calling the original. That was the first attempt, and it
+--- looked exactly like the mod not being installed: `/account register` fell
+--- through to SendCommandToServer and came back "Unknown Command".
+---
+--- Vanilla reads the box with getText(), not getInternalText().
+local function patchEntry()
+    local instance = ISChat and ISChat.instance
+    local entry = instance and instance.textEntry
 
+    if not entry or type(entry.onCommandEntered) ~= "function" then
         return false
     end
 
-    local vanilla = ISChat.onCommandEntered
+    -- Already ours. Re-checked rather than latched, because the chat UI is
+    -- rebuilt on some transitions and a stale patch would be silently dropped.
+    if entry.KR_patched then
+        return true
+    end
 
-    ISChat.onCommandEntered = function(self)
-        local instance = ISChat.instance
-        local entry = instance and instance.textEntry
-        local text = entry and entry:getInternalText() or ""
+    local vanilla = entry.onCommandEntered
+
+    entry.onCommandEntered = function(self, ...)
+        local text = ""
+        pcall(function()
+            text = ISChat.instance.textEntry:getText() or ""
+        end)
 
         local mine = false
         local checked = pcall(function()
@@ -169,27 +184,56 @@ local function hookChat()
         end)
 
         if not checked or not mine then
-            return vanilla(self)
+            return vanilla(self, ...)
         end
 
-        -- Ours. Clear the box the way the vanilla handler would have, so the
+        -- Ours. Close the box the way the vanilla handler would have, so the
         -- player is not left staring at their own command.
         pcall(function()
-            entry:clear()
-            instance:unfocus()
-            instance:logChatCommand(text)
+            ISChat.instance:unfocus()
+            ISChat.instance:logChatCommand(text)
+            ISChat.instance.textEntry:clear()
         end)
     end
+
+    entry.KR_patched = true
 
     return true
 end
 
-Events.OnServerCommand.Add(onServerCommand)
+local announced = false
 
--- The chat UI is not built at file load, so the hook waits for the game to be
--- up. OnGameStart fires once the player and the HUD exist.
-Events.OnGameStart.Add(function()
-    if hookChat() then
+--- Keep trying until the chat box exists.
+---
+--- OnGameStart can land before ISChat has built its children, and there is no
+--- event for "the chat UI is ready", so this rides the tick until the patch
+--- takes and then gets out of the way.
+local function ensurePatched()
+    if not patchEntry() then
+        return
+    end
+
+    if not announced then
+        announced = true
         print(LOG .. "/account command registered on the chat box")
     end
+
+    Events.OnTick.Remove(ensurePatched)
+end
+
+Events.OnServerCommand.Add(onServerCommand)
+
+Events.OnGameStart.Add(function()
+    if not patchEntry() then
+        Events.OnTick.Add(ensurePatched)
+    elseif not announced then
+        announced = true
+        print(LOG .. "/account command registered on the chat box")
+    end
+end)
+
+-- The chat UI is rebuilt on some transitions, which would drop the patch. This
+-- costs one table lookup on an event that fires rarely.
+Events.OnCreatePlayer.Add(function()
+    patchEntry()
 end)

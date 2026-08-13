@@ -65,6 +65,13 @@ services:
       PZ_DATA_PATH: /pz-data
       PZ_SERVER_PATH: /pz-server
       PZ_RCON_HOST: game-server
+      # From the root .env, which is also what configure-server.sh writes into
+      # server.ini — so the two cannot drift. Without these the app fell back
+      # to app/.env's own copy, which had gone stale, and every RCON call
+      # failed with "RCON: password doesn't match" in the game console while
+      # the panel just showed the server as unreachable.
+      PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
+      PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:-}
       BACKUP_PATH: /backups
       LUA_BRIDGE_PATH: /lua-bridge
       PZ_MAP_TILES_PATH: /map-tiles
@@ -124,6 +131,13 @@ services:
       PZ_DATA_PATH: /pz-data
       PZ_SERVER_PATH: /pz-server
       PZ_RCON_HOST: game-server
+      # From the root .env, which is also what configure-server.sh writes into
+      # server.ini — so the two cannot drift. Without these the app fell back
+      # to app/.env's own copy, which had gone stale, and every RCON call
+      # failed with "RCON: password doesn't match" in the game console while
+      # the panel just showed the server as unreachable.
+      PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
+      PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:-}
       BACKUP_PATH: /backups
       LUA_BRIDGE_PATH: /lua-bridge
       PZ_MAP_TILES_PATH: /map-tiles
