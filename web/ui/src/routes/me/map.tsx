@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
-import { Layers, Navigation } from 'lucide-react'
+import { Crosshair, Layers, Navigation } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
-import { Container, Section, SectionHeading } from '@/components/ui/section'
-import { Panel, PanelHeader } from '@/components/ui/panel'
+import { HealthMeter } from '@/components/ui/bar'
+import { Button } from '@/components/ui/button'
+import { FormError } from '@/components/ui/field'
 import { Skeleton } from '@/components/ui/skeleton'
-import { WorldmapView } from '@/components/ui/worldmap'
+import { WorldmapView, type MapFocus } from '@/components/ui/worldmap'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
-import { myPositionQuery } from '@/lib/queries'
+import { myCharacterQuery, myPositionQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 
 /**
@@ -21,77 +23,121 @@ import { useTranslation } from '@/i18n/use-translation'
 export function MapPage() {
   const { t, intlLocale } = useTranslation()
 
-  const { data, isPending } = useQuery(myPositionQuery)
+  const { data, isPending, isError, refetch } = useQuery(myPositionQuery)
+  const character = useQuery(myCharacterQuery)
   const position = data?.position ?? null
+  const isDead = character.data?.character?.is_dead ?? false
+  const health = isDead
+    ? 0
+    : (character.data?.body?.health?.overall ?? character.data?.character?.vitals?.health ?? null)
+
+  const [focus, setFocus] = useState<MapFocus | null>(null)
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+
+  const marker = useMemo(
+    () =>
+      position
+        ? { x: position.x, y: position.y, health, look: character.data?.character?.appearance }
+        : null,
+    [character.data?.character?.appearance, health, position],
+  )
 
   return (
-    <Section>
-      <Container>
-        <SectionHeading
-          eyebrow={t('nav.map')}
-          title={t('map.title')}
-          description={t('map.description')}
-        />
-
-        {isPending ? (
-          <Skeleton className="h-[32rem] w-full" />
-        ) : (
-          <div className="flex flex-col gap-5">
-            <Panel bracketed>
-              <PanelHeader
-                label={t('map.last_known')}
-                action={
-                  <span className="flex items-center gap-3 font-mono text-[0.6875rem] text-dust">
-                    <span
-                      className={
-                        data?.online ? 'text-moss' : 'text-dust'
-                      }
-                    >
-                      {data?.online ? t('map.in_game') : t('map.logged_out')}
-                    </span>
-                    {data?.reported_at ? (
-                      <span>{formatRelativeTime(data.reported_at, intlLocale)}</span>
-                    ) : null}
-                  </span>
-                }
-              />
-
-              <div className="flex flex-wrap items-center gap-x-8 gap-y-3 p-5">
-                {position ? (
-                  <>
-                    <Reading
-                      icon={Navigation}
-                      label={t('map.coordinates')}
-                      value={`${formatNumber(Math.round(position.x), intlLocale)}, ${formatNumber(Math.round(position.y), intlLocale)}`}
-                    />
-                    <Reading
-                      icon={Layers}
-                      label={t('map.floor')}
-                      value={
-                        position.z === 0
-                          ? t('map.ground_floor')
-                          : t('map.floor_number', { count: position.z })
-                      }
-                    />
-                  </>
-                ) : (
-                  <p className="text-sm text-dust">{t('map.no_position')}</p>
-                )}
-              </div>
-            </Panel>
-
-            <WorldmapView
-              marker={position}
-              className="h-[26rem] sm:h-[34rem]"
-            />
-
-            <p className="font-mono text-[0.6875rem] tracking-wide text-dust">
-              {t('map.attribution')}
-            </p>
+    <section className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:p-5">
+      <header className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <span aria-hidden="true" className="hazard-tape h-1 w-8" />
+            <span className="eyebrow">{t('nav.map')}</span>
           </div>
-        )}
-      </Container>
-    </Section>
+          <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('map.title')}</h1>
+          <p className="mt-2 max-w-2xl text-sm text-smoke">{t('map.description')}</p>
+        </div>
+        {position ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setFocus({ x: position.x, y: position.y, token: Date.now() })}
+          >
+            <Crosshair aria-hidden="true" className="size-3.5" />
+            {t('map.centre_on_me')}
+          </Button>
+        ) : null}
+      </header>
+
+      {isPending ? (
+        <Skeleton className="min-h-0 flex-1" />
+      ) : isError ? (
+        <div>
+          <FormError>{t('common.error')}</FormError>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => void refetch()}>
+            {t('common.retry')}
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border border-fence bg-ash px-4 py-3">
+            {position ? (
+              <>
+                <Reading
+                  icon={Navigation}
+                  label={t('map.coordinates')}
+                  value={`${formatNumber(Math.round(position.x), intlLocale)}, ${formatNumber(Math.round(position.y), intlLocale)}`}
+                />
+                <Reading
+                  icon={Layers}
+                  label={t('map.floor')}
+                  value={
+                    position.z === 0
+                      ? t('map.ground_floor')
+                      : t('map.floor_number', { count: position.z })
+                  }
+                />
+                <span className="flex flex-col">
+                  <span
+                    className={
+                      isDead ? 'font-mono text-sm text-blood' : data?.online ? 'font-mono text-sm text-moss' : 'font-mono text-sm text-dust'
+                    }
+                  >
+                    {isDead
+                      ? t('character.dead')
+                      : data?.online
+                        ? t('map.in_game')
+                        : t('map.logged_out')}
+                  </span>
+                  {data?.reported_at ? (
+                    <span className="font-mono text-[0.6875rem] tracking-widest text-dust uppercase">
+                      {formatRelativeTime(data.reported_at, intlLocale)}
+                    </span>
+                  ) : null}
+                </span>
+                <HealthMeter health={health} label={t('character.health')} />
+              </>
+            ) : (
+              <p className="text-sm text-dust">{t('map.no_position')}</p>
+            )}
+            {cursor ? (
+              <span className="lg:ml-auto">
+                <Reading
+                  icon={Crosshair}
+                  label={t('map.cursor')}
+                  value={`${formatNumber(Math.round(cursor.x), intlLocale)}, ${formatNumber(Math.round(cursor.y), intlLocale)}`}
+                />
+              </span>
+            ) : (
+              <p className="text-xs text-dust lg:ml-auto">{t('map.click_hint')}</p>
+            )}
+          </div>
+
+          <WorldmapView
+            marker={marker}
+            focus={focus}
+            onPick={setCursor}
+            className="min-h-64 flex-1"
+          />
+        </>
+      )}
+    </section>
   )
 }
 

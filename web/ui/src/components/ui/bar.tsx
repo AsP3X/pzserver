@@ -13,6 +13,33 @@ interface BarProps {
 }
 
 /** Thin status bar, coloured by how good the reading is. */
+export function HealthMeter({
+  health,
+  label,
+  className,
+}: {
+  health: number | null | undefined
+  label?: string
+  className?: string
+}) {
+  if (health === null || health === undefined || !Number.isFinite(health)) {
+    return null
+  }
+
+  const fraction = Math.max(0, Math.min(1, health / 100))
+
+  return (
+    <div className={cn('flex min-w-0 items-center gap-2', className)}>
+      {label ? (
+        <span className="font-mono text-[0.625rem] tracking-widest text-dust uppercase">{label}</span>
+      ) : null}
+      <Bar fraction={fraction} className="w-16 shrink-0" />
+      <span className="font-mono text-xs text-bone tabular-nums">{Math.round(health)}%</span>
+    </div>
+  )
+}
+
+/** Thin status bar, coloured by how good the reading is. */
 export function Bar({ fraction, invert = false, className }: BarProps) {
   const clamped = Math.max(0, Math.min(1, fraction))
   const goodness = invert ? 1 - clamped : clamped

@@ -27,6 +27,19 @@ const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
  * Unlike compact notation, `RelativeTimeFormat` has complete CLDR data for both
  * locales, so this is safe to lean on.
  */
+/** Calendar date and clock, in the viewer's language. */
+export function formatDateTime(iso: string, locale: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
 export function formatRelativeTime(iso: string, locale: string): string {
   const elapsed = (new Date(iso).getTime() - Date.now()) / 1000
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })

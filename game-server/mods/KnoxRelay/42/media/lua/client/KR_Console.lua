@@ -1,5 +1,5 @@
 --
--- KR_Console.lua — the /account chat command, client side.
+-- KR_Console.lua — in-game chat commands, client side.
 --
 -- The chat box is the only place a player can type at the server, so the
 -- command has to be caught here and forwarded. This file does no deciding: it
@@ -18,9 +18,10 @@
 
 local LOG = "[KnoxRelay] "
 local CHANNEL = "KnoxRelay"
-local COMMAND = "/account"
+local ACCOUNT = "/account"
+local REPORT = "/report"
 
-print(LOG .. "Lua file loaded — /account command is active")
+print(LOG .. "Lua file loaded — /account and /report commands are active")
 
 --------------------------------------------------------------------------
 -- Showing the player something
@@ -89,12 +90,52 @@ local function showReply(args)
     notify("Registration failed. Try /account register again in a moment.", 255, 90, 90)
 end
 
-local function onServerCommand(module, command, args)
-    if module ~= CHANNEL or command ~= "accountReply" then
+local function showReportReply(args)
+    local status = args and args.status or "error"
+
+    if status == "filed" then
+        notify("Report sent. The team will see it.", 139, 176, 74)
+
         return
     end
 
-    showReply(args)
+    if status == "self" then
+        notify("You cannot report yourself.", 255, 90, 90)
+
+        return
+    end
+
+    if status == "too_short" then
+        notify("Give the team enough detail to act on.", 255, 176, 0)
+
+        return
+    end
+
+    if status == "invalid" then
+        notify("That name is not valid.", 255, 90, 90)
+
+        return
+    end
+
+    if status == "no_answer" then
+        notify("The website did not answer. Try /report again in a moment.", 255, 90, 90)
+
+        return
+    end
+
+    notify("The report could not be sent. Try again in a moment.", 255, 90, 90)
+end
+
+local function onServerCommand(module, command, args)
+    if module ~= CHANNEL then
+        return
+    end
+
+    if command == "accountReply" then
+        showReply(args)
+    elseif command == "reportReply" then
+        showReportReply(args)
+    end
 end
 
 --------------------------------------------------------------------------
@@ -109,16 +150,12 @@ local function squeeze(text)
     return (string.gsub(string.gsub(text, "^%s+", ""), "%s+$", ""))
 end
 
---- Handle the text, or return false to let the game have it.
-local function consume(text)
-    local trimmed = squeeze(text)
-    local lowered = string.lower(trimmed)
+local function startsWith(text, prefix)
+    return text == prefix or string.sub(text, 1, #prefix + 1) == prefix .. " "
+end
 
-    if lowered ~= COMMAND and string.sub(lowered, 1, #COMMAND + 1) ~= COMMAND .. " " then
-        return false
-    end
-
-    local argument = squeeze(string.sub(trimmed, #COMMAND + 1))
+local function consumeAccount(trimmed)
+    local argument = squeeze(string.sub(trimmed, #ACCOUNT + 1))
 
     if string.lower(argument) == "register" then
         local player = getSpecificPlayer(0)
@@ -134,11 +171,58 @@ local function consume(text)
         return true
     end
 
-    -- A bare /account, or anything else after it, gets the usage rather than
-    -- being passed through to the game as an unknown command.
     notify("Usage: /account register", 200, 200, 200)
 
     return true
+end
+
+local function consumeReport(trimmed)
+    local argument = squeeze(string.sub(trimmed, #REPORT + 1))
+    local space = string.find(argument, "%s")
+    local accused = argument
+    local body = ""
+
+    if space then
+        accused = squeeze(string.sub(argument, 1, space - 1))
+        body = squeeze(string.sub(argument, space + 1))
+    end
+
+    if accused == "" or body == "" then
+        notify("Usage: /report <name> <what happened>", 200, 200, 200)
+
+        return true
+    end
+
+    local player = getSpecificPlayer(0)
+    if not player then
+        return true
+    end
+
+    notify("Sending your report...", 200, 200, 200)
+    pcall(function()
+        sendClientCommand(player, CHANNEL, "playerReport", {
+            accused = accused,
+            body = body,
+        })
+    end)
+
+    return true
+end
+
+--- Handle the text, or return false to let the game have it.
+local function consume(text)
+    local trimmed = squeeze(text)
+    local lowered = string.lower(trimmed)
+
+    if startsWith(lowered, ACCOUNT) then
+        return consumeAccount(trimmed)
+    end
+
+    if startsWith(lowered, REPORT) then
+        return consumeReport(trimmed)
+    end
+
+    return false
 end
 
 --------------------------------------------------------------------------
@@ -215,7 +299,7 @@ local function ensurePatched()
 
     if not announced then
         announced = true
-        print(LOG .. "/account command registered on the chat box")
+        print(LOG .. "/account and /report registered on the chat box")
     end
 
     Events.OnTick.Remove(ensurePatched)
@@ -228,7 +312,7 @@ Events.OnGameStart.Add(function()
         Events.OnTick.Add(ensurePatched)
     elseif not announced then
         announced = true
-        print(LOG .. "/account command registered on the chat box")
+        print(LOG .. "/account and /report registered on the chat box")
     end
 end)
 

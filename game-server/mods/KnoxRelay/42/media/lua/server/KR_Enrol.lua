@@ -295,6 +295,19 @@ end
 
 --- Clear a character's outstanding request when they disconnect, so poll()
 --- stops looking for somebody who is not there.
+--- Write an empty request file if the panel has never seen one.
+function KR_Enrol.seed()
+    if Bridge.readJson(REQUESTS) then
+        return
+    end
+
+    Bridge.writeJson(REQUESTS, {
+        version = 1,
+        updated_at = Bridge.wallStamp(),
+        requests = {},
+    })
+end
+
 function KR_Enrol.forget(player)
     if not player then
         return

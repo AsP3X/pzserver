@@ -231,6 +231,15 @@ struct Packet {
     body: String,
 }
 
+/// Open a connection, run one command, and hang up.
+///
+/// PZ drops idle RCON sockets, so there is no pool to reuse — a one-shot is
+/// the whole session.
+pub async fn execute(config: &RconConfig, command: &str) -> Result<String, RconError> {
+    let mut connection = RconConnection::connect(config).await?;
+    connection.command(command).await
+}
+
 /// Parse the reply to the `players` command into usernames.
 ///
 /// PZ answers with `Players connected (N):` followed by one `-name` per line.

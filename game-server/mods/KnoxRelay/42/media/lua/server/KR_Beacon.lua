@@ -9,6 +9,7 @@
 local Codec = require("KR_Codec")
 local Bridge = require("KR_Bridge")
 local Roster = require("KR_Roster")
+local Look = require("KR_Look")
 
 KR_Beacon = {}
 
@@ -31,6 +32,7 @@ function KR_Beacon.export()
             z = math.floor(player:getZ() or 0),
             is_dead = player:isDead() or false,
             is_ghost = player:isGhostMode() or false,
+            appearance = Look.of(player),
         }
     end
 

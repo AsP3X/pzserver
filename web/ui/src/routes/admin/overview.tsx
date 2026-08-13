@@ -1,11 +1,16 @@
-import { useQuery } from '@tanstack/react-query'
-import { Activity, Clock, Crosshair, Server, Skull, Users } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Activity, Clock, Crosshair, Play, RotateCcw, Save, Server, Skull, Square, Users } from 'lucide-react'
+import { useState } from 'react'
 
+import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Container, Section, SectionHeading } from '@/components/ui/section'
+import { FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Sparkline } from '@/components/ui/sparkline'
 import { StatTile } from '@/components/ui/stat-tile'
 import { StatusPill } from '@/components/ui/status-pill'
+import { api, ApiError } from '@/lib/api'
 import { formatNumber, formatUptime } from '@/lib/format'
 import {
   serverHistoryQuery,
@@ -130,11 +135,135 @@ export function AdminOverviewPage() {
           </Panel>
         </div>
 
-        {/* Honest about the state of the port rather than shipping dead links. */}
+        <ServerControls />
+
         <Panel className="mt-6 border-dashed p-5">
           <p className="text-sm text-smoke">{t('admin.under_construction')}</p>
         </Panel>
       </Container>
     </Section>
+  )
+}
+
+type PendingAction = 'stop' | 'restart' | 'save' | null
+
+function ServerControls() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const { data: status } = useQuery(serverStatusQuery)
+  const [pending, setPending] = useState<PendingAction>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const running = status?.container === 'running'
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['server'] })
+  }
+
+  const start = useMutation({
+    mutationFn: () => api.adminStart(),
+    onSuccess: invalidate,
+    onError: (cause) => setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error')),
+  })
+
+  const act = useMutation({
+    mutationFn: async (action: Exclude<PendingAction, null>) => {
+      if (action === 'stop') return api.adminStop()
+      if (action === 'restart') return api.adminRestart()
+      return api.adminSave()
+    },
+    onSuccess: () => {
+      setPending(null)
+      invalidate()
+    },
+    onError: (cause) => {
+      setPending(null)
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
+  return (
+    <Panel bracketed className="mt-6">
+      <PanelHeader label={t('admin.controls')} />
+      <div className="flex flex-col gap-4 p-5">
+        <p className="text-sm text-smoke">{t('admin.controls_hint')}</p>
+        {error ? <FormError>{error}</FormError> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            onClick={() => {
+              setError(null)
+              start.mutate()
+            }}
+            disabled={running || start.isPending}
+          >
+            <Play aria-hidden="true" className="size-3.5" />
+            {t('admin.action.start')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setError(null)
+              setPending('stop')
+            }}
+            disabled={!running || act.isPending}
+          >
+            <Square aria-hidden="true" className="size-3.5" />
+            {t('admin.action.stop')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setError(null)
+              setPending('restart')
+            }}
+            disabled={!running || act.isPending}
+          >
+            <RotateCcw aria-hidden="true" className="size-3.5" />
+            {t('admin.action.restart')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setError(null)
+              setPending('save')
+            }}
+            disabled={!running || act.isPending}
+          >
+            <Save aria-hidden="true" className="size-3.5" />
+            {t('admin.action.save')}
+          </Button>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={
+          pending === 'stop'
+            ? t('admin.action.stop')
+            : pending === 'restart'
+              ? t('admin.action.restart')
+              : t('admin.action.save')
+        }
+        description={
+          pending === 'stop'
+            ? t('admin.action.stop_confirm')
+            : pending === 'restart'
+              ? t('admin.action.restart_confirm')
+              : t('admin.action.save_confirm')
+        }
+        tone={pending === 'stop' ? 'danger' : 'primary'}
+        busy={act.isPending}
+        onConfirm={() => pending && act.mutate(pending)}
+        onClose={() => {
+          if (!act.isPending) {
+            setPending(null)
+          }
+        }}
+      />
+    </Panel>
   )
 }

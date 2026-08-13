@@ -32,10 +32,16 @@ pub struct Config {
     pub docker_proxy_url: String,
     pub game_server_container: String,
 
+    /// Game data directory (`Zomboid/`), parent of `Server/` and `Logs/`.
+    #[allow(dead_code)]
+    pub data_path: PathBuf,
     /// Directory the KnoxRelay mod writes its JSON exports into.
     pub lua_bridge_path: PathBuf,
     /// Path to the live `server.ini`.
     pub server_ini_path: PathBuf,
+    /// Workshop id of the Knox Relay mod — never removable from the load list.
+    pub bridge_workshop_id: Option<String>,
+    pub bridge_mod_id: String,
 
     /// Address players type into the game client.
     pub connect_host: Option<String>,
@@ -95,8 +101,11 @@ impl Config {
             docker_proxy_url: string("DOCKER_PROXY_URL", "http://docker-socket-proxy:2375"),
             game_server_container: string("GAME_SERVER_CONTAINER_NAME", "pz-game-server"),
 
+            data_path: PathBuf::from(&data_path),
             lua_bridge_path,
             server_ini_path,
+            bridge_workshop_id: optional("PZ_BRIDGE_WORKSHOP_ID"),
+            bridge_mod_id: string("PZ_BRIDGE_MOD_ID", "KnoxRelay"),
 
             connect_host: optional("PZ_CONNECT_HOST"),
             connect_port: parse("PZ_GAME_PORT", "16261", "port number")?,

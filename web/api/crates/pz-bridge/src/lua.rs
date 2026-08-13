@@ -65,6 +65,8 @@ pub struct LivePlayer {
     pub is_dead: bool,
     #[serde(default)]
     pub is_ghost: bool,
+    #[serde(default)]
+    pub appearance: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -92,6 +94,8 @@ pub struct StatsPlayer {
     pub traits: Option<serde_json::Value>,
     #[serde(default)]
     pub vitals: Option<serde_json::Value>,
+    #[serde(default)]
+    pub appearance: Option<serde_json::Value>,
     #[serde(default)]
     pub is_dead: bool,
 }

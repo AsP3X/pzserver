@@ -122,6 +122,61 @@ pub async fn settings(db: &PgPool, locale: &str) -> Result<SiteSettings, sqlx::E
     Ok(settings)
 }
 
+/// Fields an administrator can change. Absent values are left alone.
+pub struct SitePatch {
+    pub site_name: Option<String>,
+    pub hero_badge: Option<String>,
+    pub hero_title: Option<String>,
+    pub hero_subtitle: Option<String>,
+    pub hero_description: Option<String>,
+    pub hero_cta_label: Option<String>,
+    pub footer_text: Option<String>,
+    pub connect_host: Option<String>,
+    pub connect_port: Option<i32>,
+    pub discord_url: Option<String>,
+}
+
+pub async fn update(db: &PgPool, patch: SitePatch) -> Result<SiteSettings, sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE site_settings
+        SET site_name        = COALESCE($1, site_name),
+            hero_badge       = COALESCE($2, hero_badge),
+            hero_title       = COALESCE($3, hero_title),
+            hero_subtitle    = COALESCE($4, hero_subtitle),
+            hero_description = COALESCE($5, hero_description),
+            hero_cta_label   = COALESCE($6, hero_cta_label),
+            footer_text      = COALESCE($7, footer_text),
+            connect_host     = COALESCE($8, connect_host),
+            connect_port     = COALESCE($9, connect_port),
+            discord_url      = COALESCE($10, discord_url),
+            updated_at       = now()
+        WHERE id = 1
+        "#,
+    )
+    .bind(patch.site_name)
+    .bind(patch.hero_badge)
+    .bind(patch.hero_title)
+    .bind(patch.hero_subtitle)
+    .bind(patch.hero_description)
+    .bind(patch.hero_cta_label)
+    .bind(patch.footer_text)
+    .bind(empty_to_none(patch.connect_host))
+    .bind(patch.connect_port)
+    .bind(empty_to_none(patch.discord_url))
+    .execute(db)
+    .await?;
+
+    settings(db, SOURCE_LOCALE).await
+}
+
+fn empty_to_none(value: Option<String>) -> Option<String> {
+    value.and_then(|text| {
+        let trimmed = text.trim().to_owned();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

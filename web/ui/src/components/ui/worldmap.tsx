@@ -1,53 +1,107 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Maximize2, Minus, Plus } from 'lucide-react'
+import { BoxSelect, Loader2, Maximize2, Minus, Plus } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
 import {
+  DEFAULT_ISO_SCALE,
+  MAX_ISO_SCALE,
+  minIsoScaleForViewport,
+  dziToWorld,
+  drawIsoTiles,
+  fitIsoScale,
+  isoMapping,
+  isoTiles,
+  worldToDzi,
+} from '@/lib/iso-tiles'
+import {
   clampView,
+  drawMapOverlays,
   drawWorldmap,
   fitScale,
+  hitTestPins,
   loadWorldmap,
+  vectorMapping,
+  type MapPin,
   type View,
+  type WorldMapping,
   type Worldmap,
 } from '@/lib/worldmap'
 import { useTranslation } from '@/i18n/use-translation'
 
+export type { MapPin }
+
+export type MapBasemap = 'vector' | 'iso'
+
+export interface MapFocus {
+  x: number
+  y: number
+  /** Bump this when the camera should jump even if x/y did not change. */
+  token: number
+}
+
 interface WorldmapViewProps {
-  /** Where to put the pin, in world coordinates. */
-  marker?: { x: number; y: number } | null
-  /** Scale to open at, in pixels per world unit. Omitted means "fit". */
+  marker?: {
+    x: number
+    y: number
+    health?: number | null
+    look?: import('@/lib/player-look').PlayerLook | null
+  } | null
+  markers?: MapPin[]
+  selectedId?: string | null
+  destination?: { x: number; y: number } | null
+  focus?: MapFocus | null
   initialScale?: number
+  pickMode?: boolean
+  onSelect?: (id: string) => void
+  onPick?: (point: { x: number; y: number }) => void
   className?: string
 }
 
-/**
- * Bounds on how far in and out the map goes, in pixels per world unit.
- *
- * The ceiling is set well past the pack's highest `minZ` (railways, at zoom
- * 0.5) so every layer it carries can actually be reached; stopping at the
- * threshold would mean a layer that only ever half-appears.
- */
 const MIN_SCALE = 0.01
 const MAX_SCALE = 4
-
-/**
- * Where a marked map opens, in pixels per world unit.
- *
- * Zoom -0.5, which is the first level that draws building footprints. Opening
- * wider is a green field with a dot on it: "where am I" is answered by the
- * street you are standing in, not by the county.
- */
 const DEFAULT_SCALE = 0.71
+const DRAG_SLOP = 5
+const MODE_KEY = 'knox.map.basemap'
+const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
+
+function readMode(): MapBasemap {
+  if (typeof window === 'undefined') {
+    return 'iso'
+  }
+  return window.localStorage.getItem(MODE_KEY) === 'vector' ? 'vector' : 'iso'
+}
+
+function boundsMap(bounds: Worldmap['bounds']): Worldmap {
+  return {
+    bounds,
+    bg: [20, 22, 18],
+    styles: {},
+    cells: {},
+    labels: [],
+    cellSize: 300,
+    name: 'Knox County',
+  }
+}
 
 /**
  * The basemap, pannable and zoomable.
  *
- * Redrawn on demand rather than on a loop: the map only changes when the view
- * does, and a canvas repainting sixty times a second to show the same picture
- * is a warm phone for nothing. Pointer events cover mouse and touch in one
- * path, so dragging works the same on both without a gesture library.
+ * Two pictures of the same world: the schematic vector pack, and the official
+ * isometric tiles. The camera stays in game coordinates either way, so a pin
+ * does not jump when you switch.
  */
-export function WorldmapView({ marker, initialScale, className }: WorldmapViewProps) {
+export function WorldmapView({
+  marker,
+  markers,
+  selectedId,
+  destination,
+  focus,
+  initialScale,
+  pickMode = false,
+  onSelect,
+  onPick,
+  className,
+}: WorldmapViewProps) {
   const { t } = useTranslation()
 
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -56,10 +110,20 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
   const [map, setMap] = useState<Worldmap | null>(null)
   const [failed, setFailed] = useState(false)
   const [view, setView] = useState<View | null>(null)
+  const [mode, setMode] = useState<MapBasemap>(readMode)
+  const [hover, setHover] = useState<{
+    label: string
+    health?: number | null
+    x: number
+    y: number
+  } | null>(null)
+  const [isoTick, setIsoTick] = useState(0)
 
-  // Held in a ref as well as state: the pointer handlers need the current view
-  // without being torn down and rebuilt on every frame of a drag.
   const viewRef = useRef<View | null>(null)
+  const isoScaleRef = useRef(DEFAULT_ISO_SCALE)
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+
   const setBoth = useCallback((next: View) => {
     viewRef.current = next
     setView(next)
@@ -67,7 +131,6 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
 
   useEffect(() => {
     let live = true
-
     loadWorldmap()
       .then((loaded) => {
         if (live) {
@@ -79,68 +142,104 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
           setFailed(true)
         }
       })
-
     return () => {
       live = false
     }
   }, [])
 
-  /** Whether the camera has ever been put on a marker. */
-  const centred = useRef(false)
+  useEffect(() => isoTiles.subscribe(() => setIsoTick((tick) => tick + 1)), [])
 
-  /** Centre on the marker, or on the whole world when there is nothing to point at. */
+  const bounds = map?.bounds ?? FALLBACK_BOUNDS
+  const clamp = useCallback(
+    (next: View) => clampView(next, map ?? boundsMap(bounds)),
+    [bounds, map],
+  )
+
+  const mappingAt = useCallback((current: View, width: number, height: number): WorldMapping => {
+    if (modeRef.current === 'iso') {
+      return isoMapping(current.x, current.y, isoScaleRef.current, width, height)
+    }
+    return vectorMapping(current, width, height)
+  }, [])
+
+  const centred = useRef(false)
+  const lastFocus = useRef<number | null>(null)
+
+  const centreOn = useCallback(
+    (x: number, y: number) => {
+      centred.current = true
+      if (modeRef.current === 'iso') {
+        isoScaleRef.current = DEFAULT_ISO_SCALE
+        setBoth({ x, y, scale: DEFAULT_ISO_SCALE })
+        return
+      }
+      setBoth({ x, y, scale: initialScale ?? DEFAULT_SCALE })
+    },
+    [initialScale, setBoth],
+  )
+
   const reset = useCallback(() => {
     const box = frame.current?.getBoundingClientRect()
-    if (!map || !box) {
+    if (!box) {
       return
     }
 
-    const fit = fitScale(map.bounds, box.width, box.height)
-    const [minX, minY, maxX, maxY] = map.bounds
+    const target = focus ?? marker ?? markers?.[0]
+    if (target) {
+      centreOn(target.x, target.y)
+      return
+    }
 
-    centred.current = marker !== null && marker !== undefined
-
-    setBoth(
-      marker
-        ? { x: marker.x, y: marker.y, scale: initialScale ?? DEFAULT_SCALE }
-        : { x: (minX + maxX) / 2, y: (minY + maxY) / 2, scale: fit },
-    )
-  }, [map, marker, initialScale, setBoth])
-
-  useEffect(() => {
+    const [minX, minY, maxX, maxY] = bounds
+    centred.current = false
+    if (modeRef.current === 'iso') {
+      isoScaleRef.current = fitIsoScale(box.width, box.height)
+      setBoth({ x: (minX + maxX) / 2, y: (minY + maxY) / 2, scale: isoScaleRef.current })
+      return
+    }
     if (!map) {
       return
     }
+    setBoth({
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      scale: fitScale(bounds, box.width, box.height),
+    })
+  }, [bounds, centreOn, focus, map, marker, markers, setBoth])
 
-    // First view once the pack and the box are both known.
+  useEffect(() => {
     if (!viewRef.current) {
       reset()
-
       return
     }
-
-    // A position that lands after the map opened — the player joined the
-    // server while this was on screen — is worth moving to once. Only once:
-    // the position refreshes every thirty seconds, and snapping the camera
-    // back each time would fight anyone reading the next street over.
-    if (marker && !centred.current) {
+    if ((marker || (markers && markers.length > 0)) && !centred.current) {
       reset()
     }
-  }, [map, marker, reset])
+  }, [map, marker, markers, mode, reset])
 
-  // Paint whenever the view, the marker or the box changes.
+  useEffect(() => {
+    if (!focus || lastFocus.current === focus.token) {
+      return
+    }
+    lastFocus.current = focus.token
+    centreOn(focus.x, focus.y)
+  }, [centreOn, focus])
+
   useEffect(() => {
     const element = canvas.current
     const box = frame.current
-
-    if (!element || !box || !map || !view) {
+    const current = viewRef.current
+    if (!element || !box || !current) {
       return
     }
 
     const paint = () => {
+      const latest = viewRef.current
+      if (!latest) {
+        return
+      }
       const rect = box.getBoundingClientRect()
       const ratio = window.devicePixelRatio || 1
-
       element.width = Math.round(rect.width * ratio)
       element.height = Math.round(rect.height * ratio)
       element.style.width = `${rect.width}px`
@@ -150,31 +249,79 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
       if (!ctx) {
         return
       }
-
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
-      drawWorldmap(ctx, map, view, {
+
+      const overlay = {
         width: rect.width,
         height: rect.height,
         marker,
         markerColor: '#ffb000',
-      })
+        markers,
+        destination,
+        selectedId,
+      }
+
+      if (modeRef.current === 'iso') {
+        const floor = minIsoScaleForViewport(rect.width, rect.height)
+        if (isoScaleRef.current < floor) {
+          isoScaleRef.current = floor
+        }
+        const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, rect.width, rect.height)
+        drawIsoTiles(ctx, mapping, rect.width, rect.height)
+        drawMapOverlays(ctx, overlay, (x, y) => mapping.toScreen(x, y), 2)
+        return
+      }
+
+      if (map) {
+        drawWorldmap(ctx, map, latest, overlay)
+        return
+      }
+
+      ctx.fillStyle = '#141611'
+      ctx.fillRect(0, 0, rect.width, rect.height)
     }
 
     paint()
-
     const observer = new ResizeObserver(paint)
     observer.observe(box)
-
     return () => observer.disconnect()
-  }, [map, view, marker])
+  }, [destination, isoTick, map, marker, markers, mode, selectedId, view])
 
-  /** Zoom about a point on the canvas, so the world under the cursor stays put. */
   const zoomAt = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {
       const current = viewRef.current
       const box = frame.current?.getBoundingClientRect()
+      if (!current || !box) {
+        return
+      }
 
-      if (!current || !map || !box) {
+      const anchorX = clientX === undefined ? box.width / 2 : clientX - box.left
+      const anchorY = clientY === undefined ? box.height / 2 : clientY - box.top
+
+      if (modeRef.current === 'iso') {
+        const held = isoMapping(
+          current.x,
+          current.y,
+          isoScaleRef.current,
+          box.width,
+          box.height,
+        ).toWorld(anchorX, anchorY)
+        const floor = minIsoScaleForViewport(box.width, box.height)
+        const nextScale = Math.min(MAX_ISO_SCALE, Math.max(floor, isoScaleRef.current * factor))
+        if (nextScale === isoScaleRef.current) {
+          return
+        }
+        isoScaleRef.current = nextScale
+        const heldDzi = worldToDzi(held.x, held.y)
+        const camera = dziToWorld(
+          heldDzi.x - (anchorX - box.width / 2) / nextScale,
+          heldDzi.y - (anchorY - box.height / 2) / nextScale,
+        )
+        setBoth(clamp({ x: camera.x, y: camera.y, scale: nextScale }))
+        return
+      }
+
+      if (!map) {
         return
       }
 
@@ -182,14 +329,8 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
       if (scale === current.scale) {
         return
       }
-
-      // Anchor on the pointer when there is one, otherwise on the centre.
-      const anchorX = clientX === undefined ? box.width / 2 : clientX - box.left
-      const anchorY = clientY === undefined ? box.height / 2 : clientY - box.top
-
       const worldX = current.x + (anchorX - box.width / 2) / current.scale
       const worldY = current.y + (anchorY - box.height / 2) / current.scale
-
       setBoth(
         clampView(
           {
@@ -201,74 +342,217 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
         ),
       )
     },
-    [map, setBoth],
+    [clamp, map, setBoth],
   )
 
-  // Wheel is bound by hand rather than through onWheel: React attaches its
-  // listener passively, and a passive listener cannot preventDefault, so the
-  // page scrolls away underneath the map while you are trying to zoom it.
   useEffect(() => {
     const box = frame.current
     if (!box) {
       return
     }
-
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       zoomAt(Math.pow(0.999, event.deltaY), event.clientX, event.clientY)
     }
-
     box.addEventListener('wheel', onWheel, { passive: false })
-
     return () => box.removeEventListener('wheel', onWheel)
   }, [zoomAt])
 
-  const drag = useRef<{ id: number; x: number; y: number } | null>(null)
+  const gesture = useRef<{
+    id: number
+    startX: number
+    startY: number
+    lastX: number
+    lastY: number
+    dragged: boolean
+    button: number
+  } | null>(null)
+
+  const localPoint = (clientX: number, clientY: number) => {
+    const box = frame.current?.getBoundingClientRect()
+    if (!box) {
+      return null
+    }
+    return { x: clientX - box.left, y: clientY - box.top, width: box.width, height: box.height }
+  }
+
+  const mappingNow = (point: { width: number; height: number }): WorldMapping | null => {
+    const current = viewRef.current
+    if (!current) {
+      return null
+    }
+    return mappingAt(current, point.width, point.height)
+  }
+
+  const pins = markers ?? []
+
+  const resolveHover = (clientX: number, clientY: number) => {
+    const point = localPoint(clientX, clientY)
+    const mapping = point ? mappingNow(point) : null
+    if (!point || !mapping) {
+      setHover(null)
+      return
+    }
+    const hit = hitTestPins(mapping, pins, point.x, point.y)
+    setHover(
+      hit?.label
+        ? { label: hit.label, health: hit.health, x: point.x, y: point.y }
+        : null,
+    )
+  }
+
+  const finishClick = (clientX: number, clientY: number, button: number) => {
+    const point = localPoint(clientX, clientY)
+    const mapping = point ? mappingNow(point) : null
+    if (!point || !mapping) {
+      return
+    }
+    const hit = hitTestPins(mapping, pins, point.x, point.y)
+    if (hit?.id && button !== 2) {
+      onSelect?.(hit.id)
+      return
+    }
+    if (!onPick) {
+      return
+    }
+    onPick(mapping.toWorld(point.x, point.y))
+  }
+
+  function selectMode(next: MapBasemap) {
+    if (next === mode) {
+      return
+    }
+    modeRef.current = next
+    window.localStorage.setItem(MODE_KEY, next)
+    setMode(next)
+    const current = viewRef.current
+    const box = frame.current?.getBoundingClientRect()
+    if (current && next === 'iso') {
+      // Street-level only when we are already sitting on a survivor.
+      // Otherwise keep the county in frame — 0.35 at the world centre puts
+      // every pin off-screen.
+      const scale = centred.current
+        ? DEFAULT_ISO_SCALE
+        : box
+          ? fitIsoScale(box.width, box.height)
+          : DEFAULT_ISO_SCALE
+      isoScaleRef.current = scale
+      setBoth({ ...current, scale })
+    } else if (current && next === 'vector') {
+      setBoth({ ...current, scale: initialScale ?? DEFAULT_SCALE })
+    }
+  }
+
+  const waitingForVector = mode === 'vector' && map === null && !failed
 
   return (
     <div className={cn('relative overflow-hidden border border-fence bg-ash', className)}>
       <div
         ref={frame}
-        className="absolute inset-0 touch-none"
+        className={cn('absolute inset-0 touch-none', pickMode ? 'cursor-crosshair' : '')}
         role="application"
         aria-label={t('map.canvas_label')}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          finishClick(event.clientX, event.clientY, 2)
+        }}
         onPointerDown={(event) => {
-          drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
+          gesture.current = {
+            id: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            lastX: event.clientX,
+            lastY: event.clientY,
+            dragged: false,
+            button: event.button,
+          }
           event.currentTarget.setPointerCapture(event.pointerId)
         }}
         onPointerMove={(event) => {
-          const held = drag.current
+          const held = gesture.current
           const current = viewRef.current
+          const box = frame.current?.getBoundingClientRect()
 
-          if (!held || held.id !== event.pointerId || !current || !map) {
+          if (!held || held.id !== event.pointerId) {
+            resolveHover(event.clientX, event.clientY)
             return
           }
 
-          setBoth(
-            clampView(
-              {
-                ...current,
-                x: current.x - (event.clientX - held.x) / current.scale,
-                y: current.y - (event.clientY - held.y) / current.scale,
-              },
-              map,
-            ),
-          )
+          const distance = Math.hypot(event.clientX - held.startX, event.clientY - held.startY)
+          if (distance > DRAG_SLOP) {
+            held.dragged = true
+          }
 
-          drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
+          if (!held.dragged || held.button === 2 || !current || !box) {
+            return
+          }
+
+          const dx = event.clientX - held.lastX
+          const dy = event.clientY - held.lastY
+
+          if (modeRef.current === 'iso') {
+            const center = worldToDzi(current.x, current.y)
+            const next = dziToWorld(
+              center.x - dx / isoScaleRef.current,
+              center.y - dy / isoScaleRef.current,
+            )
+            setBoth(clamp({ x: next.x, y: next.y, scale: isoScaleRef.current }))
+          } else if (map) {
+            setBoth(
+              clampView(
+                {
+                  ...current,
+                  x: current.x - dx / current.scale,
+                  y: current.y - dy / current.scale,
+                },
+                map,
+              ),
+            )
+          }
+
+          held.lastX = event.clientX
+          held.lastY = event.clientY
+          setHover(null)
         }}
         onPointerUp={(event) => {
-          drag.current = null
+          const held = gesture.current
+          gesture.current = null
           event.currentTarget.releasePointerCapture(event.pointerId)
+          if (!held || held.dragged || held.button === 2) {
+            return
+          }
+          finishClick(event.clientX, event.clientY, held.button)
         }}
         onPointerCancel={() => {
-          drag.current = null
+          gesture.current = null
+          setHover(null)
+        }}
+        onPointerLeave={() => {
+          if (!gesture.current) {
+            setHover(null)
+          }
         }}
       >
-        <canvas ref={canvas} className="block cursor-grab active:cursor-grabbing" />
+        <canvas
+          ref={canvas}
+          className={cn('block', pickMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing')}
+        />
       </div>
 
-      {map === null ? (
+      {hover ? (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute z-10 border border-fence bg-void/90 px-2 py-1 font-mono text-[0.6875rem] text-bone"
+          style={{ left: hover.x + 14, top: hover.y - 14 }}
+        >
+          <span>{hover.label}</span>
+          {hover.health !== undefined && hover.health !== null ? (
+            <span className="ml-2 text-dust">{Math.round(hover.health)}%</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {waitingForVector ? (
         <div className="absolute inset-0 grid place-items-center bg-ash">
           {failed ? (
             <p className="px-6 text-center text-sm text-dust">{t('map.load_failed')}</p>
@@ -282,12 +566,58 @@ export function WorldmapView({ marker, initialScale, className }: WorldmapViewPr
         </div>
       ) : null}
 
+      <div
+        className="absolute bottom-3 left-3 flex border border-fence-bright bg-void/85"
+        role="group"
+        aria-label={t('map.modes')}
+      >
+        <ModeButton
+          active={mode === 'iso'}
+          label={t('map.mode_iso')}
+          onClick={() => selectMode('iso')}
+        />
+        <ModeButton
+          active={mode === 'vector'}
+          label={t('map.mode_vector')}
+          onClick={() => selectMode('vector')}
+        />
+      </div>
+
       <div className="absolute top-3 right-3 flex flex-col gap-1">
         <Control label={t('map.zoom_in')} onClick={() => zoomAt(1.5)} icon={Plus} />
         <Control label={t('map.zoom_out')} onClick={() => zoomAt(1 / 1.5)} icon={Minus} />
         <Control label={t('map.recentre')} onClick={reset} icon={Maximize2} />
       </div>
+
+      <p className="pointer-events-none absolute right-3 bottom-3 max-w-[min(24rem,70%)] text-right font-mono text-[0.625rem] leading-snug text-dust">
+        {mode === 'iso' ? t('map.attribution_iso') : t('map.attribution')}
+      </p>
     </div>
+  )
+}
+
+function ModeButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1.5 font-mono text-[0.6875rem] tracking-widest uppercase',
+        active ? 'bg-hazard-soft text-hazard' : 'text-dust hover:text-bone',
+      )}
+    >
+      <BoxSelect aria-hidden="true" className="size-3" />
+      {label}
+    </button>
   )
 }
 

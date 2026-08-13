@@ -85,12 +85,114 @@ impl ServerIni {
             })
             .unwrap_or_default()
     }
+
+    /// Every key currently in the file, in name order.
+    pub fn keys(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.values
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+    }
+
+    /// Rewrite `key=value` lines in `contents`, keeping comments and order.
+    ///
+    /// Keys that are not already in the file are appended at the end. This is
+    /// the only write path: a full rewrite would drop the comments operators
+    /// use to remember why a value is set.
+    pub fn apply(contents: &str, updates: &BTreeMap<String, String>) -> String {
+        let mut remaining = updates.clone();
+        let mut lines: Vec<String> = contents
+            .lines()
+            .map(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    return line.to_owned();
+                }
+
+                let Some((key, _)) = trimmed.split_once('=') else {
+                    return line.to_owned();
+                };
+
+                let key = key.trim();
+                match remaining.remove(key) {
+                    Some(value) => format!("{key}={value}"),
+                    None => line.to_owned(),
+                }
+            })
+            .collect();
+
+        if !contents.is_empty() && !contents.ends_with('\n') {
+            // Keep a trailing newline so the next append is a new line.
+        }
+
+        if !remaining.is_empty() {
+            if let Some(last) = lines.last() {
+                if !last.is_empty() {
+                    lines.push(String::new());
+                }
+            }
+            for (key, value) in remaining {
+                lines.push(format!("{key}={value}"));
+            }
+        }
+
+        let mut out = lines.join("\n");
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Read, apply `updates`, write back atomically.
+    pub async fn write_updates(
+        path: impl AsRef<Path>,
+        updates: &BTreeMap<String, String>,
+    ) -> Result<(), IniError> {
+        let path = path.as_ref();
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let contents = match tokio::fs::read_to_string(path).await {
+            Ok(contents) => contents,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(source) => {
+                return Err(IniError::Read {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        };
+
+        let next = Self::apply(&contents, updates);
+        let tmp = path.with_extension("ini.tmp");
+
+        tokio::fs::write(&tmp, next.as_bytes())
+            .await
+            .map_err(|source| IniError::Write {
+                path: tmp.clone(),
+                source,
+            })?;
+
+        tokio::fs::rename(&tmp, path)
+            .await
+            .map_err(|source| IniError::Write {
+                path: path.to_path_buf(),
+                source,
+            })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum IniError {
     #[error("server.ini at {path} could not be read: {source}")]
     Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("server.ini at {path} could not be written: {source}")]
+    Write {
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -149,5 +251,28 @@ Password=
         assert_eq!(ini.get_bool("Open"), Some(true));
         assert_eq!(ini.get_bool("PVP"), Some(false));
         assert_eq!(ini.get_int("PublicName"), None);
+    }
+
+    #[test]
+    fn apply_rewrites_existing_keys_and_keeps_comments() {
+        let mut updates = BTreeMap::new();
+        updates.insert("MaxPlayers".to_owned(), "32".to_owned());
+
+        let next = ServerIni::apply(SAMPLE, &updates);
+
+        assert!(next.contains("# Comment line"));
+        assert!(next.contains("MaxPlayers=32"));
+        assert!(next.contains("PublicName=Knox County"));
+        assert!(next.ends_with('\n'));
+    }
+
+    #[test]
+    fn apply_appends_keys_that_were_not_in_the_file() {
+        let mut updates = BTreeMap::new();
+        updates.insert("NightLength".to_owned(), "3".to_owned());
+
+        let next = ServerIni::apply(SAMPLE, &updates);
+
+        assert!(next.contains("NightLength=3"));
     }
 }

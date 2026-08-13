@@ -1,5 +1,6 @@
 //! Router assembly and shared middleware.
 
+mod admin;
 mod auth;
 mod health;
 mod me;
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
 
 fn v1(state: AppState) -> Router<AppState> {
     Router::new()
+        .merge(admin::routes())
         .merge(auth::routes())
         .merge(me::routes())
         .merge(obituary::routes())

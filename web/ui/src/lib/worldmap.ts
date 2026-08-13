@@ -13,6 +13,8 @@
  * to roughly 19,800 x 15,900. Nothing here converts to latitude and longitude.
  */
 
+import { headBitmap } from '@/lib/player-look'
+
 /** Where the pack is served from. Copied in at build time, not fetched cold. */
 export const WORLDMAP_URL = '/map/vanilla.json'
 
@@ -146,14 +148,37 @@ export function clampView(view: View, map: Worldmap): View {
   }
 }
 
+export interface MapPin {
+  x: number
+  y: number
+  /** Used to tell the page which pin was clicked. */
+  id?: string
+  color?: string
+  label?: string
+  /** Overall body health 0–100. */
+  health?: number | null
+  look?: import('@/lib/player-look').PlayerLook | null
+}
+
 interface DrawOptions {
   /** CSS pixel size of the canvas. */
   width: number
   height: number
   /** Where to put a marker, in world coordinates. */
-  marker?: { x: number; y: number } | null
+  marker?: {
+    x: number
+    y: number
+    health?: number | null
+    look?: import('@/lib/player-look').PlayerLook | null
+  } | null
   /** Colour for the marker ring. */
   markerColor?: string
+  /** Extra pins — used by the admin map to show everyone at once. */
+  markers?: MapPin[]
+  /** A destination the operator has picked, drawn as a cross. */
+  destination?: { x: number; y: number } | null
+  /** Which extra pin is selected, so its label stays up even when zoomed out. */
+  selectedId?: string | null
 }
 
 /**
@@ -228,10 +253,114 @@ export function drawWorldmap(
   }
 
   drawLabels(ctx, map, view, { px, py, width, height, zoom })
+  drawMapOverlays(ctx, options, (x, y) => ({ x: px(x), y: py(y) }), zoom)
+}
 
+export function drawMapOverlays(
+  ctx: CanvasRenderingContext2D,
+  options: DrawOptions,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+  zoom: number,
+): void {
   if (options.marker) {
-    drawMarker(ctx, px(options.marker.x), py(options.marker.y), options.markerColor)
+    const point = toScreen(options.marker.x, options.marker.y)
+    try {
+      drawMarker(ctx, point.x, point.y, options.markerColor, options.marker.health, options.marker.look)
+    } catch {
+      drawMarker(ctx, point.x, point.y, options.markerColor, options.marker.health, null)
+    }
   }
+
+  for (const extra of options.markers ?? []) {
+    const point = toScreen(extra.x, extra.y)
+    const color = extra.color ?? options.markerColor ?? '#ffb000'
+    try {
+      drawMarker(ctx, point.x, point.y, color, extra.health, extra.look)
+    } catch {
+      drawMarker(ctx, point.x, point.y, color, extra.health, null)
+    }
+    if (extra.label && (zoom >= 0 || extra.id === options.selectedId)) {
+      drawPinLabel(ctx, point.x, point.y, extra.label, color)
+    }
+  }
+
+  if (options.destination) {
+    const point = toScreen(options.destination.x, options.destination.y)
+    drawDestination(ctx, point.x, point.y)
+  }
+}
+
+export interface WorldMapping {
+  toScreen(x: number, y: number): { x: number; y: number }
+  toWorld(sx: number, sy: number): { x: number; y: number }
+}
+
+export function vectorMapping(view: View, width: number, height: number): WorldMapping {
+  return {
+    toScreen(x, y) {
+      return worldToScreen(view, width, height, x, y)
+    },
+    toWorld(sx, sy) {
+      return screenToWorld(view, width, height, sx, sy)
+    },
+  }
+}
+
+/** World coordinate under a point on the canvas. */
+export function screenToWorld(
+  view: View,
+  width: number,
+  height: number,
+  screenX: number,
+  screenY: number,
+): { x: number; y: number } {
+  return {
+    x: view.x + (screenX - width / 2) / view.scale,
+    y: view.y + (screenY - height / 2) / view.scale,
+  }
+}
+
+/** Canvas pixel for a world coordinate. */
+export function worldToScreen(
+  view: View,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+): { x: number; y: number } {
+  return {
+    x: (x - view.x) * view.scale + width / 2,
+    y: (y - view.y) * view.scale + height / 2,
+  }
+}
+
+const HIT_RADIUS = 20
+
+/**
+ * Nearest pin under a canvas point, or null if nothing is close enough.
+ *
+ * Distance is in CSS pixels, not world units, so a cluster stays clickable
+ * at every zoom instead of only when you are already on top of it.
+ */
+export function hitTestPins(
+  mapping: WorldMapping,
+  pins: MapPin[],
+  screenX: number,
+  screenY: number,
+): MapPin | null {
+  let best: MapPin | null = null
+  let bestDistance = HIT_RADIUS
+
+  for (const pin of pins) {
+    const point = mapping.toScreen(pin.x, pin.y)
+    const distance = Math.hypot(point.x - screenX, point.y - screenY)
+    if (distance <= bestDistance) {
+      best = pin
+      bestDistance = distance
+    }
+  }
+
+  return best
 }
 
 interface Projection {
@@ -295,25 +424,90 @@ function drawMarker(
   x: number,
   y: number,
   color = '#ffb000',
+  health?: number | null,
+  look?: import('@/lib/player-look').PlayerLook | null,
 ): void {
   ctx.save()
 
+  if (health !== undefined && health !== null && Number.isFinite(health)) {
+    const fraction = Math.max(0, Math.min(1, health / 100))
+    const tone = fraction >= 0.67 ? '#8bb04a' : fraction >= 0.34 ? '#ffb000' : '#c44536'
+
+    ctx.beginPath()
+    ctx.arc(x, y, 18, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)'
+    ctx.lineWidth = 3.5
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.arc(x, y, 18, -Math.PI / 2, -Math.PI / 2 + fraction * Math.PI * 2)
+    ctx.strokeStyle = tone
+    ctx.lineWidth = 3
+    ctx.stroke()
+  }
+
   ctx.beginPath()
-  ctx.arc(x, y, 11, 0, Math.PI * 2)
+  ctx.arc(x, y, 13, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+  ctx.lineWidth = 4
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(x, y, 13, 0, Math.PI * 2)
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  ctx.stroke()
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(x, y, 11.5, 0, Math.PI * 2)
+  ctx.clip()
+  const portrait = headBitmap(look, 24)
+  ctx.drawImage(portrait, x - 12, y - 12, 24, 24)
+  ctx.restore()
+
+  ctx.restore()
+}
+
+function drawPinLabel(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  text: string,
+  color: string,
+): void {
+  ctx.save()
+  ctx.font = '600 11px "Inter Variable", system-ui, sans-serif'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.lineWidth = 3
+  ctx.strokeStyle = 'rgba(10, 12, 10, 0.75)'
+  ctx.lineJoin = 'round'
+  ctx.strokeText(text, x + 14, y)
+  ctx.fillStyle = color
+  ctx.fillText(text, x + 14, y)
+  ctx.restore()
+}
+
+/**
+ * A destination is a cross, not another ring, so it cannot be mistaken for
+ * a survivor standing there.
+ */
+function drawDestination(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save()
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
   ctx.lineWidth = 5
-  ctx.stroke()
-
   ctx.beginPath()
-  ctx.arc(x, y, 11, 0, Math.PI * 2)
-  ctx.strokeStyle = color
-  ctx.lineWidth = 2.5
+  ctx.moveTo(x - 10, y)
+  ctx.lineTo(x + 10, y)
+  ctx.moveTo(x, y - 10)
+  ctx.lineTo(x, y + 10)
   ctx.stroke()
-
+  ctx.strokeStyle = '#e8e4d4'
+  ctx.lineWidth = 2
+  ctx.stroke()
   ctx.beginPath()
-  ctx.arc(x, y, 2.5, 0, Math.PI * 2)
-  ctx.fillStyle = color
-  ctx.fill()
-
+  ctx.arc(x, y, 9, 0, Math.PI * 2)
+  ctx.stroke()
   ctx.restore()
 }

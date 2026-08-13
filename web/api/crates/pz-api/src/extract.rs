@@ -14,10 +14,34 @@ use crate::state::AppState;
 /// Cookie carrying the opaque session token.
 pub const SESSION_COOKIE: &str = "knox_session";
 
+/// Roles that may use `/admin`. Matches the UI's `ADMIN_ROLES`.
+const ADMIN_ROLES: &[&str] = &["admin", "super_admin", "moderator"];
+
 /// A signed-in user. Extracting this rejects the request with 401 when there
 /// is no valid session, so a handler that takes it is a handler that requires
 /// one.
 pub struct AuthUser(pub User);
+
+/// A staff member. 401 when nobody is signed in, 403 when they are not staff.
+#[allow(dead_code)]
+pub struct AdminUser(pub User);
+
+impl FromRequestParts<AppState> for AdminUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let AuthUser(user) = AuthUser::from_request_parts(parts, state).await?;
+
+        if !ADMIN_ROLES.contains(&user.role.as_str()) {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(Self(user))
+    }
+}
 
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = ApiError;

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
-use pz_bridge::lua::{DEATHS_FILE, Death, PLAYER_STATS_FILE, StatsPlayer};
+use pz_bridge::lua::{DEATHS_FILE, Death, LivePlayer, PLAYER_STATS_FILE, StatsPlayer};
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
@@ -19,6 +19,9 @@ const SAMPLE_RETENTION_DAYS: i32 = 30;
 /// plenty.
 const SESSION_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
 
+/// How often we check whether a timed ban should come off.
+const SANCTION_EXPIRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A player standing at the keyboard is waiting for this, so it runs often.
 const REGISTRATION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -30,7 +33,10 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(deaths_sync_loop(state.clone())),
         tokio::spawn(status_sample_loop(state.clone())),
         tokio::spawn(account_registration_loop(state.clone())),
-        tokio::spawn(session_cleanup_loop(state)),
+        tokio::spawn(ingame_report_loop(state.clone())),
+        tokio::spawn(ticket_desk_loop(state.clone())),
+        tokio::spawn(session_cleanup_loop(state.clone())),
+        tokio::spawn(sanction_expiry_loop(state)),
     ]
 }
 
@@ -50,6 +56,19 @@ async fn stats_sync_loop(state: AppState) {
 
     loop {
         ticker.tick().await;
+
+        // Last-known map pin. The live file is the only export that carries
+        // coordinates, and it goes empty the moment nobody is in getOnlinePlayers()
+        // — which on a dedicated server is not the same thing as nobody playing.
+        match bridge.players_live().await {
+            Ok(Some(read)) => {
+                if let Err(error) = sync_positions(&state.db, &read.data.players).await {
+                    tracing::warn!(%error, "failed to persist live positions");
+                }
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "live position export unreadable"),
+        }
 
         let modified_at = bridge.modified_at(PLAYER_STATS_FILE).await;
 
@@ -96,18 +115,19 @@ async fn sync_players(db: &PgPool, players: &[StatsPlayer]) -> Result<u64, sqlx:
             r#"
             INSERT INTO player_stats (
                 username, zombie_kills, hours_survived, profession,
-                skills, traits, vitals, is_dead, last_synced_at
+                skills, traits, vitals, appearance, is_dead, last_synced_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
             ON CONFLICT (username) DO UPDATE SET
                 zombie_kills   = EXCLUDED.zombie_kills,
                 hours_survived = EXCLUDED.hours_survived,
                 profession     = EXCLUDED.profession,
                 skills         = EXCLUDED.skills,
-                -- Older KnoxRelay builds omit these two. Keep what we already
+                -- Older KnoxRelay builds omit these. Keep what we already
                 -- know rather than overwriting it with nothing.
                 traits         = COALESCE(EXCLUDED.traits, player_stats.traits),
                 vitals         = COALESCE(EXCLUDED.vitals, player_stats.vitals),
+                appearance     = COALESCE(EXCLUDED.appearance, player_stats.appearance),
                 is_dead        = EXCLUDED.is_dead,
                 last_synced_at = now()
             "#,
@@ -119,6 +139,7 @@ async fn sync_players(db: &PgPool, players: &[StatsPlayer]) -> Result<u64, sqlx:
         .bind(serde_json::to_value(&player.skills).unwrap_or_default())
         .bind(player.traits.clone())
         .bind(player.vitals.clone())
+        .bind(player.appearance.clone())
         .bind(player.is_dead)
         .execute(db)
         .await?;
@@ -127,6 +148,31 @@ async fn sync_players(db: &PgPool, players: &[StatsPlayer]) -> Result<u64, sqlx:
     }
 
     Ok(synced)
+}
+
+/// Remember the last tile each online player was standing on.
+async fn sync_positions(db: &PgPool, players: &[LivePlayer]) -> Result<(), sqlx::Error> {
+    for player in players {
+        if player.username.is_empty() || player.username == "unknown" {
+            continue;
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE player_stats
+               SET x = $2, y = $3, z = $4
+             WHERE username = $1
+            "#,
+        )
+        .bind(&player.username)
+        .bind(player.x)
+        .bind(player.y)
+        .bind(player.z)
+        .execute(db)
+        .await?;
+    }
+
+    Ok(())
 }
 
 /// Answer the `/account register` commands players have run in game.
@@ -364,6 +410,194 @@ async fn account_registration_loop(state: AppState) {
     }
 }
 
+/// Answer `/report` commands the same way: file the ticket, write a result.
+async fn ingame_report_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(REGISTRATION_INTERVAL);
+    let channel = pz_bridge::ReportChannel::new(&state.config.lua_bridge_path);
+
+    loop {
+        ticker.tick().await;
+
+        let requests = match channel.requests().await {
+            Ok(requests) => requests.requests,
+            Err(error) => {
+                tracing::warn!(%error, "in-game report requests unreadable");
+                continue;
+            }
+        };
+
+        if requests.is_empty() {
+            continue;
+        }
+
+        let mut ledger = match channel.results().await {
+            Ok(ledger) => ledger,
+            Err(error) => {
+                tracing::error!(%error, "in-game report ledger unreadable; skipping this pass");
+                continue;
+            }
+        };
+
+        let answered: HashSet<String> = ledger
+            .results
+            .iter()
+            .map(|result| result.id.clone())
+            .collect();
+
+        let mut new_results = Vec::new();
+
+        for request in requests {
+            if answered.contains(&request.id) {
+                continue;
+            }
+
+            let status = match crate::services::reports::file_from_game(
+                &state.db,
+                &request.username,
+                &request.accused,
+                &request.body,
+            )
+            .await
+            {
+                Ok(status) => {
+                    if status.as_str() == "filed" {
+                        tracing::info!(
+                            author = %request.username,
+                            accused = %request.accused,
+                            "filed an in-game player report",
+                        );
+                        crate::services::reports::refresh_inbox(
+                            &state.db,
+                            &state.config.lua_bridge_path,
+                            &request.username,
+                        )
+                        .await;
+                    }
+                    status.as_str().to_owned()
+                }
+                Err(error) => {
+                    tracing::error!(%error, id = %request.id, "in-game report request failed");
+                    continue;
+                }
+            };
+
+            new_results.push(pz_bridge::ReportResult {
+                id: request.id,
+                username: request.username,
+                status,
+                at: Utc::now().to_rfc3339(),
+            });
+        }
+
+        if new_results.is_empty() {
+            continue;
+        }
+
+        ledger.results.extend(new_results);
+        ledger.updated_at = Utc::now().to_rfc3339();
+
+        if let Err(error) = channel.write_results(ledger).await {
+            tracing::error!(%error, "could not write the in-game report ledger");
+        }
+    }
+}
+
+/// Drain Desk outbox actions and keep `tickets_inbox.json` current.
+async fn ticket_desk_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(REGISTRATION_INTERVAL);
+    let channel = pz_bridge::ReportChannel::new(&state.config.lua_bridge_path);
+    crate::services::reports::rebuild_inbox(&state.db, &state.config.lua_bridge_path).await;
+
+    loop {
+        ticker.tick().await;
+
+        let mut box_ = match channel.outbox().await {
+            Ok(box_) => box_,
+            Err(error) => {
+                tracing::warn!(%error, "ticket outbox unreadable");
+                continue;
+            }
+        };
+
+        if box_.requests.is_empty() {
+            continue;
+        }
+
+        let pending = std::mem::take(&mut box_.requests);
+        let mut leftover = Vec::new();
+        let mut touched: HashSet<String> = HashSet::new();
+
+        for request in pending {
+            let username = request.username.clone();
+            let outcome = match request.action.as_str() {
+                "reply" => {
+                    let Some(report_id) = request.report_id else {
+                        continue;
+                    };
+                    crate::services::reports::add_player_message_from_game(
+                        &state.db,
+                        &username,
+                        report_id,
+                        request.body.as_deref().unwrap_or(""),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+                }
+                "create" => crate::services::reports::create_from_desk(
+                    &state.db,
+                    &username,
+                    request.kind.as_deref().unwrap_or("support"),
+                    request.subject.as_deref().unwrap_or(""),
+                    request.body.as_deref().unwrap_or(""),
+                    request.accused.as_deref(),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+                "read" => {
+                    if let Some(report_id) = request.report_id {
+                        crate::services::reports::mark_read_from_game(
+                            &state.db,
+                            &username,
+                            report_id,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => Ok(()),
+            };
+
+            match outcome {
+                Ok(()) => {
+                    touched.insert(username);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, id = %request.id, "ticket outbox action failed");
+                    leftover.push(request);
+                }
+            }
+        }
+
+        box_.requests = leftover;
+        if let Err(error) = channel.write_outbox(box_).await {
+            tracing::error!(%error, "could not rewrite the ticket outbox");
+        }
+
+        for username in touched {
+            crate::services::reports::refresh_inbox(
+                &state.db,
+                &state.config.lua_bridge_path,
+                &username,
+            )
+            .await;
+        }
+    }
+}
+
 /// Record how many players were online, for the population graph.
 async fn status_sample_loop(state: AppState) {
     let mut ticker = tokio::time::interval(state.config.status_sample_interval);
@@ -426,6 +660,20 @@ async fn session_cleanup_loop(state: AppState) {
             Ok(0) => {}
             Ok(removed) => tracing::info!(codes = removed, "pruned expired registration codes"),
             Err(error) => tracing::error!(%error, "failed to prune expired registration codes"),
+        }
+    }
+}
+
+async fn sanction_expiry_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(SANCTION_EXPIRY_INTERVAL);
+
+    loop {
+        ticker.tick().await;
+
+        match crate::services::sanctions::expire_due(&state).await {
+            Ok(0) => {}
+            Ok(lifted) => tracing::info!(lifted, "lifted expired suspensions"),
+            Err(error) => tracing::error!(%error, "failed to expire suspensions"),
         }
     }
 }

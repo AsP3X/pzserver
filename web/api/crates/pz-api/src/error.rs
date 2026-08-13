@@ -15,6 +15,10 @@ pub enum ApiError {
     #[error("authentication required")]
     Unauthorized,
 
+    /// Signed in, but not staff.
+    #[error("you do not have access to this")]
+    Forbidden,
+
     /// Input failed a rule. The message is shown to the user, so it must read
     /// like a sentence and never leak internals.
     #[error("{0}")]
@@ -57,6 +61,7 @@ impl ApiError {
     fn status(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Forbidden => StatusCode::FORBIDDEN,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
@@ -68,6 +73,7 @@ impl ApiError {
     fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "unauthorized",
+            Self::Forbidden => "forbidden",
             Self::Validation(_) => "validation_failed",
             Self::Conflict { .. } => "conflict",
             Self::TooManyRequests => "too_many_requests",

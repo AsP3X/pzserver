@@ -22,6 +22,8 @@ pub struct Character {
     pub traits: Option<Value>,
     /// `{ health, bleeding_parts, infected, has_cold }`.
     pub vitals: Option<Value>,
+    /// Hair, skin and hat as the mod last reported them.
+    pub appearance: Option<Value>,
 
     pub is_dead: bool,
 
@@ -47,13 +49,14 @@ pub async fn for_username(db: &PgPool, username: &str) -> Result<Option<Characte
                    skills,
                    traits,
                    vitals,
+                   appearance,
                    is_dead,
                    last_synced_at,
                    rank() OVER (ORDER BY zombie_kills DESC)::bigint AS rank
             FROM player_stats
         )
         SELECT username, zombie_kills, hours_survived, profession, skills, traits,
-               vitals, is_dead, last_synced_at, rank
+               vitals, appearance, is_dead, last_synced_at, rank
         FROM ranked
         WHERE lower(username) = lower($1)
         "#,
@@ -61,6 +64,36 @@ pub async fn for_username(db: &PgPool, username: &str) -> Result<Option<Characte
     .bind(username)
     .fetch_optional(db)
     .await
+}
+
+/// Last tile the live roster reported for this character, if any.
+#[derive(Debug, Clone, Copy)]
+pub struct LastPosition {
+    pub x: f64,
+    pub y: f64,
+    pub z: i32,
+}
+
+pub async fn last_position(db: &PgPool, username: &str) -> Result<Option<LastPosition>, sqlx::Error> {
+    sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<i32>)>(
+        r#"
+        SELECT x, y, z
+        FROM player_stats
+        WHERE lower(username) = lower($1)
+        "#,
+    )
+    .bind(username)
+    .fetch_optional(db)
+    .await
+    .map(|row| {
+        row.and_then(|(x, y, z)| {
+            Some(LastPosition {
+                x: x?,
+                y: y?,
+                z: z.unwrap_or(0),
+            })
+        })
+    })
 }
 
 /// Whether a name appears in the current online roster.

@@ -59,7 +59,8 @@ services:
       # keeps them that way.
       - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
       # server.ini, for map name and player cap.
-      - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data:ro
+      # Writable: staff edit server.ini from the new admin panel.
+      - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
     environment:
       API_BIND: 0.0.0.0:8080
       DATABASE_URL: postgres://${WEB_DB_USERNAME:-knox}:${WEB_DB_PASSWORD:-knox}@web-db:5432/${WEB_DB_DATABASE:-knox}
@@ -93,6 +94,9 @@ services:
       - no-new-privileges:true
     read_only: true
     networks:
+      # proxy-network is the non-internal edge: Steam Workshop lookup has to
+      # leave the box. pzserver-internal is how this talks to web-db and RCON.
+      - proxy-network
       - pzserver-internal
 
   # ---------------------------------------------------------------------------

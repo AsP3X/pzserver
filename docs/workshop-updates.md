@@ -2,10 +2,15 @@
 
 Knox Relay is published as Workshop item **3777446787**. Production servers load
 it from the Workshop (`PZ_WORKSHOP_IDS` / `PZ_BRIDGE_WORKSHOP_ID` in `.env`), not
-from the copy in this repo — so a Lua change is not deployed until it has been
-uploaded to Steam and the game server has restarted.
+from the copy in this repo — so a Lua change is not deployed until the running
+server is on that same version.
 
-## The three copies of the mod
+**Version lock:** when the mod is updated, the local dedicated server must be
+put on that same build in the same sitting. Source, the published Workshop item,
+and `game_state.json` `mod_version` must agree. Packaging without recreating
+`game-server` is unfinished work. See `AGENTS.md`.
+
+## The four copies of the mod
 
 Knowing which copy you are looking at prevents most of the confusion here.
 
@@ -14,6 +19,7 @@ Knowing which copy you are looking at prevents most of the confusion here.
 | **Source** | `game-server/mods/KnoxRelay/42/` | The only copy you edit. Tracked in git. |
 | **Staging** | `workshop/KnoxRelay/` | Upload-shaped tree, rebuilt by `make workshop-package`. Tracked in git. |
 | **Upload folder** | `~/Zomboid/Workshop/KnoxRelay/` | What the in-game uploader reads. **Not** in git, and it holds settings the staging copy does not. |
+| **Live server** | Steam Workshop cache inside the game container (seeded from `/opt/knox-relay` in the image) | What PZ actually executes. Must match source. |
 
 ## Update flow
 
@@ -88,15 +94,27 @@ Two things to know before choosing this route:
 - `contentfolder` and `previewfile` are relative paths, so run steamcmd from
   `workshop/` or make them absolute first.
 
-### 6. Deploy to the server
+### 6. Deploy to the server (required, same version)
 
-`configure-server.sh` runs `steamcmd +workshop_download_item` for every ID in
-`WorkshopItems=` on each container start, so the server picks up the new version
-on a restart and not before:
+A restart alone is not enough. SteamCMD downloads the **last published** Workshop
+build into the cache. If that build is older than the source you just packaged,
+the server silently downgrades unless the **game-server image** still stages a
+newer `/opt/knox-relay` and `configure-server.sh` seeds it.
+
+Rebuild the image (so the seed is the new version) and recreate the container:
 
 ```bash
-make restart
+docker compose -f docker-compose.yml -f docker-compose.amd64.yml build game-server
+docker compose -f docker-compose.yml -f docker-compose.amd64.yml up -d game-server
 ```
+
+On ARM64 use `docker-compose.arm64.yml`. `make restart` does not rebuild the image.
+
+Then confirm the live version, not just the files on disk:
+
+- Boot log: `[configure-server] Seeded Knox Relay X.Y` or `Keeping installed Knox Relay X.Y`
+- Boot log: `[KnoxRelay] Initializing server-side bridge mod vX.Y`
+- `data/zomboid/Lua/game_state.json` → `"mod_version":"X.Y"`
 
 > Until 2026-08-13 this only ran for IDs whose directory was **missing**, so an
 > already-downloaded mod was pinned to whatever version arrived first and a
@@ -117,11 +135,12 @@ Two things lag behind the restart:
 
 ```
 [ ] luajit syntax check passes
-[ ] modversion bumped, changenote written
+[ ] modversion bumped in both mod.info and KR_Bridge.VERSION, changenote written
 [ ] make workshop-package
 [ ] rsync Contents/ only — workshop.txt left alone
 [ ] published (in-game uploader or steamcmd)
-[ ] make restart, mod version confirmed in the logs
+[ ] game-server image rebuilt and container recreated (not just restarted)
+[ ] live server confirmed: boot log + game_state.json mod_version match the bump
 [ ] staging changes committed
 ```
 

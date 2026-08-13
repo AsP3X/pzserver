@@ -2,18 +2,19 @@
 
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use pz_bridge::{InventoryReader, InventorySnapshot, PlayerVitals, VitalsReader};
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::AuthUser;
 use crate::services::character::{self, Character};
+use crate::services::reports;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -22,6 +23,10 @@ pub fn routes() -> Router<AppState> {
         .route("/me/inventory", get(my_inventory))
         .route("/me/inventory/refresh", post(refresh_inventory))
         .route("/me/position", get(my_position))
+        .route("/me/reports", get(my_reports).post(file_report))
+        .route("/me/reports/{id}", get(my_report))
+        .route("/me/reports/{id}/messages", post(reply_report))
+        .route("/me/reports/{id}/read", post(read_report))
 }
 
 #[derive(Serialize)]
@@ -187,7 +192,7 @@ async fn my_position(
         }
     };
 
-    let position = read.as_ref().and_then(|read| {
+    let live = read.as_ref().and_then(|read| {
         read.data
             .players
             .iter()
@@ -198,6 +203,17 @@ async fn my_position(
                 z: player.z,
             })
     });
+
+    let position = match live {
+        Some(position) => Some(position),
+        None => character::last_position(&state.db, username)
+            .await?
+            .map(|last| Position {
+                x: last.x,
+                y: last.y,
+                z: last.z,
+            }),
+    };
 
     Ok(Json(PositionResponse {
         reported_at: position
@@ -239,4 +255,73 @@ async fn refresh_inventory(
 
     // Accepted, not done: the mod writes the file on its next tick.
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn my_reports(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<Vec<reports::Report>>> {
+    Ok(Json(reports::list_mine(&state.db, user.id).await?))
+}
+
+#[derive(Deserialize)]
+struct NewReport {
+    kind: String,
+    subject: String,
+    body: String,
+    accused: Option<String>,
+}
+
+async fn file_report(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(body): Json<NewReport>,
+) -> Result<(StatusCode, Json<reports::Report>), ApiError> {
+    let report = reports::create(
+        &state.db,
+        user.id,
+        &body.kind,
+        &body.subject,
+        &body.body,
+        body.accused.as_deref(),
+    )
+    .await?;
+
+    reports::refresh_inbox(&state.db, &state.config.lua_bridge_path, &user.username).await;
+
+    Ok((StatusCode::CREATED, Json(report)))
+}
+
+async fn my_report(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<reports::Report>> {
+    Ok(Json(reports::get_mine(&state.db, user.id, id).await?))
+}
+
+#[derive(Deserialize)]
+struct ReplyBody {
+    body: String,
+}
+
+async fn reply_report(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<i64>,
+    Json(body): Json<ReplyBody>,
+) -> ApiResult<Json<reports::Report>> {
+    let report = reports::add_player_message(&state.db, user.id, id, &body.body).await?;
+    reports::refresh_inbox(&state.db, &state.config.lua_bridge_path, &user.username).await;
+    Ok(Json(report))
+}
+
+async fn read_report(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<reports::Report>> {
+    let report = reports::mark_read(&state.db, user.id, id).await?;
+    reports::refresh_inbox(&state.db, &state.config.lua_bridge_path, &user.username).await;
+    Ok(Json(report))
 }

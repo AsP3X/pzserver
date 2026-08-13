@@ -101,7 +101,7 @@ export const PLAYER_NAV: NavGroup[] = [
   {
     label: 'nav.group.account',
     items: [
-      { to: '/me/reports', label: 'nav.reports', icon: LifeBuoy, planned: true },
+      { to: '/me/reports', label: 'nav.reports', icon: LifeBuoy },
       { to: '/me/settings', label: 'nav.settings', icon: Settings },
     ],
   },
@@ -125,23 +125,23 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     label: 'nav.group.server',
     items: [
-      { to: '/admin/config', label: 'nav.config', icon: Wrench, planned: true },
-      { to: '/admin/mods', label: 'nav.mods', icon: Package, planned: true },
+      { to: '/admin/config', label: 'nav.config', icon: Wrench },
+      { to: '/admin/mods', label: 'nav.mods', icon: Package },
       { to: '/admin/backups', label: 'nav.backups', icon: Archive, planned: true },
       { to: '/admin/restarts', label: 'nav.auto_restart', icon: Activity, planned: true },
-      { to: '/admin/console', label: 'nav.rcon_console', icon: Terminal, planned: true },
-      { to: '/admin/logs', label: 'nav.server_logs', icon: ScrollText, planned: true },
-      { to: '/admin/bridge', label: 'nav.bridge', icon: Link2, planned: true },
+      { to: '/admin/console', label: 'nav.rcon_console', icon: Terminal },
+      { to: '/admin/logs', label: 'nav.server_logs', icon: ScrollText },
+      { to: '/admin/bridge', label: 'nav.bridge', icon: Link2 },
     ],
   },
   {
     label: 'nav.group.players',
     items: [
-      { to: '/admin/players', label: 'nav.players', icon: Users, planned: true },
-      { to: '/admin/players/map', label: 'nav.player_map', icon: MapPin, planned: true },
-      { to: '/admin/moderation', label: 'nav.moderation', icon: Crosshair, planned: true },
-      { to: '/admin/whitelist', label: 'nav.whitelist', icon: Shield, planned: true },
-      { to: '/admin/reports', label: 'nav.reports', icon: LifeBuoy, planned: true },
+      { to: '/admin/players', label: 'nav.players', icon: Users },
+      { to: '/admin/players/map', label: 'nav.player_map', icon: MapPin },
+      { to: '/admin/moderation', label: 'nav.moderation', icon: Crosshair },
+      { to: '/admin/whitelist', label: 'nav.whitelist', icon: Shield },
+      { to: '/admin/reports', label: 'nav.reports', icon: LifeBuoy },
     ],
   },
   {
@@ -172,7 +172,7 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     label: 'nav.group.system',
     items: [
-      { to: '/admin/site', label: 'nav.site_settings', icon: Sliders, planned: true },
+      { to: '/admin/site', label: 'nav.site_settings', icon: Sliders },
       { to: '/admin/translations', label: 'nav.translations', icon: Languages, planned: true },
       { to: '/admin/audit', label: 'nav.audit_log', icon: ScrollText, planned: true },
     ],

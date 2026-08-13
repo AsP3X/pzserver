@@ -52,7 +52,7 @@ export function AppShell({ surface, groups, children }: AppShellProps) {
   }, [drawerOpen])
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    <div className="flex h-dvh flex-col lg:flex-row">
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-100 focus:bg-hazard focus:px-4 focus:py-2 focus:font-mono focus:text-xs focus:text-void focus:uppercase"
@@ -94,7 +94,7 @@ export function AppShell({ surface, groups, children }: AppShellProps) {
         id="surface-nav"
         aria-label={surface}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-fence bg-ash transition-transform lg:sticky lg:top-0 lg:h-screen lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-fence bg-ash transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0',
           drawerOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
@@ -168,8 +168,8 @@ export function AppShell({ surface, groups, children }: AppShellProps) {
         <SidebarFooter />
       </nav>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <main id="main" className="flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <main id="main" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {children}
         </main>
       </div>

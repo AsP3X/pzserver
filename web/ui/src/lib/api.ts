@@ -6,7 +6,11 @@
  * unless VITE_API_BASE_URL points somewhere else.
  */
 
+import type { PlayerLook } from '@/lib/player-look'
+
 const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+
+export type { PlayerLook }
 
 export type GameState = 'offline' | 'starting' | 'online'
 
@@ -144,6 +148,7 @@ export interface Character {
   /** Absent on KnoxRelay builds older than 1.3. */
   traits: CharacterTrait[] | null
   vitals: CharacterVitals | null
+  appearance: PlayerLook | null
   is_dead: boolean
   rank: number
   last_synced_at: string
@@ -423,6 +428,191 @@ function post<T>(path: string, body: unknown): Promise<T> {
   })
 }
 
+function patch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+function del<T>(path: string): Promise<T> {
+  return request<T>(path, { method: 'DELETE' })
+}
+
+export interface AdminPlayer {
+  username: string
+  online: boolean
+  is_dead: boolean
+  zombie_kills: number
+  hours_survived: number
+  profession: string | null
+  /** Overall body health 0–100, when the mod has written vitals. */
+  health: number | null
+  appearance: PlayerLook | null
+  last_seen_at: string | null
+  x: number | null
+  y: number | null
+  z: number | null
+  sanction: PlayerSanction | null
+}
+
+export interface PlayerSanction {
+  kind: 'suspend' | 'ban' | string
+  expires_at: string | null
+  reason: string | null
+}
+
+export interface CommandReply {
+  output: string
+}
+
+export type AdminEventType = 'death' | 'pvp_kill'
+
+export interface AdminEvent {
+  id: number
+  event_type: AdminEventType | string
+  player: string
+  target: string | null
+  subject: string
+  cause: string | null
+  weapon: string | null
+  x: number | null
+  y: number | null
+  z: number | null
+  world_time: string | null
+  occurred_at: string
+}
+
+export interface AdminEventLog {
+  events: AdminEvent[]
+  totals: {
+    deaths: number
+    pvp_kills: number
+    last_24h: number
+  }
+}
+
+export interface AdminEventsQuery {
+  types?: AdminEventType[]
+  from?: string
+  to?: string
+  limit?: number
+}
+
+export interface Sanction {
+  id: number
+  username: string
+  reason: string | null
+  duration_seconds: number | null
+  starts_at: string
+  expires_at: string | null
+  lifted_at: string | null
+  lifted_reason: string | null
+}
+
+export interface SanctionList {
+  active: Sanction[]
+  recent: Sanction[]
+}
+
+export type ReportKind = 'report' | 'support'
+export type ReportStatus = 'open' | 'investigating' | 'resolved' | 'rejected'
+
+export interface ReportMessage {
+  id: number
+  report_id: number
+  author_role: 'player' | 'staff' | string
+  author: string
+  body: string
+  created_at: string
+}
+
+export interface PlayerReport {
+  id: number
+  kind: ReportKind | string
+  subject: string
+  body: string
+  accused: string | null
+  status: ReportStatus | string
+  resolution: string | null
+  author: string
+  handler: string | null
+  created_at: string
+  handled_at: string | null
+  unread: boolean
+  last_message_preview: string | null
+  last_message_at: string | null
+  messages: ReportMessage[]
+}
+
+export interface ReportQueue {
+  reports: PlayerReport[]
+  open_count: number
+}
+
+export interface ConfigField {
+  key: string
+  value: string
+  secret: boolean
+}
+
+export interface ServerConfig {
+  fields: ConfigField[]
+  missing: boolean
+}
+
+export interface ModEntry {
+  workshop_id: string
+  mod_id: string
+  protected: boolean
+}
+
+export interface WorkshopLookup {
+  workshop_id: string
+  found: boolean
+  title: string
+  preview_url: string | null
+  mod_ids: string[]
+  map_folders: string[]
+}
+
+export type BridgeFileStatus = 'fresh' | 'idle' | 'stale' | 'absent'
+
+export interface BridgeFile {
+  name: string
+  present: boolean
+  stale: boolean
+  status: BridgeFileStatus
+  reason: string
+  modified_at: string | null
+}
+
+export interface BridgeHealth {
+  files: BridgeFile[]
+  directory: string
+  world_paused: boolean
+  world_fresh: boolean
+}
+
+export interface ContainerLogs {
+  container: string
+  lines: string[]
+}
+
+export interface SiteUpdate {
+  site_name?: string
+  hero_badge?: string
+  hero_title?: string
+  hero_subtitle?: string
+  hero_description?: string
+  hero_cta_label?: string
+  footer_text?: string
+  connect_host?: string
+  connect_port?: number
+  discord_url?: string
+}
+
 export const api = {
   serverStatus: () => request<ServerStatus>('/api/v1/server/status'),
 
@@ -457,6 +647,16 @@ export const api = {
 
   refreshInventory: () => post<void>('/api/v1/me/inventory/refresh', {}),
 
+  myReports: () => request<PlayerReport[]>('/api/v1/me/reports'),
+
+  fileReport: (input: { kind: ReportKind; subject: string; body: string; accused?: string }) =>
+    post<PlayerReport>('/api/v1/me/reports', input),
+
+  replyMyReport: (id: number, body: string) =>
+    post<PlayerReport>(`/api/v1/me/reports/${id}/messages`, { body }),
+
+  readMyReport: (id: number) => post<PlayerReport>(`/api/v1/me/reports/${id}/read`, {}),
+
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),
 
@@ -466,4 +666,135 @@ export const api = {
 
   changePassword: (input: ChangePasswordInput) =>
     post<void>('/api/v1/auth/password', input),
+
+  adminPlayers: () => request<AdminPlayer[]>('/api/v1/admin/players'),
+
+  adminKick: (username: string, reason?: string) =>
+    post<CommandReply>(`/api/v1/admin/players/${encodeURIComponent(username)}/kick`, {
+      reason,
+    }),
+
+  adminBan: (username: string, reason?: string) =>
+    post<Sanction>(`/api/v1/admin/players/${encodeURIComponent(username)}/ban`, {
+      reason,
+    }),
+
+  adminUnban: (username: string) =>
+    post<CommandReply>(`/api/v1/admin/players/${encodeURIComponent(username)}/unban`, {}),
+
+  adminSuspend: (username: string, durationSeconds: number, reason?: string) =>
+    post<Sanction>(`/api/v1/admin/players/${encodeURIComponent(username)}/suspend`, {
+      duration_seconds: durationSeconds,
+      reason,
+    }),
+
+  adminSanctions: () => request<SanctionList>('/api/v1/admin/sanctions'),
+
+  adminAccess: (username: string, level: string) =>
+    post<CommandReply>(`/api/v1/admin/players/${encodeURIComponent(username)}/access`, {
+      level,
+    }),
+
+  adminTeleport: (username: string, x: number, y: number, z = 0) =>
+    post<CommandReply>(`/api/v1/admin/players/${encodeURIComponent(username)}/teleport`, {
+      x,
+      y,
+      z,
+    }),
+
+  adminInventory: (username: string) =>
+    request<InventorySnapshot | null>(
+      `/api/v1/admin/players/${encodeURIComponent(username)}/inventory`,
+    ),
+
+  adminStart: () => post<CommandReply>('/api/v1/admin/server/start', {}),
+
+  adminStop: (message?: string) =>
+    post<CommandReply>('/api/v1/admin/server/stop', { message }),
+
+  adminRestart: (message?: string) =>
+    post<CommandReply>('/api/v1/admin/server/restart', { message }),
+
+  adminSave: () => post<CommandReply>('/api/v1/admin/server/save', {}),
+
+  adminBroadcast: (message: string) =>
+    post<CommandReply>('/api/v1/admin/broadcast', { message }),
+
+  adminConsole: (command: string) =>
+    post<CommandReply>('/api/v1/admin/console', { command }),
+
+  adminConfig: () => request<ServerConfig>('/api/v1/admin/config'),
+
+  adminUpdateConfig: (updates: Record<string, string>) =>
+    patch<ServerConfig>('/api/v1/admin/config', { updates }),
+
+  adminMods: () => request<ModEntry[]>('/api/v1/admin/mods'),
+
+  adminAddMod: (workshopId: string, modId: string, mapFolder?: string) =>
+    post<ModEntry[]>('/api/v1/admin/mods', {
+      workshop_id: workshopId,
+      mod_id: modId,
+      map_folder: mapFolder,
+    }),
+
+  adminLookupMod: (workshopId: string) =>
+    post<WorkshopLookup>('/api/v1/admin/mods/lookup', { workshop_id: workshopId }),
+
+  adminReorderMods: (mods: ModEntry[]) =>
+    request<ModEntry[]>('/api/v1/admin/mods/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mods }),
+    }),
+
+  adminImportMods: (input: {
+    workshop_ids: string[]
+    mod_ids: string[]
+    map_folders?: string[]
+  }) => post<ModEntry[]>('/api/v1/admin/mods/import', input),
+
+  adminRemoveMod: (workshopId: string) =>
+    del<ModEntry[]>(`/api/v1/admin/mods/${encodeURIComponent(workshopId)}`),
+
+  adminSetOpen: (open: boolean) =>
+    patch<ServerConfig>('/api/v1/admin/whitelist', { open }),
+
+  adminWhitelistAdd: (username: string) =>
+    post<CommandReply>(`/api/v1/admin/whitelist/${encodeURIComponent(username)}`, {}),
+
+  adminWhitelistRemove: (username: string) =>
+    del<CommandReply>(`/api/v1/admin/whitelist/${encodeURIComponent(username)}`),
+
+  adminBridge: () => request<BridgeHealth>('/api/v1/admin/bridge'),
+
+  adminLogs: (tail = 200) =>
+    request<ContainerLogs>(`/api/v1/admin/logs?tail=${tail}`),
+
+  adminEvents: (query: AdminEventsQuery = {}) => {
+    const params = new URLSearchParams()
+    if (query.types && query.types.length > 0) {
+      params.set('types', query.types.join(','))
+    }
+    if (query.from) {
+      params.set('from', query.from)
+    }
+    if (query.to) {
+      params.set('to', query.to)
+    }
+    params.set('limit', String(query.limit ?? 200))
+    return request<AdminEventLog>(`/api/v1/admin/events?${params}`)
+  },
+
+  adminSite: () => request<SiteSettings>('/api/v1/admin/site'),
+
+  adminUpdateSite: (input: SiteUpdate) =>
+    patch<SiteSettings>('/api/v1/admin/site', input),
+
+  adminReports: () => request<ReportQueue>('/api/v1/admin/reports'),
+
+  adminHandleReport: (id: number, status: ReportStatus, resolution?: string) =>
+    patch<PlayerReport>(`/api/v1/admin/reports/${id}`, {
+      status,
+      resolution,
+    }),
 }

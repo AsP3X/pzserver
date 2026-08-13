@@ -142,12 +142,31 @@ check("and sends nothing", #sent == 0, #sent)
 check("and shows the usage", (halos[1] or ""):find("register") ~= nil, halos[1])
 
 -- Anything else falls through untouched
-for _, text in ipairs({ "/help", "hello everyone", "/accountant", "/safehouse" }) do
+for _, text in ipairs({ "/help", "hello everyone", "/accountant", "/safehouse", "/reporter" }) do
     sent, vanillaCalls = {}, 0
     enter(text)
     check("passed through: [" .. text .. "]", vanillaCalls == 1 and #sent == 0,
         "sent=" .. #sent .. " vanilla=" .. vanillaCalls)
 end
+
+-- /report Name details
+sent, halos, vanillaCalls = {}, {}, 0
+enter("/report pike he raided my base during safe hours")
+check("a report command is sent", #sent == 1, #sent)
+check("as playerReport", sent[1] and sent[1].command == "playerReport")
+check("the accused is the first word", sent[1] and sent[1].args.accused == "pike", sent[1] and sent[1].args.accused)
+check("the body is the rest", sent[1] and sent[1].args.body == "he raided my base during safe hours", sent[1] and sent[1].args.body)
+check("vanilla never sees a report", vanillaCalls == 0, vanillaCalls)
+
+sent, halos, vanillaCalls = {}, {}, 0
+enter("/report")
+check("a bare /report is consumed", vanillaCalls == 0)
+check("and shows the usage", (halos[1] or ""):find("Usage") ~= nil, halos[1])
+
+sent, halos, vanillaCalls = {}, {}, 0
+enter("/report pike")
+check("a report without detail is consumed", vanillaCalls == 0)
+check("and does not send", #sent == 0, #sent)
 
 --------------------------------------------------------------------------
 -- The answer coming back
@@ -171,6 +190,14 @@ check("a timeout is shown", (halos[1] or ""):find("did not answer") ~= nil, halo
 halos = {}
 fire("OnServerCommand", "SomeOtherMod", "accountReply", { status = "issued", code = "XXXXXX" })
 check("another mod's command is ignored", #halos == 0, halos[1])
+
+halos = {}
+fire("OnServerCommand", "KnoxRelay", "reportReply", { status = "filed" })
+check("a filed report is confirmed", (halos[1] or ""):find("sent") ~= nil, halos[1])
+
+halos = {}
+fire("OnServerCommand", "KnoxRelay", "reportReply", { status = "self" })
+check("a self-report is refused", (halos[1] or ""):find("yourself") ~= nil, halos[1])
 
 --------------------------------------------------------------------------
 -- A chat box rebuilt later must be re-patched

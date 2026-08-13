@@ -141,6 +141,11 @@ end
 
 function KR_Obituary.init()
     queued = {}
+    -- An empty ledger is still a ledger: the panel should see a file, not a
+    -- missing one, on a server nobody has died on yet.
+    if not Bridge.readJson(FILE) then
+        Bridge.writeJson(FILE, { deaths = {} })
+    end
     print(LOG .. "Obituary: initialized")
 end
 

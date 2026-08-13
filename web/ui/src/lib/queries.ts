@@ -111,3 +111,83 @@ export const siteQuery = (locale: string) =>
     // Copy changes when an admin edits it, which is rare.
     staleTime: 10 * 60_000,
   })
+
+export const adminPlayersQuery = queryOptions({
+  queryKey: ['admin', 'players'],
+  queryFn: api.adminPlayers,
+  refetchInterval: 10_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
+export const adminConfigQuery = queryOptions({
+  queryKey: ['admin', 'config'],
+  queryFn: api.adminConfig,
+  staleTime: 15_000,
+})
+
+export const adminModsQuery = queryOptions({
+  queryKey: ['admin', 'mods'],
+  queryFn: api.adminMods,
+  staleTime: 15_000,
+})
+
+export const adminBridgeQuery = queryOptions({
+  queryKey: ['admin', 'bridge'],
+  queryFn: api.adminBridge,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
+export const adminLogsQuery = (tail: number) =>
+  queryOptions({
+    queryKey: ['admin', 'logs', tail],
+    queryFn: () => api.adminLogs(tail),
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
+    staleTime: 2_000,
+  })
+
+export const adminSanctionsQuery = queryOptions({
+  queryKey: ['admin', 'sanctions'],
+  queryFn: api.adminSanctions,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
+export const adminEventsQuery = (input: {
+  types: Array<'death' | 'pvp_kill'>
+  from?: string
+  to?: string
+}) =>
+  queryOptions({
+    queryKey: ['admin', 'events', input],
+    queryFn: () => api.adminEvents(input),
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+    staleTime: 5_000,
+  })
+
+export const adminSiteQuery = queryOptions({
+  queryKey: ['admin', 'site'],
+  queryFn: api.adminSite,
+  staleTime: 30_000,
+})
+
+export const adminReportsQuery = queryOptions({
+  queryKey: ['admin', 'reports'],
+  queryFn: api.adminReports,
+  refetchInterval: 20_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
+export const myReportsQuery = queryOptions({
+  queryKey: ['me', 'reports'],
+  queryFn: api.myReports,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})

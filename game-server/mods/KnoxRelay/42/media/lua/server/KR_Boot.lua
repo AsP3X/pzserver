@@ -40,6 +40,8 @@ local Conductor = require("KR_Conductor")
 local Garage = require("KR_Garage")
 local Vitals = require("KR_Vitals")
 local Enrol = require("KR_Enrol")
+local Report = require("KR_Report")
+local Tickets = require("KR_Tickets")
 
 local LOG = "[KnoxRelay] "
 
@@ -55,6 +57,12 @@ local HOLDINGS_TICKS = 48
 --- this is what keeps it to a file write rather than a busy loop.
 local WORLD_SECONDS = 10
 
+--- Live roster files ride EveryOneMinute / EveryTenMinutes, which freeze
+--- when PauseEmpty pauses an empty server. Rewrite them on the real-time
+--- hook too so the panel can tell "nobody here" from "the mod is dead".
+local BEACON_SECONDS = 30
+local PROGRESS_SECONDS = 60
+
 --- How many recently learned recipes to keep per character. The list rides in
 --- the player's modData and ships in every heartbeat, so it stays short.
 local RECIPE_HISTORY = 20
@@ -65,6 +73,8 @@ local sincePosition = 0
 local sinceVitals = 0
 local sinceHoldings = 0
 local lastWorldExport = 0
+local lastBeaconExport = 0
+local lastProgressExport = 0
 local framesSinceWorld = 0
 
 --- Roughly WORLD_SECONDS of frames, for when os.time is unavailable. Erring
@@ -97,6 +107,19 @@ local function exportWorld()
     World.export()
 end
 
+--- Throttle a wall-clock export. Returns true when it is time to write.
+local function due(last, seconds)
+    local gotTime, now = pcall(os.time)
+    if not (gotTime and type(now) == "number") then
+        return false, last
+    end
+    if (now - last) < seconds then
+        return false, last
+    end
+
+    return true, now
+end
+
 --- A player joined or spawned.
 --- Unreliable on dedicated servers, so nothing critical hangs off it; death
 --- and respawn handling lives on the tick instead.
@@ -118,6 +141,8 @@ local function onEveryOneMinute()
     -- Every tick, not on a divisor: a player is standing in game waiting to be
     -- shown a code, and the panel aims to answer inside five seconds.
     Enrol.poll()
+    Report.poll()
+    Tickets.poll()
 
     sinceDelivery = sinceDelivery + 1
     if sinceDelivery >= DELIVERY_TICKS then
@@ -172,6 +197,18 @@ end
 --- PauseEmpty=true. exportWorld() throttles it to a write every WORLD_SECONDS.
 local function onTickEvenPaused()
     exportWorld()
+
+    local beaconDue
+    beaconDue, lastBeaconExport = due(lastBeaconExport, BEACON_SECONDS)
+    if beaconDue then
+        Beacon.export()
+    end
+
+    local progressDue
+    progressDue, lastProgressExport = due(lastProgressExport, PROGRESS_SECONDS)
+    if progressDue then
+        Progress.export()
+    end
 end
 
 --- Remember a recipe the moment it is learned.
@@ -237,6 +274,11 @@ local function onServerStarted()
         print(LOG .. "Exported initial game state")
     end
 
+    Beacon.export()
+    Progress.export()
+    Enrol.seed()
+    Report.seed()
+    Tickets.seed()
     Holdings.export()
 
     local ok, count = pcall(Catalog.export)
@@ -254,10 +296,15 @@ Events.EveryTenMinutes.Add(onEveryTenMinutes)
 Events.EveryOneMinute.Add(onEveryOneMinute)
 Events.OnServerStarted.Add(onServerStarted)
 Events.OnClientCommand.Add(Enrol.onClientCommand)
+Events.OnClientCommand.Add(Report.onClientCommand)
+Events.OnClientCommand.Add(Tickets.onClientCommand)
 
 -- Optional: without it a player who disconnects mid-registration leaves an
 -- entry that poll() drops on the answer timeout anyway.
-local disconnectHooked = pcall(function() Events.OnPlayerDisconnect.Add(Enrol.forget) end)
+local disconnectHooked = pcall(function()
+    Events.OnPlayerDisconnect.Add(Enrol.forget)
+    Events.OnPlayerDisconnect.Add(Report.forget)
+end)
 
 -- No vanilla Lua subscribes to OnTickEvenPaused, so treat it as optional: an
 -- indexing error here would take the whole mod down with it, and everything
@@ -268,7 +315,7 @@ local tickHooked = pcall(function() Events.OnTickEvenPaused.Add(onTickEvenPaused
 -- everything else; only the recently-learned-recipes panel stays empty.
 local recipeHooked = pcall(function() Events.OnRecipeLearned.Add(onRecipeLearned) end)
 
-print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, OnClientCommand, MoneyDeposit"
+print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, OnClientCommand(2), MoneyDeposit"
     .. (tickHooked and ", OnTickEvenPaused" or "")
     .. (recipeHooked and ", OnRecipeLearned" or "")
     .. (disconnectHooked and ", OnPlayerDisconnect" or ""))

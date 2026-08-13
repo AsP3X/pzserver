@@ -14,6 +14,7 @@ local Codec = require("KR_Codec")
 local Bridge = require("KR_Bridge")
 local Roster = require("KR_Roster")
 local Vitals = require("KR_Vitals")
+local Look = require("KR_Look")
 
 KR_Progress = {}
 
@@ -139,6 +140,7 @@ function KR_Progress.export()
                 skills = perks(player),
                 traits = traits(player),
                 vitals = vitals(player),
+                appearance = Look.of(player),
                 is_dead = player:isDead() or false,
             }
         end)
