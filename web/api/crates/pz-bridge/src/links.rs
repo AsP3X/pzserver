@@ -216,6 +216,51 @@ mod tests {
         assert_eq!(requests[0].steam_id.as_deref(), Some("7656119"));
     }
 
+    /// The exact bytes `KR_Enrol` produces, captured by running the mod's own
+    /// encoder over two requests (see `game-server/tests/kr-enrol.test.lua`).
+    ///
+    /// Pinned rather than hand-written: the two halves of this channel live in
+    /// different languages and nothing else fails if the field names drift.
+    #[tokio::test]
+    async fn parses_the_bytes_the_mod_actually_writes() {
+        let (dir, channel) = channel();
+        std::fs::write(
+            dir.path().join(LINK_REQUESTS_FILE),
+            concat!(
+                r#"{"requests":[{"id":"pike-2026-08-13T09:00:00-1-4242","username":"pike","#,
+                r#""steam_id":"76561198000000001","requested_at":"2026-08-13T09:00:00"},"#,
+                r#"{"id":"rook-2026-08-13T09:00:00-2-4242","username":"rook","#,
+                r#""requested_at":"2026-08-13T09:00:00"}],"#,
+                r#""updated_at":"2026-08-13T09:00:00","version":1}"#,
+            ),
+        )
+        .expect("write");
+
+        let requests = channel.requests().await.expect("read").requests;
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].username, "pike");
+        assert_eq!(requests[0].steam_id.as_deref(), Some("76561198000000001"));
+        // A player who is not on Steam: the mod omits the key rather than
+        // writing a null or a "0".
+        assert_eq!(requests[1].username, "rook");
+        assert_eq!(requests[1].steam_id, None);
+    }
+
+    /// The mod writes `[]` for an empty list, because its codec collapses an
+    /// empty table to an array. It must not be read as a missing field.
+    #[tokio::test]
+    async fn an_empty_request_list_from_the_mod_reads_as_no_requests() {
+        let (dir, channel) = channel();
+        std::fs::write(
+            dir.path().join(LINK_REQUESTS_FILE),
+            r#"{"requests":[],"updated_at":"2026-08-13T09:00:00","version":1}"#,
+        )
+        .expect("write");
+
+        assert!(channel.requests().await.expect("read").requests.is_empty());
+    }
+
     #[tokio::test]
     async fn parses_a_request_without_the_optional_fields() {
         let (dir, channel) = channel();

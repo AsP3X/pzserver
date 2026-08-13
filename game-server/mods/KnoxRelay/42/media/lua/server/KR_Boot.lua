@@ -39,6 +39,7 @@ local Holdings = require("KR_Holdings")
 local Conductor = require("KR_Conductor")
 local Garage = require("KR_Garage")
 local Vitals = require("KR_Vitals")
+local Enrol = require("KR_Enrol")
 
 local LOG = "[KnoxRelay] "
 
@@ -113,6 +114,10 @@ end
 --- The heartbeat.
 local function onEveryOneMinute()
     Snapshot.serveRequests()
+
+    -- Every tick, not on a divisor: a player is standing in game waiting to be
+    -- shown a code, and the panel aims to answer inside five seconds.
+    Enrol.poll()
 
     sinceDelivery = sinceDelivery + 1
     if sinceDelivery >= DELIVERY_TICKS then
@@ -248,6 +253,11 @@ Events.OnWeaponHitCharacter.Add(Feud.onWeaponHit)
 Events.EveryTenMinutes.Add(onEveryTenMinutes)
 Events.EveryOneMinute.Add(onEveryOneMinute)
 Events.OnServerStarted.Add(onServerStarted)
+Events.OnClientCommand.Add(Enrol.onClientCommand)
+
+-- Optional: without it a player who disconnects mid-registration leaves an
+-- entry that poll() drops on the answer timeout anyway.
+local disconnectHooked = pcall(function() Events.OnPlayerDisconnect.Add(Enrol.forget) end)
 
 -- No vanilla Lua subscribes to OnTickEvenPaused, so treat it as optional: an
 -- indexing error here would take the whole mod down with it, and everything
@@ -258,9 +268,10 @@ local tickHooked = pcall(function() Events.OnTickEvenPaused.Add(onTickEvenPaused
 -- everything else; only the recently-learned-recipes panel stays empty.
 local recipeHooked = pcall(function() Events.OnRecipeLearned.Add(onRecipeLearned) end)
 
-print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, MoneyDeposit"
+print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, OnClientCommand, MoneyDeposit"
     .. (tickHooked and ", OnTickEvenPaused" or "")
-    .. (recipeHooked and ", OnRecipeLearned" or ""))
+    .. (recipeHooked and ", OnRecipeLearned" or "")
+    .. (disconnectHooked and ", OnPlayerDisconnect" or ""))
 
 if not tickHooked then
     print(LOG .. "WARNING: OnTickEvenPaused unavailable — world state will not refresh while the server is paused and empty")

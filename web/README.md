@@ -150,12 +150,14 @@ Only a completed registration consumes a code, and a code is single-use. Running
 the command again replaces an outstanding code rather than adding a second, so a
 character never has two live codes.
 
-### The file contract (mod side not written yet)
+### The file contract
 
-**`/account register` does not exist in KnoxRelay today.** The web half is
-finished and tested against the contract below; the command still has to be
-added to the mod. The channel mirrors the mod's own request/result idiom with
-the direction reversed — the mod writes the requests, this stack answers.
+Both halves are built. The mod side is `KR_Enrol` plus the chat hook in
+`KR_Console`, added in KnoxRelay 1.10 — a server running an older build of the
+mod has no `/account register` and therefore no way to make an account.
+
+The channel mirrors the mod's own request/result idiom with the direction
+reversed — the mod writes the requests, this stack answers.
 
 **The mod writes `Lua/account_links.json`** when a player runs the command:
 
@@ -197,19 +199,31 @@ this safe to read twice: any id that already has a result is skipped, exactly as
 }
 ```
 
-| `status` | What to tell the player |
+| `status` | What the mod tells the player |
 | --- | --- |
-| `issued` | Show them `code`, and that it lasts until `expires_at` |
+| `issued` | Shows them `code`, and that it lasts until `expires_at` |
 | `already_registered` | This character already has an account — sign in instead |
 
 `code` and `expires_at` are present only on `issued`.
 
-Two rules worth honouring:
+A request that fails on this side is deliberately left unanswered so the next
+pass retries it. `KR_Enrol` gives up after twelve heartbeats — about thirty
+seconds against a five-second answer target — and tells the player to try
+again rather than leaving them watching an empty screen. That timeout is
+mod-side only; it never appears in the ledger.
 
-- **The mod owns the request file.** This stack only reads it, and never deletes
-  from it. Answered entries should be pruned mod-side, or the file grows forever.
-- **Show the code privately.** It is worth an account to whoever reads it, so it
-  belongs in a message to the one player, not the public channel.
+Two rules the mod honours:
+
+- **The mod owns the request file.** This stack only reads it, and never
+  deletes from it. `KR_Enrol.prune` takes out entries that already have a
+  result, or the file would grow for the life of the server.
+- **The code is shown privately.** It is worth an account to whoever reads it,
+  so it goes to one client as a server command and is drawn on that player's
+  screen — never into a chat channel, which is echoed into the server log.
+
+Running the command again replaces the character's outstanding request rather
+than adding a second, on both sides: the mod drops the earlier entry from the
+file, and `registration::open` replaces the outstanding code.
 
 The ledger is capped at 200 entries and written to a temporary file that is then
 renamed, so the mod never reads a half-written one. `web-api` therefore mounts

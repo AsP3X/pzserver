@@ -227,9 +227,10 @@ test:
 test-game-server:
 	@bash game-server/tests/configure-server.test.sh
 	@if command -v luajit >/dev/null 2>&1; then \
-		luajit game-server/tests/kr-vitals.test.lua; \
+		luajit game-server/tests/kr-vitals.test.lua && \
+		luajit game-server/tests/kr-enrol.test.lua; \
 	else \
-		echo "SKIP: kr-vitals.test.lua needs luajit (PZ runs Lua 5.1) — brew install luajit"; \
+		echo "SKIP: Lua suites need luajit (PZ runs Lua 5.1) — brew install luajit"; \
 	fi
 
 exec:
