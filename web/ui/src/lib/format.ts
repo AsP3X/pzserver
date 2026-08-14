@@ -4,6 +4,22 @@ export function formatNumber(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(Math.round(value))
 }
 
+export function formatCoins(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale).format(Math.round(value))
+}
+
+/** 12.4 MB — for archive sizes. */
+export function formatBytes(bytes: number, locale: string): string {
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = bytes
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(size)} ${units[unit]}`
+}
+
 /**
  * Deliberately not `notation: 'compact'`.
  *

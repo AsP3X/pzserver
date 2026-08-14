@@ -85,7 +85,6 @@ export function AppSidebar() {
             label: t('nav.group.shop'),
             items: [
                 { title: t('nav.items_categories'), href: '/admin/shop', icon: Store },
-                { title: t('nav.bundles'), href: '/admin/shop/bundles', icon: Package },
                 { title: t('nav.promotions'), href: '/admin/shop/promotions', icon: Tag },
                 { title: t('nav.purchases'), href: '/admin/shop/purchases', icon: ShoppingBag },
                 { title: t('nav.wallets'), href: '/admin/wallets', icon: Wallet },

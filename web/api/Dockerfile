@@ -32,7 +32,7 @@ RUN touch crates/*/src/*.rs \
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl tar unzip \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --uid 10001 pzapi
 

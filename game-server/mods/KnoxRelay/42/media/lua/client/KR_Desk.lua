@@ -33,6 +33,12 @@ KR_Desk.Color = {
 local RAIL = 128
 local WIDTH = 860
 local HEIGHT = 560
+local MIN_W = 620
+local MIN_H = 460
+
+KR_Desk.RAIL = RAIL
+KR_Desk.MIN_WIDTH = MIN_W
+KR_Desk.MIN_HEIGHT = MIN_H
 
 local function sortedPages()
     local list = {}
@@ -86,6 +92,8 @@ function KnoxDeskWindow:initialise()
     ISCollapsableWindow.initialise(self)
     self.pin = true
     self.resizable = true
+    self.minimumWidth = MIN_W
+    self.minimumHeight = MIN_H
 end
 
 function KnoxDeskWindow:createChildren()
@@ -115,13 +123,47 @@ function KnoxDeskWindow:createChildren()
     self:addChild(self.host)
 
     self.railButtons = {}
+    if self.resizeWidget then
+        self.resizeWidget.resizeFunction = KnoxDeskWindow.applySize
+    end
+    if self.resizeWidget2 then
+        self.resizeWidget2.resizeFunction = KnoxDeskWindow.applySize
+    end
     self:placeChrome()
     self:rebuildRail()
 end
 
-function KnoxDeskWindow:placeChrome()
+function KnoxDeskWindow:clampSize()
     local w = self:getWidth()
     local h = self:getHeight()
+    if w < MIN_W then
+        self:setWidth(MIN_W)
+        w = MIN_W
+    end
+    if h < MIN_H then
+        self:setHeight(MIN_H)
+        h = MIN_H
+    end
+    return w, h
+end
+
+function KnoxDeskWindow:applySize(w, h)
+    if w < MIN_W then
+        w = MIN_W
+    end
+    if h < MIN_H then
+        h = MIN_H
+    end
+    self:setWidth(w)
+    self:setHeight(h)
+    self:placeChrome()
+    if mounted and type(mounted.layout) == "function" then
+        pcall(mounted.layout, mounted, self.host)
+    end
+end
+
+function KnoxDeskWindow:placeChrome()
+    local w, h = self:clampSize()
     local th = self:titleBarHeight()
     local rh = 8
     if self.resizeWidgetHeight then
@@ -145,11 +187,24 @@ function KnoxDeskWindow:placeChrome()
         if self.host.javaObject then
             self.host.javaObject:setX(RAIL)
             self.host.javaObject:setY(th)
+            self.host.javaObject:setWidth(math.max(80, w - RAIL))
+            self.host.javaObject:setHeight(innerH)
         end
     end
 end
 
 function KnoxDeskWindow:prerender()
+    local w = self:getWidth()
+    local h = self:getHeight()
+    if w ~= self._laidW or h ~= self._laidH then
+        self._laidW = w
+        self._laidH = h
+        self:placeChrome()
+        if mounted and type(mounted.layout) == "function" then
+            pcall(mounted.layout, mounted, self.host)
+        end
+    end
+
     local th = self:titleBarHeight()
     local void = KR_Desk.Color.void
     local ash = KR_Desk.Color.ash

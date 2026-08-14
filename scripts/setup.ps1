@@ -725,7 +725,7 @@ if ($GENERATE_SELF_SIGNED) {
 
 $CADDY_SITE {
 $CADDY_TLS
-`treverse_proxy app:8000
+`treverse_proxy web-ui:8080
 }
 
 :80 {
@@ -740,7 +740,7 @@ $CADDY_TLS
 
 $CADDY_SITE {
 $CADDY_TLS
-`treverse_proxy app:8000
+`treverse_proxy web-ui:8080
 }
 
 http://$CADDY_SITE {

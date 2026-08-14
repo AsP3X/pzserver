@@ -1,32 +1,42 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
 import {
-  dictionaries,
+  dictionaryFor,
   fallback,
   initialLocale,
-  INTL_LOCALES,
+  intlFor,
+  isLocale,
   STORAGE_KEY,
   type Locale,
   type TranslationKey,
 } from '@/i18n/locales'
-import {
-  TranslationContext,
-  type Replacements,
-} from '@/i18n/use-translation'
+import { TranslationContext, type Replacements } from '@/i18n/use-translation'
+import { api } from '@/lib/api'
 
 export function TranslationProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale)
 
+  const overrides = useQuery({
+    queryKey: ['i18n', locale],
+    queryFn: () => api.i18nOverrides(locale),
+    staleTime: 30_000,
+    retry: false,
+  })
+
   const setLocale = useCallback((next: Locale) => {
+    if (!isLocale(next)) {
+      return
+    }
     setLocaleState(next)
     window.localStorage.setItem(STORAGE_KEY, next)
-    // Screen readers and font fallback both key off this.
     document.documentElement.lang = next
   }, [])
 
   const t = useCallback(
     (key: TranslationKey, replacements?: Replacements) => {
-      const template = dictionaries[locale][key] ?? fallback[key] ?? key
+      const file = dictionaryFor(locale)[key]
+      const template = overrides.data?.[key] ?? file ?? fallback[key] ?? key
 
       if (!replacements) {
         return template
@@ -37,11 +47,11 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
         template,
       )
     },
-    [locale],
+    [locale, overrides.data],
   )
 
   const value = useMemo(
-    () => ({ locale, intlLocale: INTL_LOCALES[locale], setLocale, t }),
+    () => ({ locale, intlLocale: intlFor(locale), setLocale, t }),
     [locale, setLocale, t],
   )
 

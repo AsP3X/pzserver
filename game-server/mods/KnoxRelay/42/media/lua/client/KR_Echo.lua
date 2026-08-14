@@ -127,6 +127,66 @@ local function mirrorAddition(inventory, itemType, count)
     end
 end
 
+local function wearOn(item, fraction)
+    if not item or not item.setCondition or not item.getConditionMax then
+        return
+    end
+
+    fraction = tonumber(fraction) or 1.0
+    if fraction < 0 then
+        fraction = 0
+    end
+    if fraction > 1 then
+        fraction = 1
+    end
+
+    local ceiling = item:getConditionMax()
+    if ceiling and ceiling > 0 then
+        item:setCondition(math.max(1, math.floor(fraction * ceiling)))
+    end
+end
+
+local function fillContainer(container, cargo)
+    if not container or not cargo then
+        return
+    end
+
+    for _, piece in ipairs(cargo) do
+        local itemType = piece.item_type or piece.full_type
+        local count = tonumber(piece.quantity or piece.count) or 1
+        if itemType then
+            for _ = 1, count do
+                local item = container:AddItem(itemType)
+                if item then
+                    local condition = piece.condition
+                    if piece.condition_bp ~= nil then
+                        condition = (tonumber(piece.condition_bp) or 100) / 100
+                    end
+                    wearOn(item, condition)
+                    if piece.cargo and item.getItemContainer then
+                        fillContainer(item:getItemContainer(), piece.cargo)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function mirrorFillBag(inventory, itemType, fraction, cargo)
+    print(LOG .. "fillBag: type=" .. tostring(itemType))
+
+    local bag = inventory:AddItem(itemType)
+    if not bag then
+        print(LOG .. "fillBag: failed to add " .. tostring(itemType))
+        return
+    end
+
+    wearOn(bag, fraction)
+    if cargo then
+        fillContainer(bag.getItemContainer and bag:getItemContainer(), cargo)
+    end
+end
+
 local function onServerCommand(module, command, args)
     if module ~= CHANNEL then
         return
@@ -153,6 +213,13 @@ local function onServerCommand(module, command, args)
         mirrorRemoval(inventory, args.item_type, tonumber(args.count) or 1)
     elseif command == "addItem" then
         mirrorAddition(inventory, args.item_type, tonumber(args.count) or 1)
+    elseif command == "fillBag" then
+        mirrorFillBag(
+            inventory,
+            args.item_type,
+            tonumber(args.condition) or 1,
+            args.cargo
+        )
     end
 end
 

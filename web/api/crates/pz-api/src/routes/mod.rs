@@ -2,9 +2,13 @@
 
 mod admin;
 mod auth;
+mod economy;
 mod health;
+mod i18n;
 mod me;
+mod news;
 mod obituary;
+mod safezones;
 mod server;
 mod site;
 mod stats;
@@ -13,11 +17,13 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::middleware;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
+use crate::services::audit;
 use crate::state::AppState;
 
 /// Ceiling on any single request. Sits above the RCON and Docker timeouts so a
@@ -35,24 +41,43 @@ pub fn router(state: AppState) -> Router {
         .nest("/api", api)
         .layer(cors(&state))
         .layer(CompressionLayer::new())
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::GATEWAY_TIMEOUT,
-            REQUEST_TIMEOUT,
-        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
 fn v1(state: AppState) -> Router<AppState> {
-    Router::new()
+    let fast = Router::new()
         .merge(admin::routes())
         .merge(auth::routes())
+        .merge(economy::routes())
+        .merge(i18n::routes())
         .merge(me::routes())
+        .merge(news::routes())
         .merge(obituary::routes())
+        .merge(safezones::routes())
         .merge(server::routes())
         .merge(site::routes())
         .merge(stats::routes())
-        .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            audit::capture,
+        ))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::GATEWAY_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ));
+
+    let slow = admin::file_routes()
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            audit::capture,
+        ))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::GATEWAY_TIMEOUT,
+            Duration::from_secs(600),
+        ));
+
+    Router::new().merge(fast).merge(slow).with_state(state)
 }
 
 /// The UI is served from its own origin, so the browser preflights everything.

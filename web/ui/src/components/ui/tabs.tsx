@@ -190,9 +190,23 @@ function Fade({ side, show }: { side: 'start' | 'end'; show: boolean }) {
 }
 
 /** The region a tab controls. */
-export function TabPanel({ id, children }: { id: string; children: ReactNode }) {
+export function TabPanel({
+  id,
+  children,
+  className,
+}: {
+  id: string
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <div role="tabpanel" id={`tabpanel-${id}`} aria-labelledby={`tab-${id}`} tabIndex={-1}>
+    <div
+      role="tabpanel"
+      id={`tabpanel-${id}`}
+      aria-labelledby={`tab-${id}`}
+      tabIndex={-1}
+      className={className}
+    >
       {children}
     </div>
   )

@@ -479,7 +479,7 @@ assert_seeding "a newer staged Knox Relay replaces a stale Workshop download" \
     1.7 1.5 1.7
 assert_seeding "a newer Workshop Knox Relay is kept over an older staged one" \
     1.5 1.7 1.7
-assert_seeding "an equal Workshop version is left in place" \
+assert_seeding "an equal Workshop version is replaced by the staged image copy" \
     1.7 1.7 1.7
 assert_seeding "the staged copy seeds when no Workshop copy is installed" \
     1.7 "" 1.7

@@ -14,6 +14,8 @@ export const POCKETS = 'inventory'
 export const ALL_ITEMS = ''
 
 export interface StackedItem {
+  /** Unique in this list. Bags stay separate so two backpacks do not merge. */
+  key: string
   full_type: string
   name: string
   category: string
@@ -43,14 +45,27 @@ export interface ContainerGroup {
  * worst condition wins, because that is the one that will break first, and
  * anything equipped marks the whole stack.
  */
+/** How many item objects sit inside this bag, including nested bags. */
+export function cargoCount(items: InventoryItem[], containerId: string): number {
+  return items
+    .filter((item) => item.container_id === containerId)
+    .reduce(
+      (total, item) =>
+        total + item.count + (item.contains ? cargoCount(items, item.contains) : 0),
+      0,
+    )
+}
+
 export function stackItems(items: InventoryItem[]): StackedItem[] {
   const stacks = new Map<string, StackedItem>()
 
   for (const item of items) {
-    const existing = stacks.get(item.full_type)
+    const key = item.contains ? item.contains : item.full_type
+    const existing = item.contains ? undefined : stacks.get(key)
 
     if (!existing) {
-      stacks.set(item.full_type, {
+      stacks.set(key, {
+        key,
         full_type: item.full_type,
         name: item.name,
         category: item.category,

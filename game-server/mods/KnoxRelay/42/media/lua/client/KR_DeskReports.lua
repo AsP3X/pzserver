@@ -162,7 +162,7 @@ function KnoxReportsView:createChildren()
     self.list = ISScrollingListBox:new(0, 0, 200, 200)
     self.list:initialise()
     self.list:instantiate()
-    self.list.itemheight = 42
+    self.list.itemheight = KnoxReportsView.rowHeight()
     self.list.selected = 0
     self.list.font = UIFont.Small
     self.list.drawBorder = true
@@ -188,9 +188,14 @@ function KnoxReportsView:createChildren()
     self.thread.marginBottom = 8
     self:addChild(self.thread)
 
-    self.reply = ISTextEntryBox:new("", 0, 0, 200, 28)
+    self.reply = ISTextEntryBox:new("", 0, 0, 200, KnoxReportsView.replyHeight())
     self.reply:initialise()
+    self.reply:instantiate()
+    self.reply.backgroundColor = C.void
+    self.reply.borderColor = C.fence
+    self.reply.font = UIFont.Small
     self:addChild(self.reply)
+    KnoxReportsView.makeMultiline(self.reply, 8)
 
     self.sendBtn = ISButton:new(0, 0, 80, 28, "SEND", self, KnoxReportsView.onSend)
     styleButton(self.sendBtn, C.hazard, C.hazard)
@@ -222,13 +227,12 @@ function KnoxReportsView:createChildren()
     self.accused:initialise()
     self.subject:initialise()
     self.body:initialise()
+    self.body:instantiate()
+    self.body.font = UIFont.Small
     self:addChild(self.accused)
     self:addChild(self.subject)
     self:addChild(self.body)
-    pcall(function()
-        self.body:setMultipleLine(true)
-        self.body:setMaxLines(6)
-    end)
+    KnoxReportsView.makeMultiline(self.body, 10)
 
     self.fileBtn = ISButton:new(0, 0, 140, 28, "FILE REPORT", self, KnoxReportsView.onFile)
     styleButton(self.fileBtn, C.hazard, C.hazard)
@@ -241,6 +245,30 @@ function KnoxReportsView:createChildren()
     self:showThread()
 end
 
+local function box(el, x, y, w, h)
+    if not el then
+        return
+    end
+    if w < 1 then
+        w = 1
+    end
+    if h < 1 then
+        h = 1
+    end
+    el:setX(x)
+    el:setY(y)
+    el:setWidth(w)
+    el:setHeight(h)
+    pcall(function()
+        if el.javaObject then
+            el.javaObject:setX(x)
+            el.javaObject:setY(y)
+            el.javaObject:setWidth(w)
+            el.javaObject:setHeight(h)
+        end
+    end)
+end
+
 function KnoxReportsView:relayout()
     local w = self:getWidth()
     local h = self:getHeight()
@@ -249,109 +277,243 @@ function KnoxReportsView:relayout()
     end
 
     local pad = 10
-    local toolH = 26
-    local replyH = 28
-    local listW = math.max(220, math.floor((w - pad * 3) * 0.34))
     local gap = 8
+    local toolH = 26
+    local sendW = 80
+    local sendH = 28
+    local replyH = KnoxReportsView.replyHeight()
+    local composerH = replyH + gap + sendH
+    local innerW = math.max(40, w - pad * 2)
+    local compose = mode == "compose"
+
+    -- Compose is a single column that always fits the hole.
+    if compose then
+        local y = pad
+        box(self.backBtn, pad, y, 80, toolH)
+        self.notice:setX(pad + 88)
+        self.notice:setY(y + 4)
+        y = y + toolH + gap
+
+        local kindW = math.min(110, math.floor((innerW - gap) / 2))
+        box(self.kindReport, pad, y, kindW, toolH)
+        box(self.kindSupport, pad + kindW + gap, y, kindW, toolH)
+        y = y + toolH + gap
+
+        local fieldH = 26
+        local accusedH = 0
+        if composeKind == "report" then
+            self.accusedLbl:setX(pad)
+            self.accusedLbl:setY(y)
+            y = y + 16
+            box(self.accused, pad, y, innerW, fieldH)
+            y = y + fieldH + gap
+            accusedH = 16 + fieldH + gap
+        end
+
+        self.subjectLbl:setX(pad)
+        self.subjectLbl:setY(y)
+        y = y + 16
+        box(self.subject, pad, y, innerW, fieldH)
+        y = y + fieldH + gap
+
+        self.bodyLbl:setX(pad)
+        self.bodyLbl:setY(y)
+        y = y + 16
+
+        local fileH = 28
+        local bodyH = h - y - pad - fileH - gap
+        if bodyH < 60 then
+            bodyH = 60
+        end
+        box(self.body, pad, y, innerW, bodyH)
+        KnoxReportsView.makeMultiline(self.body, 10)
+        box(self.fileBtn, pad, y + bodyH + gap, math.min(160, innerW), fileH)
+        return
+    end
+
+    -- Browse: side-by-side when there is room, otherwise stacked.
+    local listW = math.floor(innerW * 0.34)
+    if listW < 180 then
+        listW = 180
+    end
+    if listW > 280 then
+        listW = 280
+    end
+    local threadW = innerW - listW - gap
+    local stacked = threadW < 200
+    if stacked then
+        listW = innerW
+        threadW = innerW
+    end
+
     local listX = pad
     local listY = pad
+    local usableH = h - pad * 2
 
-    -- + NEW sits under the list, in that column only — never beside REPORTS.
-    self.newBtn:setX(listX)
-    self.newBtn:setY(h - pad - toolH)
-    self.newBtn:setWidth(listW)
-    self.newBtn:setHeight(toolH)
+    if stacked then
+        local listH = math.floor((usableH - toolH - composerH - gap * 3) * 0.36)
+        if listH < 80 then
+            listH = 80
+        end
+        local threadH = usableH - listH - toolH - composerH - gap * 3
+        if threadH < 80 then
+            threadH = 80
+            listH = math.max(70, usableH - threadH - toolH - composerH - gap * 3)
+        end
 
-    self.backBtn:setX(listX)
-    self.backBtn:setY(pad)
-    self.backBtn:setWidth(80)
-    self.backBtn:setHeight(toolH)
+        box(self.list, listX, listY, listW, listH)
+        box(self.newBtn, listX, listY + listH + gap, listW, toolH)
 
-    self.notice:setX(listX + listW + gap)
-    self.notice:setY(h - pad - toolH + 4)
+        local threadY = listY + listH + gap + toolH + gap
+        local replyY = threadY + threadH + gap
+        box(self.thread, listX, threadY, threadW, threadH)
+        box(self.reply, listX, replyY, threadW, replyH)
+        KnoxReportsView.makeMultiline(self.reply, 8)
+        box(self.sendBtn, listX + threadW - sendW, replyY + replyH + gap, sendW, sendH)
+        self.notice:setX(listX)
+        self.notice:setY(replyY + replyH + gap + 4)
+    else
+        local listH = usableH - toolH - gap
+        box(self.list, listX, listY, listW, listH)
+        box(self.newBtn, listX, listY + listH + gap, listW, toolH)
 
-    local listH = h - listY - pad - toolH - gap
-    self.list:setX(listX)
-    self.list:setY(listY)
-    self.list:setWidth(listW)
-    self.list:setHeight(math.max(60, listH))
+        local threadX = listX + listW + gap
+        local threadH = usableH - composerH - gap
+        local replyY = pad + threadH + gap
+        box(self.thread, threadX, pad, threadW, threadH)
+        box(self.reply, threadX, replyY, threadW, replyH)
+        KnoxReportsView.makeMultiline(self.reply, 8)
+        box(self.sendBtn, threadX + threadW - sendW, replyY + replyH + gap, sendW, sendH)
+        self.notice:setX(threadX)
+        self.notice:setY(replyY + replyH + gap + 4)
+    end
 
-    local threadX = listX + listW + gap
-    local threadW = w - threadX - pad
-    local threadY = pad
-    local threadH = h - threadY - pad - replyH - gap
-    self.thread:setX(threadX)
-    self.thread:setY(threadY)
-    self.thread:setWidth(math.max(80, threadW))
-    self.thread:setHeight(math.max(60, threadH))
+    box(self.backBtn, pad, pad, 80, toolH)
+    self:syncListRows()
     pcall(function() self.thread:paginate() end)
+end
 
-    self.reply:setX(threadX)
-    self.reply:setY(threadY + math.max(60, threadH) + gap)
-    self.reply:setWidth(math.max(40, threadW - 88))
-    self.reply:setHeight(replyH)
+function KnoxReportsView.lineHeight()
+    local height = 16
+    pcall(function()
+        local tm = getTextManager()
+        local font = tm:getFontFromEnum(UIFont.Small)
+        if font and font.getLineHeight then
+            height = font:getLineHeight()
+        else
+            height = tm:getFontHeight(UIFont.Small)
+        end
+    end)
+    if height < 16 then
+        height = 16
+    end
+    return height
+end
 
-    self.sendBtn:setX(threadX + math.max(40, threadW - 88) + 8)
-    self.sendBtn:setY(self.reply:getY())
-    self.sendBtn:setWidth(80)
-    self.sendBtn:setHeight(replyH)
+function KnoxReportsView.fontHeight()
+    return KnoxReportsView.lineHeight()
+end
 
-    local formY = pad + toolH + 12
-    local formW = w - pad * 2
-    self.kindReport:setX(pad)
-    self.kindReport:setY(formY)
-    self.kindSupport:setX(pad + 108)
-    self.kindSupport:setY(formY)
+function KnoxReportsView.rowHeight()
+    return KnoxReportsView.lineHeight() + 16
+end
 
-    self.accusedLbl:setX(pad)
-    self.accusedLbl:setY(formY + 36)
-    self.accused:setX(pad)
-    self.accused:setY(formY + 54)
-    self.accused:setWidth(formW)
-    self.accused:setHeight(26)
+function KnoxReportsView.replyHeight()
+    local height = KnoxReportsView.lineHeight() * 6 + 28
+    if height < 120 then
+        height = 120
+    end
+    if height > 200 then
+        height = 200
+    end
+    return height
+end
 
-    self.subjectLbl:setX(pad)
-    self.subjectLbl:setY(formY + 88)
-    self.subject:setX(pad)
-    self.subject:setY(formY + 106)
-    self.subject:setWidth(formW)
-    self.subject:setHeight(26)
+function KnoxReportsView.makeMultiline(el, maxLines)
+    if not el then
+        return
+    end
+    pcall(function()
+        if el.setMultipleLine then
+            el:setMultipleLine(true)
+        elseif el.javaObject and el.javaObject.setMultipleLine then
+            el.javaObject:setMultipleLine(true)
+        end
+        if el.setMaxLines then
+            el:setMaxLines(maxLines or 8)
+        elseif el.javaObject and el.javaObject.setMaxLines then
+            el.javaObject:setMaxLines(maxLines or 8)
+        end
+    end)
+end
 
-    self.bodyLbl:setX(pad)
-    self.bodyLbl:setY(formY + 140)
-    self.body:setX(pad)
-    self.body:setY(formY + 158)
-    self.body:setWidth(formW)
-    self.body:setHeight(math.max(80, h - formY - 210))
-
-    self.fileBtn:setX(pad)
-    self.fileBtn:setY(self.body:getY() + self.body:getHeight() + 10)
-    self.fileBtn:setWidth(140)
-    self.fileBtn:setHeight(28)
+function KnoxReportsView:syncListRows()
+    if not self.list then
+        return
+    end
+    local rowH = KnoxReportsView.rowHeight()
+    self.list.itemheight = rowH
+    local items = self.list.items
+    if type(items) ~= "table" then
+        return
+    end
+    for _, item in ipairs(items) do
+        item.height = rowH
+    end
 end
 
 function KnoxReportsView:drawTicket(y, item, alt)
-    if not item.height then
-        item.height = self.itemheight
-    end
+    local font = UIFont.Small
+    local lh = KnoxReportsView.lineHeight()
+    local padY = 8
+    local rowH = lh + padY * 2
+    item.height = rowH
+
     local report = item.item
     if self.selected == item.index then
-        self:drawRect(0, y, self:getWidth(), item.height, 1, 0.23, 0.16, 0.02)
+        self:drawRect(0, y, self:getWidth(), rowH, 1, 0.23, 0.16, 0.02)
     end
-    self:drawRectBorder(0, y, self:getWidth(), item.height, 0.7, 0.11, 0.14, 0.11)
+    self:drawRectBorder(0, y, self:getWidth(), rowH, 0.7, 0.11, 0.14, 0.11)
 
     if type(report) == "table" and report.unread then
-        self:drawRect(0, y, 3, item.height, 1, 0.95, 0.64, 0.05)
+        self:drawRect(0, y, 3, rowH, 1, 0.95, 0.64, 0.05)
+    end
+
+    local status = type(report) == "table" and string.upper(tostring(report.status or "open")) or ""
+    local statusW = 48
+    pcall(function()
+        statusW = getTextManager():MeasureStringX(font, status)
+    end)
+    if statusW < 24 then
+        statusW = 24
+    end
+
+    local rightPad = 12
+    if self.vscroll and self.vscroll.getIsVisible and self.vscroll:getIsVisible() then
+        rightPad = rightPad + (self.vscroll:getWidth() or 13)
+    end
+    local statusX = self:getWidth() - rightPad - statusW
+    if statusX < 40 then
+        statusX = 40
     end
 
     local title = tostring(item.text or "")
-    self:drawText(title, 10, y + 4, 0.91, 0.90, 0.87, 1, UIFont.Small)
+    local maxW = statusX - 16
+    if maxW < 20 then
+        maxW = 20
+    end
+    pcall(function()
+        while getTextManager():MeasureStringX(font, title) > maxW and #title > 4 do
+            title = string.sub(title, 1, #title - 4) .. "..."
+        end
+    end)
 
-    local status = type(report) == "table" and tostring(report.status or "open") or ""
-    local rgb = statusRgb(status)
-    self:drawText(string.upper(status), 10, y + 22, rgb.r, rgb.g, rgb.b, 1, UIFont.Small)
+    local textY = y + padY
+    self:drawText(title, 10, textY, 0.91, 0.90, 0.87, 1, font)
+    local rgb = statusRgb(type(report) == "table" and tostring(report.status or "open") or "")
+    self:drawText(status, statusX, textY, rgb.r, rgb.g, rgb.b, 1, font)
 
-    return y + item.height
+    return y + rowH
 end
 
 function KnoxReportsView:onPick(item)
@@ -462,6 +624,7 @@ function KnoxReportsView:applyMode()
     if compose then
         self:paintKind()
     end
+    self:relayout()
 end
 
 function KnoxReportsView:populate()
@@ -480,6 +643,7 @@ function KnoxReportsView:populate()
         selectedId = inbox.reports[1].id
         self.list.selected = 1
     end
+    self:syncListRows()
 end
 
 function KnoxReportsView:showThread()

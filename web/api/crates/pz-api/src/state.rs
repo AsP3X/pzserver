@@ -6,6 +6,7 @@ use pz_bridge::{DockerClient, LuaBridge};
 use sqlx::PgPool;
 
 use crate::config::Config;
+use crate::services::backups::{self, JobLock};
 use crate::services::rate_limit::AttemptLimiter;
 use crate::services::status::StatusService;
 
@@ -21,6 +22,7 @@ pub struct AppState {
     /// short one inside `StatusService`.
     pub docker: DockerClient,
     pub bridge: LuaBridge,
+    pub backup_job: JobLock,
 }
 
 impl AppState {
@@ -60,6 +62,7 @@ impl AppState {
             login_limiter,
             docker,
             bridge,
+            backup_job: backups::new_job_lock(),
         }
     }
 }

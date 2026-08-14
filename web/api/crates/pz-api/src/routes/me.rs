@@ -14,6 +14,7 @@ use pz_bridge::{InventoryReader, InventorySnapshot, PlayerVitals, VitalsReader};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::AuthUser;
 use crate::services::character::{self, Character};
+use crate::services::economy::inventory as holdings;
 use crate::services::reports;
 use crate::state::AppState;
 
@@ -92,6 +93,8 @@ struct InventoryResponse {
     /// Whether a refresh would do anything: the mod only serves snapshot
     /// requests for players it can see on the roster.
     online: bool,
+    /// Takes and gives waiting for the next join.
+    holds: Vec<holdings::InventoryHold>,
 }
 
 /// How stale a snapshot may be before simply opening the page renews it.
@@ -140,12 +143,17 @@ async fn my_inventory(
         tracing::warn!(%error, "could not queue an inventory snapshot");
     }
 
+    let holds = holdings::holds(&state.db, user.id, username)
+        .await
+        .unwrap_or_default();
+
     Ok(Json(InventoryResponse {
         snapshot: read.as_ref().map(|read| read.data.clone()),
         reported_at: read
             .and_then(|read| read.reported_at)
             .map(DateTime::<Utc>::from),
         online,
+        holds,
     }))
 }
 

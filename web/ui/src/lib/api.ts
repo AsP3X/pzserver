@@ -300,12 +300,21 @@ export interface InventorySnapshot {
   max_weight: number
 }
 
+export interface InventoryHold {
+  item_type: string
+  item_name: string
+  quantity: number
+  kind: string
+}
+
 export interface MyInventoryResponse {
   /** Null until the mod has written a snapshot for this character. */
   snapshot: InventorySnapshot | null
   reported_at: string | null
   /** Whether a refresh would do anything — the mod only serves online players. */
   online: boolean
+  /** Takes and gives waiting for the next join. */
+  holds: InventoryHold[]
 }
 
 export interface MyPositionResponse {
@@ -436,6 +445,14 @@ function patch<T>(path: string, body: unknown): Promise<T> {
   })
 }
 
+function put<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 function del<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'DELETE' })
 }
@@ -465,6 +482,14 @@ export interface PlayerSanction {
 
 export interface CommandReply {
   output: string
+}
+
+export interface WipeResult {
+  message: string
+  include_config: boolean
+  backup: string | null
+  players_deleted: number
+  filesystem_errors: string[]
 }
 
 export type AdminEventType = 'death' | 'pvp_kill'
@@ -600,6 +625,419 @@ export interface ContainerLogs {
   lines: string[]
 }
 
+export type BackupType =
+  | 'manual'
+  | 'scheduled'
+  | 'daily'
+  | 'pre_rollback'
+  | 'pre_update'
+  | 'pre_import'
+
+export interface BackupRecord {
+  id: string
+  filename: string
+  size_bytes: number
+  size_human: string
+  type: BackupType | string
+  game_version: string | null
+  steam_branch: string | null
+  notes: string | null
+  created_at: string
+  missing: boolean
+}
+
+export interface BackupJob {
+  kind: string
+  started_at: string
+  detail: string
+}
+
+export interface BackupList {
+  backups: BackupRecord[]
+  job: BackupJob | null
+  last_error: string | null
+}
+
+export interface BackupArchiveEntry {
+  path: string
+  size_bytes: number
+  dir: boolean
+}
+
+export interface BackupArchiveListing {
+  entries: BackupArchiveEntry[]
+  file_count: number
+  dir_count: number
+}
+
+export interface BackupArchiveFile {
+  path: string
+  name: string
+  language: string
+  size_bytes: number
+  truncated: boolean
+  content: string
+}
+
+export type AutomationAction =
+  | 'restart'
+  | 'start'
+  | 'stop'
+  | 'save'
+  | 'backup'
+  | 'broadcast'
+  | 'rcon'
+  | 'whitelist_open'
+  | 'whitelist_close'
+  | 'config'
+  | 'kick_all'
+  | 'rollback'
+  | 'cycle'
+  | 'chopper'
+  | 'gunshot'
+  | 'rain_start'
+  | 'rain_stop'
+  | 'thunder'
+
+export type AutomationScheduleKind = 'times' | 'every'
+
+export interface Automation {
+  id: string
+  name: string
+  enabled: boolean
+  action: AutomationAction | string
+  message: string | null
+  warn_seconds: number
+  warn_message: string | null
+  schedule_kind: AutomationScheduleKind | string
+  times: string[]
+  every_minutes: number | null
+  last_run_at: string | null
+  last_status: string | null
+  last_error: string | null
+  next_run_at: string | null
+  created_at: string
+}
+
+export interface AutomationInput {
+  name?: string
+  enabled?: boolean
+  action?: AutomationAction | string
+  message?: string | null
+  warn_seconds?: number
+  warn_message?: string | null
+  schedule_kind?: AutomationScheduleKind | string
+  times?: string[]
+  every_minutes?: number | null
+}
+
+export interface AutomationRun {
+  id: string
+  automation_id: string
+  started_at: string
+  finished_at: string | null
+  status: string
+  detail: string | null
+}
+
+export interface AuditEntry {
+  id: string
+  actor_id: string | null
+  actor: string
+  action: string
+  method: string
+  path: string
+  target: string | null
+  status: number
+  details: unknown
+  ip_address: string | null
+  created_at: string
+}
+
+export interface WalletView {
+  user_id: string
+  balance: number
+  available: number
+  held: number
+  total_earned: number
+  total_spent: number
+  updated_at: string
+}
+
+export interface WalletTransaction {
+  id: string
+  user_id: string
+  kind: 'credit' | 'debit' | string
+  amount: number
+  balance_after: number
+  source: string
+  reference_type: string | null
+  reference_id: string | null
+  description: string | null
+  created_at: string
+}
+
+export interface AdminWalletRow {
+  user_id: string
+  username: string
+  balance: number
+  available: number
+  total_earned: number
+  total_spent: number
+  updated_at: string
+}
+
+export interface DailyReward {
+  available: boolean
+  claimed_today: boolean
+  coins: number
+  streak: number
+  next_claim_at: string
+  last_claim_at: string | null
+}
+
+export interface RewardTask {
+  id: string
+  coins: number
+  progress: number
+  goal: number
+  complete: boolean
+  claimed: boolean
+}
+
+export interface AccountRank {
+  current: number
+  xp: number
+  into: number
+  per_rank: number
+}
+
+export type ObjectiveKind = 'play' | 'kills' | 'hours' | 'spend' | 'trade' | 'manual'
+export type ObjectiveCadence = 'daily' | 'once'
+
+export interface ObjectiveProgress {
+  id: string
+  title: string
+  description: string | null
+  kind: ObjectiveKind | string
+  cadence: ObjectiveCadence | string
+  xp: number
+  coins: number
+  progress: number
+  goal: number
+  complete: boolean
+  claimed: boolean
+}
+
+export interface Objective {
+  id: string
+  title: string
+  description: string | null
+  kind: ObjectiveKind | string
+  goal: number
+  xp: number
+  coins: number
+  cadence: ObjectiveCadence | string
+  active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+  completions: number
+}
+
+export interface ObjectiveInput {
+  title?: string
+  description?: string | null
+  kind?: string
+  goal?: number
+  xp?: number
+  coins?: number
+  cadence?: string
+  active?: boolean
+  sort_order?: number
+}
+
+export interface RewardsView {
+  daily: DailyReward
+  tasks: RewardTask[]
+  objectives: ObjectiveProgress[]
+  quests: import('@/lib/quest-graph').QuestProgress[]
+  available_quests: import('@/lib/quest-graph').QuestOffer[]
+  rank: AccountRank
+}
+
+export interface RewardClaimResult {
+  claimed: number
+  xp: number
+  rewards: RewardsView
+}
+
+export type StoreCategory = 'weapons' | 'ammo' | 'food' | 'medical' | 'tools' | 'clothing' | 'other'
+
+export interface StoreItem {
+  id: string
+  name: string
+  item_type: string
+  description: string | null
+  category: StoreCategory | string
+  quantity: number
+  price: number
+  stock: number | null
+  max_per_player: number | null
+  featured: boolean
+  active: boolean
+  sort_order: number
+}
+
+export interface StoreItemInput {
+  name?: string
+  item_type?: string
+  description?: string | null
+  category?: string
+  quantity?: number
+  price?: number
+  stock?: number | null
+  max_per_player?: number | null
+  featured?: boolean
+  active?: boolean
+  sort_order?: number
+}
+
+export interface StorePurchase {
+  id: string
+  user_id: string
+  username?: string
+  item_id: string | null
+  item_type: string
+  item_name: string
+  quantity: number
+  unit_price: number
+  total_price: number
+  status: string
+  created_at: string
+  finished_at: string | null
+}
+
+export interface AuctionListing {
+  id: string
+  seller_id: string
+  item_type: string
+  item_name: string
+  quantity: number
+  condition: number | null
+  start_price: number
+  buyout_price: number | null
+  current_price: number
+  current_bidder_id: string | null
+  status: string
+  ends_at: string
+  created_at: string
+  settled_at: string | null
+  seller: string
+  current_bidder: string | null
+  bid_count: number
+  next_bid: number
+  mine: boolean
+}
+
+export interface AuctionBid {
+  id: string
+  listing_id: string
+  bidder_id: string
+  bidder: string
+  amount: number
+  created_at: string
+}
+
+export interface AuctionListInput {
+  item_type: string
+  item_name?: string
+  quantity?: number
+  condition?: number | null
+  start_price: number
+  buyout_price?: number | null
+  hours?: number
+}
+
+export interface VaultItem {
+  id: string
+  item_type: string
+  item_name: string
+  category: string
+  condition_bp: number
+  quantity: number
+  cargo_count: number
+}
+
+export interface VaultMove {
+  id: string
+  direction: 'store' | 'retrieve' | string
+  status: 'pending' | 'done' | 'failed' | 'partial' | string
+  item_type: string
+  item_name: string
+  category: string
+  condition_bp: number
+  requested: number
+  actual: number
+  fee: number
+  cargo_count: number
+  created_at: string
+  finished_at: string | null
+}
+
+export interface VaultView {
+  enabled: boolean
+  items: VaultItem[]
+  capacity: {
+    used: number
+    reserved: number
+    total: number
+    max: number
+    upgrade_cost: number
+    upgrade_increment: number
+    at_max: boolean
+  }
+  fees: { flat: number; per_item: number }
+  wallet: WalletView
+  moves: VaultMove[]
+}
+
+export interface VaultSettings {
+  enabled: boolean
+  default_slots: number
+  max_slots: number
+  slot_upgrade_increment: number
+  slot_upgrade_cost: number
+  withdraw_fee_flat: number
+  withdraw_fee_per_item: number
+}
+
+export interface AdminVault {
+  settings: VaultSettings
+  vaults: { user_id: string; username: string; used: number; total: number }[]
+}
+
+export interface VaultStoreInput {
+  item_type: string
+  item_name?: string
+  category?: string
+  condition?: number | null
+  quantity?: number
+  container_id?: string | null
+}
+
+export interface BackupSchedule {
+  hourly_enabled: boolean
+  daily_enabled: boolean
+  daily_time: string
+  retention_manual: number
+  retention_scheduled: number
+  retention_daily: number
+  retention_pre_rollback: number
+  retention_pre_update: number
+  retention_pre_import: number
+}
+
 export interface SiteUpdate {
   site_name?: string
   hero_badge?: string
@@ -611,6 +1049,99 @@ export interface SiteUpdate {
   connect_host?: string
   connect_port?: number
   discord_url?: string
+}
+
+export interface SafeZone {
+  id: string
+  name: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+export interface SafeZoneConfig {
+  enabled: boolean
+  zones: SafeZone[]
+}
+
+export interface SafeZoneInput {
+  id?: string
+  name: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+export type PvpViolationStatus = 'pending' | 'dismissed' | 'actioned'
+
+export interface PvpViolation {
+  id: string
+  attacker: string
+  victim: string
+  zone_id: string
+  zone_name: string
+  attacker_x: number | null
+  attacker_y: number | null
+  strike_number: number
+  status: PvpViolationStatus
+  resolution_note: string | null
+  resolved_by: string | null
+  occurred_at: string
+  resolved_at: string | null
+}
+
+export interface SafeZoneView {
+  config: SafeZoneConfig
+  violations: PvpViolation[]
+}
+
+export interface NewsSummary {
+  id: string
+  slug: string
+  title: string
+  excerpt: string | null
+  pinned: boolean
+  published_at: string | null
+  author: string | null
+}
+
+export interface NewsPost extends NewsSummary {
+  body: string
+  author_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface NewsPatch {
+  title?: string
+  excerpt?: string | null
+  body?: string
+  pinned?: boolean
+  published?: boolean
+}
+
+export interface UiLanguage {
+  code: string
+  name: string
+  native_name: string
+  is_default: boolean
+  is_active: boolean
+  created_at: string
+}
+
+export interface TranslationCatalog {
+  languages: UiLanguage[]
+  overrides: Record<string, Record<string, string>>
+}
+
+export interface LanguagePatch {
+  code?: string
+  name?: string
+  native_name?: string
+  is_default?: boolean
+  is_active?: boolean
 }
 
 export const api = {
@@ -707,6 +1238,18 @@ export const api = {
       `/api/v1/admin/players/${encodeURIComponent(username)}/inventory`,
     ),
 
+  adminGiveItem: (username: string, itemType: string, count = 1) =>
+    post<{ message: string }>(
+      `/api/v1/admin/players/${encodeURIComponent(username)}/items/give`,
+      { item_type: itemType, count },
+    ),
+
+  adminTakeItem: (username: string, itemType: string, count = 1) =>
+    post<{ message: string }>(
+      `/api/v1/admin/players/${encodeURIComponent(username)}/items/take`,
+      { item_type: itemType, count },
+    ),
+
   adminStart: () => post<CommandReply>('/api/v1/admin/server/start', {}),
 
   adminStop: (message?: string) =>
@@ -716,6 +1259,9 @@ export const api = {
     post<CommandReply>('/api/v1/admin/server/restart', { message }),
 
   adminSave: () => post<CommandReply>('/api/v1/admin/server/save', {}),
+
+  adminWipe: (input: { confirm: boolean; include_config?: boolean; message?: string }) =>
+    post<WipeResult>('/api/v1/admin/server/wipe', input),
 
   adminBroadcast: (message: string) =>
     post<CommandReply>('/api/v1/admin/broadcast', { message }),
@@ -796,5 +1342,290 @@ export const api = {
     patch<PlayerReport>(`/api/v1/admin/reports/${id}`, {
       status,
       resolution,
+    }),
+
+  adminBackups: () => request<BackupList>('/api/v1/admin/backups'),
+
+  adminCreateBackup: (input: { notes?: string; notify_players?: boolean; message?: string }) =>
+    post<{ message: string }>('/api/v1/admin/backups', input),
+
+  adminDeleteBackup: (id: string) =>
+    del<{ message: string }>(`/api/v1/admin/backups/${id}`),
+
+  adminDeleteBackups: (ids: string[]) =>
+    request<{ message: string }>('/api/v1/admin/backups', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }),
+
+  adminRollbackBackup: (
+    id: string,
+    input: { confirm: boolean; countdown?: number; message?: string },
+  ) => post<{ message: string }>(`/api/v1/admin/backups/${id}/rollback`, input),
+
+  adminBackupContents: (id: string) =>
+    request<BackupArchiveListing>(`/api/v1/admin/backups/${id}/contents`),
+
+  adminBackupFile: (id: string, path: string) =>
+    request<BackupArchiveFile>(
+      `/api/v1/admin/backups/${id}/file?path=${encodeURIComponent(path)}`,
+    ),
+
+  adminBackupSchedule: () => request<BackupSchedule>('/api/v1/admin/backups/schedule'),
+
+  adminUpdateBackupSchedule: (input: Partial<BackupSchedule>) =>
+    patch<BackupSchedule>('/api/v1/admin/backups/schedule', input),
+
+  adminAutomations: () => request<Automation[]>('/api/v1/admin/automations'),
+
+  adminCreateAutomation: (input: AutomationInput) =>
+    post<Automation>('/api/v1/admin/automations', input),
+
+  adminUpdateAutomation: (id: string, input: AutomationInput) =>
+    patch<Automation>(`/api/v1/admin/automations/${id}`, input),
+
+  adminDeleteAutomation: (id: string) =>
+    del<{ message: string }>(`/api/v1/admin/automations/${id}`),
+
+  adminRunAutomation: (id: string) =>
+    post<Automation>(`/api/v1/admin/automations/${id}/run`, {}),
+
+  adminAutomationRuns: (id: string) =>
+    request<AutomationRun[]>(`/api/v1/admin/automations/${id}/runs`),
+
+  adminAudit: (filter?: { actor?: string; action?: string; target?: string }) => {
+    const params = new URLSearchParams()
+    if (filter?.actor) params.set('actor', filter.actor)
+    if (filter?.action) params.set('action', filter.action)
+    if (filter?.target) params.set('target', filter.target)
+    const query = params.toString()
+    return request<AuditEntry[]>(`/api/v1/admin/audit${query ? `?${query}` : ''}`)
+  },
+
+  adminAuditActions: () => request<string[]>('/api/v1/admin/audit/actions'),
+
+  myWallet: () => request<WalletView>('/api/v1/me/wallet'),
+
+  myWalletTransactions: () =>
+    request<WalletTransaction[]>('/api/v1/me/wallet/transactions'),
+
+  myRewards: () => request<RewardsView>('/api/v1/me/rewards'),
+
+  claimReward: (key: string) =>
+    post<RewardClaimResult>('/api/v1/me/rewards/claim', { key }),
+
+  claimObjective: (id: string) =>
+    post<RewardClaimResult>(`/api/v1/me/rewards/objectives/${id}`, {}),
+
+  adminObjectives: () => request<Objective[]>('/api/v1/admin/objectives'),
+
+  adminCreateObjective: (input: ObjectiveInput) =>
+    post<Objective>('/api/v1/admin/objectives', input),
+
+  adminUpdateObjective: (id: string, input: ObjectiveInput) =>
+    patch<Objective>(`/api/v1/admin/objectives/${id}`, input),
+
+  adminDeleteObjective: (id: string) =>
+    del<{ message: string }>(`/api/v1/admin/objectives/${id}`),
+
+  adminGrantObjective: (id: string, username: string) =>
+    post<{ xp: number; coins: number; message: string }>(
+      `/api/v1/admin/objectives/${id}/grant`,
+      { username },
+    ),
+
+  claimQuest: (questId: string) =>
+    post<RewardClaimResult>(`/api/v1/me/rewards/quests/${questId}/claim`, {}),
+
+  claimQuestNode: (questId: string, nodeId: string) =>
+    post<RewardClaimResult>(
+      `/api/v1/me/rewards/quests/${questId}/nodes/${encodeURIComponent(nodeId)}`,
+      {},
+    ),
+
+  adminQuests: () => request<import('@/lib/quest-graph').Quest[]>('/api/v1/admin/quests'),
+
+  adminQuest: (id: string) =>
+    request<import('@/lib/quest-graph').Quest>(`/api/v1/admin/quests/${id}`),
+
+  adminCreateQuest: (input: import('@/lib/quest-graph').QuestPatch) =>
+    post<import('@/lib/quest-graph').Quest>('/api/v1/admin/quests', input),
+
+  adminUpdateQuest: (id: string, input: import('@/lib/quest-graph').QuestPatch) =>
+    patch<import('@/lib/quest-graph').Quest>(`/api/v1/admin/quests/${id}`, input),
+
+  adminDeleteQuest: (id: string) =>
+    del<{ message: string }>(`/api/v1/admin/quests/${id}`),
+
+  adminGroups: () => request<import('@/lib/quest-graph').PlayerGroup[]>('/api/v1/admin/groups'),
+
+  adminCreateGroup: (name: string) =>
+    post<import('@/lib/quest-graph').PlayerGroup>('/api/v1/admin/groups', { name }),
+
+  adminDeleteGroup: (id: string) => del<{ message: string }>(`/api/v1/admin/groups/${id}`),
+
+  adminGroupMembers: (id: string) => request<string[]>(`/api/v1/admin/groups/${id}/members`),
+
+  adminAddGroupMember: (id: string, username: string) =>
+    post<{ message: string }>(`/api/v1/admin/groups/${id}/members`, { username }),
+
+  adminRemoveGroupMember: (id: string, username: string) =>
+    del<{ message: string }>(
+      `/api/v1/admin/groups/${id}/members/${encodeURIComponent(username)}`,
+    ),
+
+  storeItems: () => request<StoreItem[]>('/api/v1/store'),
+
+  buyStoreItem: (id: string, quantity = 1) =>
+    post<StorePurchase>(`/api/v1/store/${id}/buy`, { quantity }),
+
+  myStorePurchases: () => request<StorePurchase[]>('/api/v1/me/store/purchases'),
+
+  auctions: () => request<AuctionListing[]>('/api/v1/auctions'),
+
+  myAuctions: () => request<AuctionListing[]>('/api/v1/auctions/mine'),
+
+  auction: (id: string) => request<AuctionListing>(`/api/v1/auctions/${id}`),
+
+  listAuction: (input: AuctionListInput) =>
+    post<AuctionListing>('/api/v1/auctions', input),
+
+  bidAuction: (id: string, amount: number) =>
+    post<AuctionListing>(`/api/v1/auctions/${id}/bid`, { amount }),
+
+  buyoutAuction: (id: string) =>
+    post<AuctionListing>(`/api/v1/auctions/${id}/buyout`, {}),
+
+  cancelAuction: (id: string) =>
+    post<{ message: string }>(`/api/v1/auctions/${id}/cancel`, {}),
+
+  adminStoreItems: () => request<StoreItem[]>('/api/v1/admin/store'),
+
+  adminCreateStoreItem: (input: StoreItemInput) =>
+    post<StoreItem>('/api/v1/admin/store', input),
+
+  adminUpdateStoreItem: (id: string, input: StoreItemInput) =>
+    patch<StoreItem>(`/api/v1/admin/store/${id}`, input),
+
+  adminDeleteStoreItem: (id: string) =>
+    del<{ message: string }>(`/api/v1/admin/store/${id}`),
+
+  adminStorePurchases: () => request<StorePurchase[]>('/api/v1/admin/store/purchases'),
+
+  adminWallets: () => request<AdminWalletRow[]>('/api/v1/admin/wallets'),
+
+  adminAdjustWallet: (userId: string, amount: number, reason?: string) =>
+    post<WalletView>(`/api/v1/admin/wallets/${userId}`, { amount, reason }),
+
+  adminWalletTransactions: (userId: string) =>
+    request<WalletTransaction[]>(`/api/v1/admin/wallets/${userId}/transactions`),
+
+  adminAuctions: () => request<AuctionListing[]>('/api/v1/admin/auctions'),
+
+  adminAuctionBids: (id: string) =>
+    request<AuctionBid[]>(`/api/v1/admin/auctions/${id}/bids`),
+
+  adminCancelAuction: (id: string) =>
+    post<{ message: string }>(`/api/v1/admin/auctions/${id}/cancel`, {}),
+
+  myVault: () => request<VaultView>('/api/v1/me/vault'),
+
+  storeInVault: (input: VaultStoreInput) =>
+    post<VaultView>('/api/v1/me/vault/store', input),
+
+  retrieveFromVault: (itemId: string, quantity: number) =>
+    post<VaultView>('/api/v1/me/vault/retrieve', { item_id: itemId, quantity }),
+
+  upgradeVault: () => post<VaultView>('/api/v1/me/vault/upgrade', {}),
+
+  adminVault: () => request<AdminVault>('/api/v1/admin/vault'),
+
+  adminUpdateVault: (input: Partial<VaultSettings>) =>
+    patch<AdminVault>('/api/v1/admin/vault', input),
+
+  adminImportWorld: async (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<{ message: string }>('/api/v1/admin/backups/import', {
+      method: 'POST',
+      body,
+    })
+  },
+
+  news: () => request<NewsSummary[]>('/api/v1/news'),
+
+  newsPost: (slug: string) =>
+    request<NewsPost>(`/api/v1/news/${encodeURIComponent(slug)}`),
+
+  adminNews: () => request<NewsPost[]>('/api/v1/admin/news'),
+
+  adminCreateNews: (input: NewsPatch) => post<NewsPost>('/api/v1/admin/news', input),
+
+  adminUpdateNews: (id: string, input: NewsPatch) =>
+    patch<NewsPost>(`/api/v1/admin/news/${id}`, input),
+
+  adminDeleteNews: (id: string) =>
+    del<{ message: string }>(`/api/v1/admin/news/${id}`),
+
+  i18nLanguages: () => request<UiLanguage[]>('/api/v1/i18n/languages'),
+
+  i18nOverrides: (locale: string) =>
+    request<Record<string, string>>(`/api/v1/i18n/${encodeURIComponent(locale)}`),
+
+  adminLanguages: () => request<UiLanguage[]>('/api/v1/admin/languages'),
+
+  adminCreateLanguage: (input: LanguagePatch) =>
+    post<UiLanguage>('/api/v1/admin/languages', input),
+
+  adminUpdateLanguage: (code: string, input: LanguagePatch) =>
+    patch<UiLanguage>(`/api/v1/admin/languages/${encodeURIComponent(code)}`, input),
+
+  adminDeleteLanguage: (code: string) =>
+    del<{ message: string }>(`/api/v1/admin/languages/${encodeURIComponent(code)}`),
+
+  adminTranslations: () => request<TranslationCatalog>('/api/v1/admin/translations'),
+
+  adminPutTranslation: (locale: string, key: string, value: string) =>
+    put<{ message: string }>('/api/v1/admin/translations', { locale, key, value }),
+
+  adminClearTranslation: (locale: string, key: string) =>
+    request<{ message: string }>(
+      `/api/v1/admin/translations?locale=${encodeURIComponent(locale)}&key=${encodeURIComponent(key)}`,
+      { method: 'DELETE' },
+    ),
+
+  adminImportTranslations: (locale: string, entries: Record<string, string>) =>
+    put<{ message: string; count: number }>('/api/v1/admin/translations/import', {
+      locale,
+      entries,
+    }),
+
+  adminExportTranslations: (locale: string) =>
+    request<Record<string, string>>(
+      `/api/v1/admin/translations/export/${encodeURIComponent(locale)}`,
+    ),
+
+  safeZones: () => request<SafeZoneConfig>('/api/v1/safe-zones'),
+
+  adminSafeZones: () => request<SafeZoneView>('/api/v1/admin/safe-zones'),
+
+  adminSetSafeZonesEnabled: (enabled: boolean) =>
+    patch<SafeZoneConfig>('/api/v1/admin/safe-zones/config', { enabled }),
+
+  adminCreateSafeZone: (input: SafeZoneInput) =>
+    post<SafeZoneConfig>('/api/v1/admin/safe-zones', input),
+
+  adminDeleteSafeZone: (id: string) =>
+    del<SafeZoneConfig>(`/api/v1/admin/safe-zones/${encodeURIComponent(id)}`),
+
+  adminResolveViolation: (
+    id: string,
+    status: Exclude<PvpViolationStatus, 'pending'>,
+    note?: string,
+  ) =>
+    post<PvpViolation>(`/api/v1/admin/safe-zones/violations/${id}`, {
+      status,
+      note,
     }),
 }

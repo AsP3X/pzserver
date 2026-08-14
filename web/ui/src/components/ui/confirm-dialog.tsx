@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/cn'
 import { useTranslation } from '@/i18n/use-translation'
 
 interface ConfirmDialogProps {
@@ -11,7 +12,10 @@ interface ConfirmDialogProps {
   confirmLabel?: string
   /** Destructive actions use blood; everything else uses hazard. */
   tone?: 'primary' | 'danger'
+  /** Form-heavy dialogs need more width than a one-line confirm. */
+  size?: 'md' | 'lg' | 'xl'
   busy?: boolean
+  confirmDisabled?: boolean
   onConfirm: () => void
   onClose: () => void
 }
@@ -28,7 +32,9 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   tone = 'primary',
+  size = 'md',
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
@@ -55,7 +61,14 @@ export function ConfirmDialog({
       ref={dialog}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
-      className="m-auto w-[min(28rem,calc(100vw-2rem))] border border-fence-bright bg-ash p-0 text-bone backdrop:bg-void/80"
+      className={cn(
+        'm-auto border border-fence-bright bg-ash p-0 text-bone backdrop:bg-void/80',
+        size === 'xl'
+          ? 'max-h-[min(48rem,calc(100vh-2rem))] w-[min(48rem,calc(100vw-2rem))] open:flex open:flex-col'
+          : size === 'lg'
+            ? 'w-[min(36rem,calc(100vw-2rem))]'
+            : 'w-[min(28rem,calc(100vw-2rem))]',
+      )}
       onCancel={(event) => {
         event.preventDefault()
         if (!busy) {
@@ -68,7 +81,7 @@ export function ConfirmDialog({
         }
       }}
     >
-      <div className="p-5">
+      <div className={cn('p-5', size === 'xl' && 'min-h-0 flex-1 overflow-y-auto')}>
         <h2 id={titleId} className="display text-2xl text-bone">
           {title}
         </h2>
@@ -77,7 +90,7 @@ export function ConfirmDialog({
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-fence px-5 py-3">
+      <div className="flex shrink-0 justify-end gap-2 border-t border-fence px-5 py-3">
         <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
           {t('common.cancel')}
         </Button>
@@ -85,7 +98,7 @@ export function ConfirmDialog({
           variant={tone === 'danger' ? 'outline' : 'primary'}
           size="sm"
           onClick={onConfirm}
-          disabled={busy}
+          disabled={busy || confirmDisabled}
           className={tone === 'danger' ? 'border-blood text-blood hover:border-blood hover:text-blood' : undefined}
         >
           {busy ? t('common.saving') : (confirmLabel ?? t('common.confirm'))}

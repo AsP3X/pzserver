@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Clock, Crosshair, Hourglass, Skull } from 'lucide-react'
 
-import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { LinkButton } from '@/components/ui/button'
 import { BodyMap } from '@/routes/character/body-map'
 import { Condition } from '@/routes/character/condition'
@@ -29,34 +28,29 @@ export function CharacterPage() {
   const { data, isPending } = useQuery({ ...myCharacterQuery, enabled: Boolean(user) })
 
   return (
-    <Section>
-      <Container>
-        <SectionHeading
-          eyebrow={t('character.eyebrow')}
-          title={t('character.title')}
-          description={t('character.description')}
-        />
+    <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:p-5">
+      <header>
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true" className="hazard-tape h-1 w-8" />
+          <span className="eyebrow">{t('character.eyebrow')}</span>
+        </div>
+        <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('character.title')}</h1>
+        <p className="mt-2 max-w-2xl text-sm text-smoke">{t('character.description')}</p>
+      </header>
 
-        {isPending ? (
-          <Skeleton className="h-64 w-full" />
-        ) : data?.character || data?.body ? (
-          // Either source is enough. The heartbeat lands within seconds of
-          // joining; the player_stats row waits on the mod's ten-minute export
-          // and then a sync, so gating the page on the row alone showed a
-          // brand new survivor "nothing recorded" for several minutes while
-          // their vitals were already sitting on disk.
-          <CharacterDetail
-            character={data.character}
-            online={data.online}
-            body={data.body}
-            username={user?.username ?? ''}
-          />
-        ) : (
-          // Registered from in game, but nothing has been exported at all yet.
-          <NotSeenYet username={user?.username ?? ''} />
-        )}
-      </Container>
-    </Section>
+      {isPending ? (
+        <Skeleton className="min-h-64" />
+      ) : data?.character || data?.body ? (
+        <CharacterDetail
+          character={data.character}
+          online={data.online}
+          body={data.body}
+          username={user?.username ?? ''}
+        />
+      ) : (
+        <NotSeenYet username={user?.username ?? ''} />
+      )}
+    </section>
   )
 }
 

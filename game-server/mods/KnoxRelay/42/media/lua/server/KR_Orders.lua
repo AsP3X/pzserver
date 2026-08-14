@@ -12,6 +12,7 @@
 --   remove               take items away, fail loudly if not all of them went
 --   remove_verified      take what is there and report exactly what came out
 --   give_with_condition  add items and restore a given wear fraction on each
+--   give_kit             add a bag and put its recorded cargo back inside it
 --
 -- The verified variants exist because the shop debits a wallet only after the
 -- goods are confirmed delivered. A silent partial add would charge a player
@@ -99,6 +100,39 @@ end
 
 --- Take one item and describe what it was. The item object is unusable once
 --- detached, so its identity is captured first.
+local function describeHeld(item)
+    if not item then
+        return nil
+    end
+
+    local record = {
+        full_type = item:getFullType(),
+        name = item:getName(),
+        category = tostring(item:getDisplayCategory() or "General"),
+        condition = Stash.wear(item),
+        count = 1,
+    }
+
+    if item.getItemContainer then
+        local box = item:getItemContainer()
+        local contents = box and box.getItems and box:getItems()
+        if contents and contents:size() > 0 then
+            local cargo = {}
+            for index = 0, contents:size() - 1 do
+                local nested = describeHeld(contents:get(index))
+                if nested then
+                    cargo[#cargo + 1] = nested
+                end
+            end
+            if #cargo > 0 then
+                record.cargo = cargo
+            end
+        end
+    end
+
+    return record
+end
+
 local function takeOneDescribed(player, itemType)
     local inventory = player:getInventory()
     if not inventory then
@@ -110,17 +144,62 @@ local function takeOneDescribed(player, itemType)
         return nil
     end
 
-    local record = {
-        full_type = item:getFullType(),
-        name = item:getName(),
-        category = tostring(item:getDisplayCategory() or "General"),
-        condition = Stash.wear(item),
-    }
+    local record = describeHeld(item)
 
     Stash.unequip(player, item)
     Stash.detach(player, item)
 
     return record
+end
+
+local function wearOn(item, fraction)
+    if not item or not item.setCondition or not item.getConditionMax then
+        return
+    end
+
+    fraction = tonumber(fraction) or 1.0
+    if fraction < 0 then
+        fraction = 0
+    end
+    if fraction > 1 then
+        fraction = 1
+    end
+
+    local ceiling = item:getConditionMax()
+    if ceiling and ceiling > 0 then
+        item:setCondition(math.max(1, math.floor(fraction * ceiling)))
+    end
+end
+
+local function fillContainer(container, cargo)
+    if not container or not cargo then
+        return true
+    end
+
+    for _, piece in ipairs(cargo) do
+        local itemType = piece.item_type or piece.full_type
+        local count = tonumber(piece.quantity or piece.count) or 1
+        if itemType then
+            for _ = 1, count do
+                local item = container:AddItem(itemType)
+                if not item then
+                    return false
+                end
+                local condition = piece.condition
+                if piece.condition_bp ~= nil then
+                    condition = (tonumber(piece.condition_bp) or 100) / 100
+                end
+                wearOn(item, condition)
+                if piece.cargo and item.getItemContainer then
+                    if not fillContainer(item:getItemContainer(), piece.cargo) then
+                        return false
+                    end
+                end
+            end
+        end
+    end
+
+    return true
 end
 
 --------------------------------------------------------------------------
@@ -297,6 +376,58 @@ local function actionRemoveVerified(player, itemType, count)
     return true, nil, { removed = taken, removed_count = #taken }
 end
 
+local function flattenCargo(cargo, into)
+    if not cargo then
+        return
+    end
+
+    for _, piece in ipairs(cargo) do
+        local itemType = piece.item_type or piece.full_type
+        local count = tonumber(piece.quantity or piece.count) or 1
+        if itemType then
+            into[itemType] = (into[itemType] or 0) + count
+        end
+        if piece.cargo then
+            flattenCargo(piece.cargo, into)
+        end
+    end
+end
+
+local function actionGiveKit(player, itemType, fraction, cargo)
+    local inventory = player:getInventory()
+    if not inventory then
+        return false, "player has no inventory", nil
+    end
+
+    -- Dump the bag and its cargo into the main pack so every client (including
+    -- a Steam copy without fillBag) can see the items. The vault still stored
+    -- the packed bag as one slot.
+    local bag = inventory:AddItem(itemType)
+    if not bag then
+        return false, "failed to add container " .. tostring(itemType), nil
+    end
+
+    wearOn(bag, fraction)
+
+    local counts = {}
+    flattenCargo(cargo, counts)
+    for nestedType, nestedCount in pairs(counts) do
+        for _ = 1, nestedCount do
+            if not inventory:AddItem(nestedType) then
+                return false, "failed to restore " .. tostring(nestedType), nil
+            end
+        end
+    end
+
+    markDirty(player)
+    mirrorAdd(player, itemType, 1)
+    for nestedType, nestedCount in pairs(counts) do
+        mirrorAdd(player, nestedType, nestedCount)
+    end
+
+    return true, nil, { verified = true }
+end
+
 local function perform(entry, player)
     local count = entry.count or 1
 
@@ -315,8 +446,124 @@ local function perform(entry, player)
     if entry.action == "give_with_condition" then
         return actionGiveWithCondition(player, entry.item_type, count, entry.condition or 1.0)
     end
+    if entry.action == "give_kit" then
+        return actionGiveKit(player, entry.item_type, entry.condition or 1.0, entry.cargo)
+    end
 
     return false, "unknown action: " .. tostring(entry.action)
+end
+
+--------------------------------------------------------------------------
+-- Join settle
+--
+-- Offline listings only reserve against a snapshot. The item is still in
+-- the pack until this runs. If the player can drop it first, the take fails
+-- or they keep a copy on the ground. Lock the reserved types, tell the
+-- client to refuse drop/transfer, then drain before they get a chance.
+--------------------------------------------------------------------------
+
+local function pendingFor(username)
+    local queue = Bridge.readJson(QUEUE)
+    if not queue or not queue.entries then
+        return {}
+    end
+
+    local ledger = loadLedger()
+    local done = {}
+    if ledger.results then
+        for _, result in ipairs(ledger.results) do
+            done[result.id] = true
+        end
+    end
+
+    local pending = {}
+    for _, entry in ipairs(queue.entries) do
+        if entry.status == "pending" and not done[entry.id] and entry.username == username then
+            pending[#pending + 1] = entry
+        end
+    end
+
+    return pending
+end
+
+function KR_Orders.hasPending(username)
+    return #pendingFor(username) > 0
+end
+
+local function tell(player, command, args)
+    if isServer() then
+        sendServerCommand(player, "KnoxRelay", command, args or {})
+    end
+end
+
+--- Favorite / pin reserved copies so they cannot be dropped, and tell the
+--- client to refuse any move of those types until drain finishes.
+function KR_Orders.lockReserved(player)
+    local username = player:getUsername()
+    if not username then
+        return {}
+    end
+
+    local types = {}
+    local seen = {}
+
+    for _, entry in ipairs(pendingFor(username)) do
+        local action = entry.action or ""
+        if action == "remove" or action == "remove_verified" then
+            local itemType = entry.item_type
+            local need = tonumber(entry.count) or 1
+            if itemType and not seen[itemType] then
+                seen[itemType] = true
+                types[#types + 1] = itemType
+            end
+
+            for _ = 1, need do
+                local item = Stash.locateMatching(player, itemType, false)
+                if not item then
+                    break
+                end
+                Stash.markHeld(item, true)
+            end
+        end
+    end
+
+    if #types > 0 then
+        tell(player, "holdItems", { types = types })
+    end
+
+    return types
+end
+
+--- Pin reserved copies on everyone who has a pending take, drain the
+--- whole queue, then release leftover pins. Drain is global, so every
+--- online player with a take must be locked before it runs.
+function KR_Orders.settleOnline()
+    local players = Roster.online()
+    if not players then
+        return 0
+    end
+
+    local any = false
+    for _, player in ipairs(players) do
+        local username = player.getUsername and player:getUsername()
+        if username and KR_Orders.hasPending(username) then
+            KR_Orders.lockReserved(player)
+            any = true
+        end
+    end
+
+    if not any then
+        return 0
+    end
+
+    local handled = KR_Orders.drain()
+
+    for _, player in ipairs(players) do
+        Stash.unlockHeld(player)
+        tell(player, "clearHolds", {})
+    end
+
+    return handled
 end
 
 --------------------------------------------------------------------------

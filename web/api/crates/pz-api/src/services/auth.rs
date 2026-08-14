@@ -4,6 +4,8 @@
 //! them revocable one by one and keeps a database dump from handing anyone a
 //! working login. Passwords are Argon2id.
 
+use std::path::Path;
+
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use chrono::{DateTime, Duration, Utc};
@@ -47,15 +49,18 @@ struct Credentials {
     password_hash: String,
 }
 
-/// Create the account behind a completed in-game registration.
+/// Create or refresh the account behind a completed in-game registration.
 ///
 /// Takes the caller's transaction because the row that authorised this — the
 /// registration code — is consumed in the same one: either both happen or
 /// neither does, so a failure cannot burn a code without producing an account.
 ///
-/// There is no other way to create a user. Accounts exist only for characters
-/// that have proven themselves on the server.
-pub async fn create_from_registration(
+/// If that character already has a row, the email and password are replaced.
+/// `/account register` is how a player recovers a lost login; refusing because
+/// a row already exists is how AsP3X got locked out.
+///
+/// Accounts exist only for characters that have proven themselves on the server.
+pub async fn apply_registration(
     transaction: &mut Transaction<'_, Postgres>,
     username: &str,
     steam_id: Option<&str>,
@@ -70,6 +75,36 @@ pub async fn create_from_registration(
     validate_password(password)?;
 
     let password_hash = hash_password(password)?;
+
+    let existing = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM users WHERE lower(username) = lower($1) FOR UPDATE",
+    )
+    .bind(username)
+    .fetch_optional(&mut **transaction)
+    .await?;
+
+    if let Some(id) = existing {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE users
+            SET email = $2,
+                password_hash = $3,
+                steam_id = coalesce($4, steam_id),
+                updated_at = now()
+            WHERE id = $1
+            RETURNING id, username, email, role, steam_id, created_at
+            "#,
+        )
+        .bind(id)
+        .bind(email)
+        .bind(&password_hash)
+        .bind(steam_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(taken_field)?;
+
+        return Ok(user);
+    }
 
     let user = sqlx::query_as::<_, User>(
         r#"
@@ -120,35 +155,124 @@ fn taken_field(error: sqlx::Error) -> ApiError {
 /// capitalises differently than the game does still gets in. A miss still pays
 /// for a hash verification so that "no such account" and "wrong password" take
 /// the same time — otherwise the endpoint answers whether a name is registered.
+///
+/// If the website hash does not match, the dedicated server's whitelist is
+/// tried next. That is the password the player uses to join the game, and it
+/// is how the old PHP site signed people in. A hit updates the website hash
+/// (or creates the website row) so the next visit is a normal login.
 pub async fn authenticate(
     db: &PgPool,
     username: &str,
     password: &str,
+    whitelist_db: Option<&Path>,
 ) -> Result<Option<User>, ApiError> {
-    let credentials = sqlx::query_as::<_, Credentials>(
-        "SELECT id, password_hash FROM users WHERE lower(username) = lower($1)",
-    )
-    .bind(username.trim())
-    .fetch_optional(db)
-    .await?;
+    let identifier = username.trim();
+    // The register form collects an email. People type that back into the
+    // login box hours later. Looking up only the in-game name produces the
+    // same "no such account" message as a wrong password.
+    let credentials = if identifier.contains('@') {
+        sqlx::query_as::<_, Credentials>(
+            "SELECT id, password_hash FROM users WHERE lower(email) = lower($1)",
+        )
+        .bind(identifier)
+        .fetch_optional(db)
+        .await?
+    } else {
+        sqlx::query_as::<_, Credentials>(
+            "SELECT id, password_hash FROM users WHERE lower(username) = lower($1)",
+        )
+        .bind(identifier)
+        .fetch_optional(db)
+        .await?
+    };
 
-    let Some(credentials) = credentials else {
+    if let Some(credentials) = credentials {
+        if verify_password(password, &credentials.password_hash) {
+            let user = sqlx::query_as::<_, User>(
+                "SELECT id, username, email, role, steam_id, created_at FROM users WHERE id = $1",
+            )
+            .bind(credentials.id)
+            .fetch_one(db)
+            .await?;
+
+            return Ok(Some(user));
+        }
+    } else {
         burn_time();
+    }
+
+    let Some(whitelist_db) = whitelist_db else {
         return Ok(None);
     };
 
-    if !verify_password(password, &credentials.password_hash) {
+    // The game whitelist is keyed by character name, not email.
+    if identifier.contains('@') {
         return Ok(None);
     }
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT id, username, email, role, steam_id, created_at FROM users WHERE id = $1",
-    )
-    .bind(credentials.id)
-    .fetch_one(db)
-    .await?;
+    let Some(game) = pz_bridge::authenticate_whitelist(whitelist_db, identifier, password) else {
+        return Ok(None);
+    };
+
+    let user = sync_from_game(db, &game, password).await?;
+    tracing::info!(username = %user.username, "signed in with game credentials");
 
     Ok(Some(user))
+}
+
+/// Create or refresh the website row from a verified game whitelist login.
+async fn sync_from_game(
+    db: &PgPool,
+    game: &pz_bridge::WhitelistAccount,
+    password: &str,
+) -> Result<User, ApiError> {
+    let password_hash = hash_password(password)?;
+
+    let existing = sqlx::query_as::<_, User>(
+        "SELECT id, username, email, role, steam_id, created_at FROM users WHERE lower(username) = lower($1)",
+    )
+    .bind(&game.username)
+    .fetch_optional(db)
+    .await?;
+
+    if let Some(user) = existing {
+        sqlx::query(
+            r#"
+            UPDATE users
+            SET password_hash = $2,
+                steam_id = coalesce($3, steam_id),
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(user.id)
+        .bind(&password_hash)
+        .bind(game.steam_id.as_deref())
+        .execute(db)
+        .await?;
+
+        // Never invent or replace the email they registered with.
+        return Ok(user);
+    }
+
+    let email = format!("{}@pz.local", game.username.to_ascii_lowercase());
+
+    let user = sqlx::query_as::<_, User>(
+        r#"
+        INSERT INTO users (username, steam_id, email, password_hash, role)
+        VALUES ($1, $2, $3, $4, 'player')
+        RETURNING id, username, email, role, steam_id, created_at
+        "#,
+    )
+    .bind(&game.username)
+    .bind(game.steam_id.as_deref())
+    .bind(&email)
+    .bind(&password_hash)
+    .fetch_one(db)
+    .await
+    .map_err(taken_field)?;
+
+    Ok(user)
 }
 
 /// Issue a session and return the raw token, which is only ever seen here and
@@ -342,6 +466,13 @@ fn hash_password(password: &str) -> Result<String, ApiError> {
 }
 
 fn verify_password(password: &str, hash: &str) -> bool {
+    // Rows copied from the Laravel site are bcrypt (`$2y$` / `$2a$`), not
+    // Argon2id. Accept those, and the PZ scheme (bcrypt of md5), so a
+    // migrated player is not locked out of their existing password.
+    if hash.starts_with("$2") {
+        return pz_bridge::whitelist::verify_password(password, hash);
+    }
+
     let Ok(parsed) = PasswordHash::new(hash) else {
         // A hash we cannot parse is a corrupt row, not a valid login.
         tracing::error!("stored password hash is unparseable");

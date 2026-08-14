@@ -2,17 +2,26 @@
 
 use std::collections::BTreeMap;
 
-use axum::extract::{Path, Query, State};
+use axum::body::Body;
+use axum::extract::{Multipart, Path, Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use tokio_util::io::ReaderStream;
+use uuid::Uuid;
 
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::extract::AdminUser;
 use crate::services::admin;
+use crate::services::audit;
+use crate::services::automations;
+use crate::services::backups;
 use crate::services::reports;
 use crate::services::sanctions;
 use crate::services::site::{self, SiteSettings};
+use crate::services::wipe::{self, WipeRequest, WipeResult};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -26,6 +35,8 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/players/{username}/access", post(access))
         .route("/admin/players/{username}/teleport", post(teleport))
         .route("/admin/players/{username}/inventory", get(inventory))
+        .route("/admin/players/{username}/items/give", post(give_item))
+        .route("/admin/players/{username}/items/take", post(take_item))
         .route("/admin/server/start", post(start))
         .route("/admin/server/stop", post(stop))
         .route("/admin/server/restart", post(restart))
@@ -46,6 +57,38 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/reports", get(report_queue))
         .route("/admin/reports/{id}", get(show_report).patch(update_report))
         .route("/admin/site", get(site).patch(update_site))
+        .route("/admin/backups", get(backups).post(create_backup).delete(delete_backups))
+        .route("/admin/backups/status", get(backup_status))
+        .route("/admin/backups/schedule", get(backup_schedule).patch(update_backup_schedule))
+        .route("/admin/backups/{id}", delete(delete_backup))
+        .route("/admin/backups/{id}/contents", get(backup_contents))
+        .route("/admin/backups/{id}/file", get(backup_file))
+        .route("/admin/backups/{id}/rollback", post(rollback_backup))
+        .route("/admin/automations", get(automations).post(create_automation))
+        .route(
+            "/admin/automations/{id}",
+            patch(update_automation).delete(delete_automation),
+        )
+        .route("/admin/automations/{id}/run", post(run_automation))
+        .route("/admin/automations/{id}/runs", get(automation_runs))
+        .route("/admin/audit", get(audit_log))
+        .route("/admin/audit/actions", get(audit_actions))
+}
+
+/// Download and import sit outside the 15s request ceiling.
+pub fn file_routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/backups/{id}/download", get(download_backup))
+        .route("/admin/backups/import", post(import_world))
+        .route("/admin/server/wipe", post(wipe_server))
+}
+
+async fn wipe_server(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<WipeRequest>,
+) -> ApiResult<Json<WipeResult>> {
+    Ok(Json(wipe::run(&state, body).await?))
 }
 
 #[derive(serde::Serialize)]
@@ -170,6 +213,69 @@ async fn inventory(
     Path(username): Path<String>,
 ) -> ApiResult<Json<Option<pz_bridge::InventorySnapshot>>> {
     Ok(Json(admin::player_inventory(&state, &username).await?))
+}
+
+#[derive(Deserialize)]
+struct ItemMove {
+    item_type: String,
+    count: Option<i32>,
+}
+
+async fn give_item(
+    State(state): State<AppState>,
+    AdminUser(staff): AdminUser,
+    Path(username): Path<String>,
+    Json(body): Json<ItemMove>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let item_type = crate::services::economy::item_type(&body.item_type)?;
+    let count = body.count.unwrap_or(1);
+    if !(1..=100).contains(&count) {
+        return Err(ApiError::Validation("Give between 1 and 100.".to_owned()));
+    }
+    let outcome = crate::services::economy::delivery::give_now(
+        &state,
+        &username,
+        item_type,
+        count,
+        "admin_give",
+        "admin",
+        staff.id,
+    )
+    .await?;
+    let queued = matches!(outcome, crate::services::economy::delivery::GiveOutcome::Queued(_));
+    Ok(Json(serde_json::json!({
+        "message": if queued {
+            "Queued. They receive it the next time they are in the world."
+        } else {
+            "Given."
+        }
+    })))
+}
+
+async fn take_item(
+    State(state): State<AppState>,
+    AdminUser(staff): AdminUser,
+    Path(username): Path<String>,
+    Json(body): Json<ItemMove>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let item_type = crate::services::economy::item_type(&body.item_type)?;
+    let count = body.count.unwrap_or(1);
+    if !(1..=100).contains(&count) {
+        return Err(ApiError::Validation("Take between 1 and 100.".to_owned()));
+    }
+    crate::services::economy::delivery::take(
+        &state,
+        &username,
+        item_type,
+        count,
+        "admin_take",
+        "admin",
+        staff.id,
+    )
+    .await?;
+    Ok(Json(serde_json::json!({
+        "message": "Queued. The item leaves their pack the next time they are in the world."
+    })))
 }
 
 // ── Server ──────────────────────────────────────────────────────────
@@ -551,4 +657,344 @@ async fn update_site(
         )
         .await?,
     ))
+}
+
+// ── Backups ─────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct BackupQuery {
+    r#type: Option<String>,
+}
+
+async fn backups(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Query(query): Query<BackupQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let items = backups::list(&state.db, &state.config.backup_path, query.r#type.as_deref()).await?;
+    let slot = backups::slot(&state.backup_job).await;
+    Ok(Json(serde_json::json!({
+        "backups": items,
+        "job": slot.current,
+        "last_error": slot.last_error,
+    })))
+}
+
+async fn backup_status(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let slot = backups::slot(&state.backup_job).await;
+    Ok(Json(serde_json::json!({
+        "job": slot.current,
+        "last_error": slot.last_error,
+    })))
+}
+
+#[derive(Deserialize)]
+struct CreateBackupBody {
+    notes: Option<String>,
+    notify_players: Option<bool>,
+    message: Option<String>,
+}
+
+async fn create_backup(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<CreateBackupBody>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    if body
+        .notes
+        .as_deref()
+        .is_some_and(|notes| notes.chars().count() > 500)
+    {
+        return Err(ApiError::Validation(
+            "Notes must be 500 characters or fewer.".to_owned(),
+        ));
+    }
+    backups::start_create(state.clone(), body.notes).await?;
+    if body.notify_players.unwrap_or(false) {
+        let message = body
+            .message
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("Backup in progress — expect a brief lag");
+        let _ = admin::broadcast(&state, message).await;
+    }
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "message": "Backup started. It will appear in the list shortly."
+        })),
+    ))
+}
+
+async fn delete_backup(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let filename = backups::delete(&state.db, id).await?;
+    Ok(Json(serde_json::json!({ "message": format!("Deleted {filename}") })))
+}
+
+#[derive(Deserialize)]
+struct BulkDeleteBody {
+    ids: Vec<Uuid>,
+}
+
+async fn delete_backups(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<BulkDeleteBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if body.ids.is_empty() {
+        return Err(ApiError::Validation("Select at least one backup.".to_owned()));
+    }
+    let count = backups::delete_many(&state.db, &body.ids).await?;
+    Ok(Json(serde_json::json!({ "message": format!("Deleted {count} backup(s)") })))
+}
+
+#[derive(Deserialize)]
+struct RollbackBody {
+    confirm: bool,
+    countdown: Option<u32>,
+    message: Option<String>,
+}
+
+async fn rollback_backup(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<RollbackBody>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    if !body.confirm {
+        return Err(ApiError::Validation("Confirm the rollback first.".to_owned()));
+    }
+    if let Some(seconds) = body.countdown.filter(|value| *value > 0) {
+        if !(10..=3600).contains(&seconds) {
+            return Err(ApiError::Validation(
+                "Countdown must be between 10 and 3600 seconds.".to_owned(),
+            ));
+        }
+        let warning = body
+            .message
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("Server rolling back — you will be disconnected");
+        let _ = admin::broadcast(&state, warning).await;
+        let cloned = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(seconds.into())).await;
+            if let Err(error) = backups::start_rollback(cloned.clone(), id).await {
+                tracing::error!(%error, "delayed rollback failed to start");
+                backups::record_error(&cloned, error.to_string()).await;
+            }
+        });
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "message": format!("Rollback scheduled in {seconds} seconds")
+            })),
+        ));
+    }
+
+    let filename = backups::start_rollback(state, id).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "message": format!("Restoring {filename}")
+        })),
+    ))
+}
+
+async fn backup_schedule(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<backups::BackupSettings>> {
+    Ok(Json(backups::settings(&state.db).await?))
+}
+
+async fn update_backup_schedule(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<backups::SchedulePatch>,
+) -> ApiResult<Json<backups::BackupSettings>> {
+    Ok(Json(backups::update_settings(&state.db, body).await?))
+}
+
+async fn backup_contents(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<backups::ArchiveListing>> {
+    let backup = backups::get(&state.db, id)
+        .await?
+        .ok_or_else(|| ApiError::Validation("That backup is gone.".to_owned()))?;
+    Ok(Json(backups::contents(&backup)?))
+}
+
+#[derive(Deserialize)]
+struct BackupFileQuery {
+    path: String,
+}
+
+async fn backup_file(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+    Query(query): Query<BackupFileQuery>,
+) -> ApiResult<Json<backups::ArchiveFile>> {
+    let backup = backups::get(&state.db, id)
+        .await?
+        .ok_or_else(|| ApiError::Validation("That backup is gone.".to_owned()))?;
+    Ok(Json(backups::read_entry(&backup, &query.path)?))
+}
+
+async fn download_backup(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<impl IntoResponse> {
+    let backup = backups::get(&state.db, id)
+        .await?
+        .ok_or_else(|| ApiError::Validation("That backup is gone.".to_owned()))?;
+    let path = backups::download_path(&backup, &state.config.backup_path)?;
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|error| ApiError::Internal(format!("could not read the archive: {error}")))?;
+    let body = Body::from_stream(ReaderStream::new(file));
+    let mut response = axum::response::Response::new(body);
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/gzip"));
+    if let Ok(value) = header::HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}\"",
+        backup.filename
+    )) {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    Ok(response)
+}
+
+async fn import_world(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    mut multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let dir = backups::imports_dir(&state.config.backup_path);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|error| ApiError::Internal(format!("cannot create the import folder: {error}")))?;
+
+    let dest = dir.join(format!(
+        "import_{}.zip",
+        chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+    ));
+
+    let mut written = false;
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| ApiError::Validation(error.to_string()))?
+    {
+        if field.name() != Some("file") {
+            continue;
+        }
+        let mut file = tokio::fs::File::create(&dest)
+            .await
+            .map_err(|error| ApiError::Internal(error.to_string()))?;
+        use tokio::io::AsyncWriteExt;
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|error| ApiError::Validation(error.to_string()))?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(|error| ApiError::Internal(error.to_string()))?;
+        }
+        written = true;
+        break;
+    }
+
+    if !written {
+        return Err(ApiError::Validation("Choose a zip to import.".to_owned()));
+    }
+
+    backups::start_import(state, dest).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "message": "World import started. The server will restart shortly."
+        })),
+    ))
+}
+
+// ── Automations ─────────────────────────────────────────────────────
+
+async fn automations(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<Vec<automations::AutomationView>>> {
+    Ok(Json(automations::list(&state.db).await?))
+}
+
+async fn create_automation(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<automations::AutomationPatch>,
+) -> ApiResult<(StatusCode, Json<automations::AutomationView>)> {
+    Ok((
+        StatusCode::CREATED,
+        Json(automations::create(&state.db, body).await?),
+    ))
+}
+
+async fn update_automation(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<automations::AutomationPatch>,
+) -> ApiResult<Json<automations::AutomationView>> {
+    Ok(Json(automations::update(&state.db, id, body).await?))
+}
+
+async fn delete_automation(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    automations::delete(&state.db, id).await?;
+    Ok(Json(serde_json::json!({ "message": "Automation deleted." })))
+}
+
+async fn run_automation(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<automations::AutomationView>> {
+    Ok(Json(automations::run_now(&state, id).await?))
+}
+
+async fn automation_runs(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Vec<automations::AutomationRun>>> {
+    Ok(Json(automations::runs(&state.db, id).await?))
+}
+
+async fn audit_log(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Query(filter): Query<audit::AuditFilter>,
+) -> ApiResult<Json<Vec<audit::AuditEntry>>> {
+    Ok(Json(audit::list(&state.db, &filter).await?))
+}
+
+async fn audit_actions(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<Vec<String>>> {
+    Ok(Json(audit::actions(&state.db).await?))
 }

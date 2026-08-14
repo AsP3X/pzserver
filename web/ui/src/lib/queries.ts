@@ -191,3 +191,258 @@ export const myReportsQuery = queryOptions({
   refetchIntervalInBackground: false,
   staleTime: 5_000,
 })
+
+export const adminBackupsQuery = queryOptions({
+  queryKey: ['admin', 'backups'],
+  queryFn: api.adminBackups,
+  refetchInterval: (query) => (query.state.data?.job ? 3_000 : 15_000),
+  refetchIntervalInBackground: false,
+  staleTime: 2_000,
+})
+
+export const adminBackupScheduleQuery = queryOptions({
+  queryKey: ['admin', 'backups', 'schedule'],
+  queryFn: api.adminBackupSchedule,
+  staleTime: 15_000,
+})
+
+export const adminAutomationsQuery = queryOptions({
+  queryKey: ['admin', 'automations'],
+  queryFn: api.adminAutomations,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
+export const adminAuditQuery = (filter: { actor?: string; action?: string; target?: string }) =>
+  queryOptions({
+    queryKey: ['admin', 'audit', filter],
+    queryFn: () => api.adminAudit(filter),
+    refetchInterval: 15_000,
+    staleTime: 5_000,
+  })
+
+export const adminAuditActionsQuery = queryOptions({
+  queryKey: ['admin', 'audit', 'actions'],
+  queryFn: api.adminAuditActions,
+  staleTime: 30_000,
+})
+
+export function adminAutomationRunsQuery(id: string) {
+  return queryOptions({
+    queryKey: ['admin', 'automations', id, 'runs'],
+    queryFn: () => api.adminAutomationRuns(id),
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+    staleTime: 5_000,
+    enabled: id.length > 0,
+  })
+}
+
+export const myWalletQuery = queryOptions({
+  queryKey: ['me', 'wallet'],
+  queryFn: api.myWallet,
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+})
+
+export const myWalletTransactionsQuery = queryOptions({
+  queryKey: ['me', 'wallet', 'transactions'],
+  queryFn: api.myWalletTransactions,
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+})
+
+export const myRewardsQuery = queryOptions({
+  queryKey: ['me', 'rewards'],
+  queryFn: api.myRewards,
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+})
+
+export const storeItemsQuery = queryOptions({
+  queryKey: ['store', 'items'],
+  queryFn: api.storeItems,
+  staleTime: 10_000,
+})
+
+export const myStorePurchasesQuery = queryOptions({
+  queryKey: ['me', 'store', 'purchases'],
+  queryFn: api.myStorePurchases,
+  refetchInterval: 10_000,
+  staleTime: 5_000,
+})
+
+export const auctionsQuery = queryOptions({
+  queryKey: ['auctions'],
+  queryFn: api.auctions,
+  refetchInterval: 8_000,
+  staleTime: 4_000,
+})
+
+export const myAuctionsQuery = queryOptions({
+  queryKey: ['auctions', 'mine'],
+  queryFn: api.myAuctions,
+  refetchInterval: 8_000,
+  staleTime: 4_000,
+})
+
+export const myVaultQuery = queryOptions({
+  queryKey: ['me', 'vault'],
+  queryFn: api.myVault,
+  refetchInterval: 8_000,
+  refetchIntervalInBackground: false,
+  staleTime: 4_000,
+})
+
+export const adminVaultQuery = queryOptions({
+  queryKey: ['admin', 'vault'],
+  queryFn: api.adminVault,
+  staleTime: 5_000,
+})
+
+export const adminStoreQuery = queryOptions({
+  queryKey: ['admin', 'store'],
+  queryFn: api.adminStoreItems,
+  staleTime: 5_000,
+})
+
+export const adminStorePurchasesQuery = queryOptions({
+  queryKey: ['admin', 'store', 'purchases'],
+  queryFn: api.adminStorePurchases,
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+})
+
+export const adminWalletsQuery = queryOptions({
+  queryKey: ['admin', 'wallets'],
+  queryFn: api.adminWallets,
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+})
+
+export const adminObjectivesQuery = queryOptions({
+  queryKey: ['admin', 'objectives'],
+  queryFn: api.adminObjectives,
+  staleTime: 5_000,
+})
+
+export const adminQuestsQuery = queryOptions({
+  queryKey: ['admin', 'quests'],
+  queryFn: api.adminQuests,
+  staleTime: 5_000,
+})
+
+export function adminQuestQuery(id: string) {
+  return queryOptions({
+    queryKey: ['admin', 'quests', id],
+    queryFn: () => api.adminQuest(id),
+    enabled: id.length > 0,
+  })
+}
+
+export const adminGroupsQuery = queryOptions({
+  queryKey: ['admin', 'groups'],
+  queryFn: api.adminGroups,
+  staleTime: 10_000,
+})
+
+export function adminWalletTransactionsQuery(userId: string) {
+  return queryOptions({
+    queryKey: ['admin', 'wallets', userId, 'transactions'],
+    queryFn: () => api.adminWalletTransactions(userId),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+    enabled: userId.length > 0,
+  })
+}
+
+export const adminAuctionsQuery = queryOptions({
+  queryKey: ['admin', 'auctions'],
+  queryFn: api.adminAuctions,
+  refetchInterval: 10_000,
+  staleTime: 5_000,
+})
+
+export function adminAuctionBidsQuery(id: string) {
+  return queryOptions({
+    queryKey: ['admin', 'auctions', id, 'bids'],
+    queryFn: () => api.adminAuctionBids(id),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+    enabled: id.length > 0,
+  })
+}
+
+export function adminBackupContentsQuery(id: string) {
+  return queryOptions({
+    queryKey: ['admin', 'backups', id, 'contents'],
+    queryFn: () => api.adminBackupContents(id),
+    staleTime: 60_000,
+    enabled: id.length > 0,
+  })
+}
+
+export function adminBackupFileQuery(id: string, path: string) {
+  return queryOptions({
+    queryKey: ['admin', 'backups', id, 'file', path],
+    queryFn: () => api.adminBackupFile(id, path),
+    staleTime: 60_000,
+    enabled: id.length > 0 && path.length > 0,
+  })
+}
+
+export const languagesQuery = queryOptions({
+  queryKey: ['i18n', 'languages'],
+  queryFn: api.i18nLanguages,
+  staleTime: 60_000,
+})
+
+export const newsQuery = queryOptions({
+  queryKey: ['news'],
+  queryFn: api.news,
+  staleTime: 30_000,
+})
+
+export function newsPostQuery(slug: string) {
+  return queryOptions({
+    queryKey: ['news', slug],
+    queryFn: () => api.newsPost(slug),
+    enabled: slug.length > 0,
+    staleTime: 30_000,
+  })
+}
+
+export const adminNewsQuery = queryOptions({
+  queryKey: ['admin', 'news'],
+  queryFn: api.adminNews,
+  staleTime: 10_000,
+})
+
+export const adminLanguagesQuery = queryOptions({
+  queryKey: ['admin', 'languages'],
+  queryFn: api.adminLanguages,
+  staleTime: 15_000,
+})
+
+export const adminTranslationsQuery = queryOptions({
+  queryKey: ['admin', 'translations'],
+  queryFn: api.adminTranslations,
+  staleTime: 10_000,
+})
+
+export const adminSafeZonesQuery = queryOptions({
+  queryKey: ['admin', 'safe-zones'],
+  queryFn: api.adminSafeZones,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
+export const safeZonesQuery = queryOptions({
+  queryKey: ['safe-zones'],
+  queryFn: api.safeZones,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})

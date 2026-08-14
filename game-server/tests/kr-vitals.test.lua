@@ -42,7 +42,7 @@ package.preload["KR_Codec"] = function() return Codec end
 local written = {}
 package.preload["KR_Bridge"] = function()
     return {
-        VERSION = "1.18",
+        VERSION = "1.21",
         wallStamp = function() return "2026-08-10T12:00:00" end,
         worldStamp = function() return "1993-07-09T12:00:00" end,
         writeText = function(path, body)

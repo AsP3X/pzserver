@@ -9,16 +9,22 @@
 //! Every reader returns `Option`/`Result` rather than panicking. A missing file
 //! is the normal state of a stopped server, not an error worth surfacing.
 
+pub mod delivery;
 pub mod docker;
 pub mod ini;
 pub mod inventory;
 pub mod links;
+pub mod sanctuary;
 pub mod tickets;
 pub mod lua;
 pub mod player_file;
 pub mod vitals;
+pub mod whitelist;
 pub mod workshop;
 
+pub use delivery::{
+    DeliveryChannel, DeliveryEntry, DeliveryError, DeliveryQueue, DeliveryResult, DeliveryResults,
+};
 pub use docker::{ContainerState, ContainerStatus, DockerClient, DockerError, parse_docker_logs};
 pub use ini::ServerIni;
 pub use inventory::{InventoryReader, InventorySnapshot};
@@ -32,4 +38,5 @@ pub use lua::{
 };
 pub use player_file::PlayerFile;
 pub use vitals::{PlayerVitals, VitalsReader};
+pub use whitelist::{WhitelistAccount, authenticate as authenticate_whitelist};
 pub use workshop::{WorkshopDetails, parse_workshop_id};

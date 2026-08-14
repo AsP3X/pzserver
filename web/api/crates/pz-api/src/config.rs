@@ -33,10 +33,13 @@ pub struct Config {
     pub game_server_container: String,
 
     /// Game data directory (`Zomboid/`), parent of `Server/` and `Logs/`.
-    #[allow(dead_code)]
     pub data_path: PathBuf,
+    /// `server.ini` / whitelist DB stem (`ZomboidServer` here).
+    pub server_name: String,
     /// Directory the KnoxRelay mod writes its JSON exports into.
     pub lua_bridge_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub steam_branch: Option<String>,
     /// Path to the live `server.ini`.
     pub server_ini_path: PathBuf,
     /// Workshop id of the Knox Relay mod — never removable from the load list.
@@ -65,6 +68,9 @@ pub struct Config {
     pub stats_sync_interval: Duration,
     /// A live-position export older than this no longer proves the mod is alive.
     pub bridge_stale_after: Duration,
+
+    /// Coins paid by the daily wallet drop. Zero disables it.
+    pub daily_reward_coins: i64,
 }
 
 impl Config {
@@ -102,7 +108,10 @@ impl Config {
             game_server_container: string("GAME_SERVER_CONTAINER_NAME", "pz-game-server"),
 
             data_path: PathBuf::from(&data_path),
+            server_name,
             lua_bridge_path,
+            backup_path: PathBuf::from(string("BACKUP_PATH", "/backups")),
+            steam_branch: optional("PZ_STEAM_BRANCH"),
             server_ini_path,
             bridge_workshop_id: optional("PZ_BRIDGE_WORKSHOP_ID"),
             bridge_mod_id: string("PZ_BRIDGE_MOD_ID", "KnoxRelay"),
@@ -124,7 +133,13 @@ impl Config {
             // somebody who is playing right now and expects to see themselves.
             stats_sync_interval: seconds("STATS_SYNC_INTERVAL", "5")?,
             bridge_stale_after: seconds("BRIDGE_STALE_AFTER", "120")?,
+            daily_reward_coins: parse("PZ_DAILY_REWARD_COINS", "25", "integer")?,
         })
+    }
+
+    /// The dedicated server's whitelist SQLite file, if it is on disk.
+    pub fn whitelist_db_path(&self) -> Option<std::path::PathBuf> {
+        pz_bridge::whitelist::resolve_db_path(&self.data_path, &self.server_name)
     }
 }
 

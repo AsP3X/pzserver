@@ -20,7 +20,6 @@
  * items; past that, split the group rather than letting the list grow.
  */
 import {
-  Activity,
   Archive,
   Backpack,
   Bell,
@@ -28,6 +27,7 @@ import {
   Coins,
   Crosshair,
   Gauge,
+  GitBranch,
   Languages,
   LayoutGrid,
   LifeBuoy,
@@ -39,7 +39,6 @@ import {
   Settings,
   Shield,
   ShieldAlert,
-  ShoppingBag,
   Skull,
   Sliders,
   Store,
@@ -50,6 +49,7 @@ import {
   Users,
   Vault,
   Wrench,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -74,7 +74,7 @@ export interface NavGroup {
 export const PUBLIC_NAV: NavItem[] = [
   { to: '/status', label: 'nav.status', icon: Gauge },
   { to: '/rankings', label: 'nav.rankings', icon: Trophy },
-  { to: '/news', label: 'nav.news', icon: Newspaper, planned: true },
+  { to: '/news', label: 'nav.news', icon: Newspaper },
   { to: '/obituary', label: 'nav.obituary', icon: Skull },
 ]
 
@@ -93,9 +93,10 @@ export const PLAYER_NAV: NavGroup[] = [
   {
     label: 'nav.group.holdings',
     items: [
-      { to: '/me/vault', label: 'nav.vault', icon: Vault, planned: true },
-      { to: '/me/wallet', label: 'nav.wallet', icon: Coins, planned: true },
-      { to: '/me/purchases', label: 'nav.purchases', icon: ShoppingBag, planned: true },
+      { to: '/me/wallet', label: 'nav.wallet', icon: Coins },
+      { to: '/shop', label: 'nav.store', icon: Store },
+      { to: '/auctions', label: 'nav.auctions', icon: Tag },
+      { to: '/me/vault', label: 'nav.vault', icon: Vault },
     ],
   },
   {
@@ -127,8 +128,8 @@ export const ADMIN_NAV: NavGroup[] = [
     items: [
       { to: '/admin/config', label: 'nav.config', icon: Wrench },
       { to: '/admin/mods', label: 'nav.mods', icon: Package },
-      { to: '/admin/backups', label: 'nav.backups', icon: Archive, planned: true },
-      { to: '/admin/restarts', label: 'nav.auto_restart', icon: Activity, planned: true },
+      { to: '/admin/backups', label: 'nav.backups', icon: Archive },
+      { to: '/admin/automations', label: 'nav.automations', icon: Zap },
       { to: '/admin/console', label: 'nav.rcon_console', icon: Terminal },
       { to: '/admin/logs', label: 'nav.server_logs', icon: ScrollText },
       { to: '/admin/bridge', label: 'nav.bridge', icon: Link2 },
@@ -147,25 +148,26 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     label: 'nav.group.world',
     items: [
-      { to: '/admin/safe-zones', label: 'nav.safe_zones', icon: ShieldAlert, planned: true },
+      { to: '/admin/safe-zones', label: 'nav.safe_zones', icon: ShieldAlert },
       { to: '/admin/vehicles', label: 'nav.vehicles', icon: Car, planned: true },
     ],
   },
   {
     label: 'nav.group.shop',
     items: [
-      { to: '/admin/shop', label: 'nav.catalogue', icon: Store, planned: true },
-      { to: '/admin/shop/bundles', label: 'nav.bundles', icon: Package, planned: true },
+      { to: '/admin/shop', label: 'nav.catalogue', icon: Store },
+      { to: '/admin/auctions', label: 'nav.auctions', icon: Tag },
+      { to: '/admin/wallets', label: 'nav.wallets', icon: Coins },
+      { to: '/admin/objectives', label: 'nav.objectives', icon: Trophy },
+      { to: '/admin/quests', label: 'nav.flows', icon: GitBranch },
       { to: '/admin/shop/promotions', label: 'nav.promotions', icon: Tag, planned: true },
-      { to: '/admin/shop/purchases', label: 'nav.purchases', icon: ShoppingBag, planned: true },
-      { to: '/admin/wallets', label: 'nav.wallets', icon: Coins, planned: true },
-      { to: '/admin/vault', label: 'nav.vault', icon: Vault, planned: true },
+      { to: '/admin/vault', label: 'nav.vault', icon: Vault },
     ],
   },
   {
     label: 'nav.group.community',
     items: [
-      { to: '/admin/news', label: 'nav.news', icon: Newspaper, planned: true },
+      { to: '/admin/news', label: 'nav.news', icon: Newspaper },
       { to: '/admin/discord', label: 'nav.discord', icon: Bell, planned: true },
     ],
   },
@@ -173,8 +175,8 @@ export const ADMIN_NAV: NavGroup[] = [
     label: 'nav.group.system',
     items: [
       { to: '/admin/site', label: 'nav.site_settings', icon: Sliders },
-      { to: '/admin/translations', label: 'nav.translations', icon: Languages, planned: true },
-      { to: '/admin/audit', label: 'nav.audit_log', icon: ScrollText, planned: true },
+      { to: '/admin/translations', label: 'nav.translations', icon: Languages },
+      { to: '/admin/audit', label: 'nav.audit_log', icon: ScrollText },
     ],
   },
 ]

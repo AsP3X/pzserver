@@ -5,10 +5,18 @@ it from the Workshop (`PZ_WORKSHOP_IDS` / `PZ_BRIDGE_WORKSHOP_ID` in `.env`), no
 from the copy in this repo — so a Lua change is not deployed until the running
 server is on that same version.
 
-**Version lock:** when the mod is updated, the local dedicated server must be
-put on that same build in the same sitting. Source, the published Workshop item,
-and `game_state.json` `mod_version` must agree. Packaging without recreating
-`game-server` is unfinished work. See `AGENTS.md`.
+**When to use this doc:** only after the user answers **yes** to the question
+dialog “Prepare the next Knox Relay Workshop release?” Do not bump the version,
+package, or sync the upload folder on a no.
+
+Saying no does **not** skip putting the new Lua on the dedicated server **and**
+the PZ client. That still happens in the same sitting — see `AGENTS.md`.
+
+**Version lock (after a yes):** bump `modversion=` and `KR_Bridge.VERSION`
+together, then put the local dedicated server on that same build before you
+stop. After Steam publish, the Workshop item and `game_state.json`
+`mod_version` must agree. Packaging without recreating `game-server` is
+unfinished work.
 
 ## The four copies of the mod
 
@@ -37,8 +45,8 @@ running the mod, and the fix has to go through this whole flow again.
 
 ### 2. Bump the version and write a changenote
 
-The version lives in two places and `make workshop-package` refuses to run if
-they disagree:
+Only do this step after a **yes**. The version lives in two places and
+`make workshop-package` refuses to run if they disagree:
 
 - `modversion=` in `game-server/mods/KnoxRelay/42/mod.info` — metadata
 - `KR_Bridge.VERSION` in `KR_Bridge.lua` — what a running server reports in
@@ -134,6 +142,7 @@ Two things lag behind the restart:
 ## Checklist
 
 ```
+[ ] user answered yes to “Prepare the next Knox Relay Workshop release?”
 [ ] luajit syntax check passes
 [ ] modversion bumped in both mod.info and KR_Bridge.VERSION, changenote written
 [ ] make workshop-package

@@ -21,9 +21,9 @@ const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 const CODE_LENGTH: usize = 6;
 
-/// Long enough to alt-tab to a browser and type it out, short enough that a
-/// code glimpsed on someone's screen is not worth much.
-pub const CODE_LIFETIME_MINUTES: i64 = 30;
+/// Long enough to finish on the website after a play session, short enough
+/// that a code left on screen is not useful the next day.
+pub const CODE_LIFETIME_MINUTES: i64 = 12 * 60;
 
 /// What came of a player running the command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -35,6 +35,10 @@ pub enum OpenOutcome {
         expires_at: DateTime<Utc>,
     },
     /// That character already has an account. Nothing to do.
+    ///
+    /// No longer produced by [`open`]: a second `/account register` issues a
+    /// recovery code instead. Kept so older result ledgers still deserialise.
+    #[allow(dead_code)]
     AlreadyRegistered,
 }
 
@@ -46,26 +50,18 @@ struct RegistrationRow {
     consumed_at: Option<DateTime<Utc>>,
 }
 
-/// Open a registration for a character, or report that it already has one.
+/// Open a registration for a character.
 ///
-/// Running the command twice replaces the outstanding code rather than adding
-/// a second, so only one code is ever live for a character.
+/// Always issues a code, even when the character already has a website row.
+/// Completing that code updates the email and password, which is how a player
+/// recovers a login. Running the command twice replaces the outstanding code
+/// rather than adding a second, so only one code is ever live for a character.
 pub async fn open(
     db: &PgPool,
     username: &str,
     steam_id: Option<&str>,
 ) -> Result<OpenOutcome, ApiError> {
     let username = username.trim();
-
-    let taken: bool =
-        sqlx::query_scalar("SELECT exists (SELECT 1 FROM users WHERE lower(username) = lower($1))")
-            .bind(username)
-            .fetch_one(db)
-            .await?;
-
-    if taken {
-        return Ok(OpenOutcome::AlreadyRegistered);
-    }
 
     let code = generate_code()?;
     let expires_at = Utc::now() + Duration::minutes(CODE_LIFETIME_MINUTES);
@@ -135,7 +131,7 @@ pub async fn complete(
         });
     };
 
-    let user = auth::create_from_registration(
+    let user = auth::apply_registration(
         &mut transaction,
         &registration.username,
         registration.steam_id.as_deref(),

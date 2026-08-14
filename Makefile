@@ -20,7 +20,7 @@ ifeq ($(filter $(WEB_PROXY_MODE),external proxy traefik),$(WEB_PROXY_MODE))
 	WEB_PROXY_MODE := npm
 endif
 
-COMPOSE_BASE := docker compose -f docker-compose.yml -f $(ARCH_FILE)
+COMPOSE_BASE := docker compose -f docker-compose.yml -f $(ARCH_FILE) -f docker-compose.web.yml
 ifeq ($(WEB_PROXY_MODE),caddy)
 	COMPOSE := $(COMPOSE_BASE) -f docker-compose.web-caddy.yml --profile caddy
 else ifeq ($(WEB_PROXY_MODE),npm)
@@ -32,6 +32,7 @@ endif
 PZ_GAME_PORT ?= 16261
 PZ_DIRECT_PORT ?= 16262
 APP_PORT ?= 8000
+WEB_UI_PORT ?= 8100
 CADDY_HTTP_PORT ?= 80
 CADDY_HTTPS_PORT ?= 443
 
@@ -75,7 +76,7 @@ info:
 	echo "║          Zomboid Manager — Status            ║"; \
 	echo "╚══════════════════════════════════════════════╝"; \
 	echo ""; \
-	echo "  Local Admin:   http://localhost:$(APP_PORT)"; \
+	echo "  Local Admin:   http://localhost:$(WEB_UI_PORT)"; \
 	if [ -f .firewall.conf ]; then \
 		. ./.firewall.conf; \
 		HTTPS_PORT="$${ADMIN_HTTPS_PORT:-443}"; \
@@ -118,7 +119,7 @@ info:
 ensure-data-dirs:
 	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
 		data/postgres data/redis data/app-vendor data/app-node-modules data/app-build \
-		data/caddy-data data/caddy-config
+		data/caddy-data data/caddy-config data/web-postgres
 
 # Public edge network is external; create if the host does not already have it
 ensure-networks:
@@ -307,30 +308,16 @@ update:
 	@echo "→ Rebuilding containers ..."
 	$(COMPOSE) up -d --build
 	@echo ""
-	@echo "→ Waiting for app container ..."
+	@echo "→ Waiting for web-api ..."
 	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
-		if $(COMPOSE) exec -T app php -v >/dev/null 2>&1; then break; fi; \
+		if $(COMPOSE) exec -T web-api true >/dev/null 2>&1; then break; fi; \
 		sleep 2; \
 	done; \
-	if ! $(COMPOSE) exec -T app php -v >/dev/null 2>&1; then \
-		echo "Error: app container did not become ready within 30s."; \
+	if ! $(COMPOSE) exec -T web-api true >/dev/null 2>&1; then \
+		echo "Error: web-api container did not become ready within 30s."; \
 		echo "Check 'make logs' for details."; \
 		exit 1; \
 	fi
-	@echo "→ Installing PHP dependencies (composer.lock) ..."
-	$(COMPOSE) exec -T app composer install --no-interaction --no-progress --prefer-dist
-	@echo ""
-	@echo "→ Building frontend assets ..."
-	$(COMPOSE) exec -T app npm install --no-audit --no-fund --silent
-	$(COMPOSE) exec -T app npm run build
-	@echo ""
-	@echo "→ Running database migrations ..."
-	$(COMPOSE) exec -T app php artisan migrate --force --no-interaction
-	@echo ""
-	@echo "→ Clearing application cache ..."
-	@$(COMPOSE) exec -T app php artisan config:clear >/dev/null 2>&1 || true
-	@$(COMPOSE) exec -T app php artisan route:clear >/dev/null 2>&1 || true
-	@$(COMPOSE) exec -T app php artisan view:clear >/dev/null 2>&1 || true
 	@echo ""
 	@echo "→ Restarting game-server (picks up entrypoint script changes) ..."
 	$(COMPOSE) restart game-server
@@ -368,10 +355,9 @@ update-version:
 	echo "  PZ_VERSION=$$VER"; \
 	echo "  PZ_VERSION_FULL=$$FULL"
 
-# ── Second web stack (Rust API + Vite UI + own Postgres) ─────────────
-# Runs alongside the Laravel stack; see web/README.md. The base compose file
-# is included for the shared pzserver-internal network and the game container.
-COMPOSE_WEB := $(COMPOSE_BASE) -f docker-compose.web.yml
+# ── Web stack extras (Rust API + Vite UI + own Postgres) ─────────────
+# docker-compose.web.yml is already in COMPOSE_BASE so `make up` starts it.
+COMPOSE_WEB := $(COMPOSE_BASE)
 COMPOSE_WEB_DEV := $(COMPOSE_WEB) -f docker-compose.web-dev.yml
 
 WEB_DB_PORT ?= 55433
@@ -385,7 +371,7 @@ ifeq ($(WEB_DB_NAME),)
 endif
 
 ensure-web-data-dirs:
-	@mkdir -p data/web-postgres
+	@mkdir -p data/web-postgres data/backups
 
 web-up: ensure-web-data-dirs ensure-networks
 	$(COMPOSE_WEB) up -d --build web-db web-api web-ui
@@ -436,7 +422,7 @@ help:
 	@echo "    setup          - Alias for 'init'"
 	@echo ""
 	@echo "  Services:"
-	@echo "    up             - Start services (admin UI local-only at localhost:8000)"
+	@echo "    up             - Start services (new UI local-only at localhost:8100)"
 	@echo "    down           - Stop services"
 	@echo "    build          - Build Docker images"
 	@echo "    restart        - Restart services"
@@ -464,9 +450,9 @@ help:
 	@echo "    test           - Run tests in the app container"
 	@echo "    exec CMD=...   - Run a command in the app container"
 	@echo ""
-	@echo "  Second web stack (Rust API + Vite UI — see web/README.md):"
-	@echo "    web-up         - Build and start web-db, web-api and web-ui"
-	@echo "    web-down       - Stop the second web stack"
+	@echo "  Web stack extras (Rust API + Vite UI — already started by 'up'):"
+	@echo "    web-up         - Build and start only web-db, web-api and web-ui"
+	@echo "    web-down       - Stop the web stack (and other compose services)"
 	@echo "    web-logs       - Follow web-api and web-ui logs"
 	@echo "    web-ps         - Show second-stack containers"
 	@echo "    web-dev-db     - Start only its Postgres, published for host dev"

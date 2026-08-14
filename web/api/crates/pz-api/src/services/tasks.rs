@@ -36,8 +36,53 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(ingame_report_loop(state.clone())),
         tokio::spawn(ticket_desk_loop(state.clone())),
         tokio::spawn(session_cleanup_loop(state.clone())),
-        tokio::spawn(sanction_expiry_loop(state)),
+        tokio::spawn(sanction_expiry_loop(state.clone())),
+        tokio::spawn(backup_schedule_loop(state.clone())),
+        tokio::spawn(automation_loop(state.clone())),
+        tokio::spawn(economy_loop(state.clone())),
+        tokio::spawn(safezone_loop(state)),
     ]
+}
+
+const SAFEZONE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+async fn safezone_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(SAFEZONE_INTERVAL);
+    loop {
+        ticker.tick().await;
+        crate::services::safezones::import(&state).await;
+    }
+}
+
+const ECONOMY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn economy_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(ECONOMY_INTERVAL);
+    loop {
+        ticker.tick().await;
+        crate::services::economy::delivery::tick(&state).await;
+        crate::services::economy::auction::tick(&state).await;
+    }
+}
+
+const BACKUP_SCHEDULE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+async fn backup_schedule_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(BACKUP_SCHEDULE_INTERVAL);
+    loop {
+        ticker.tick().await;
+        crate::services::backups::tick_schedule(&state).await;
+    }
+}
+
+const AUTOMATION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+async fn automation_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(AUTOMATION_INTERVAL);
+    loop {
+        ticker.tick().await;
+        crate::services::automations::tick(&state).await;
+    }
 }
 
 /// Upsert the mod's `player_stats.json` into Postgres whenever it changes.
@@ -376,6 +421,8 @@ async fn account_registration_loop(state: AppState) {
                         at: Utc::now().to_rfc3339(),
                     }
                 }
+                // Kept for older ledgers. New opens always issue a code so a
+                // player can recover email and password on this character.
                 Ok(OpenOutcome::AlreadyRegistered) => pz_bridge::LinkResult {
                     id: request.id,
                     username: request.username,

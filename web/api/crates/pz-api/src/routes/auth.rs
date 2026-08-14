@@ -84,7 +84,15 @@ async fn login(
         return Err(ApiError::TooManyRequests);
     }
 
-    let Some(user) = auth::authenticate(&state.db, &body.username, &body.password).await? else {
+    let whitelist_db = state.config.whitelist_db_path();
+    let Some(user) = auth::authenticate(
+        &state.db,
+        &body.username,
+        &body.password,
+        whitelist_db.as_deref(),
+    )
+    .await?
+    else {
         state.login_limiter.record_failure(&attempted);
 
         // Deliberately the same answer for an unknown name and a wrong

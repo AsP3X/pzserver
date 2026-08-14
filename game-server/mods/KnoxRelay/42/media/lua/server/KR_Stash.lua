@@ -143,12 +143,18 @@ end
 
 --- First item of `itemType` anywhere on the player, or nil. Falls back to the
 --- engine's recursive search when the manual walk comes up empty.
+---
+--- Held (queued take) copies are preferred so a drain removes the reserved
+--- ones rather than a spare the player meant to keep.
 function KR_Stash.locate(player, itemType)
-    for _, container in ipairs(KR_Stash.containers(player)) do
-        local item = KR_Stash.firstIn(container, itemType)
-        if item then
-            return item
-        end
+    local held = KR_Stash.locateMatching(player, itemType, true)
+    if held then
+        return held
+    end
+
+    local free = KR_Stash.locateMatching(player, itemType, false)
+    if free then
+        return free
     end
 
     local inventory = player:getInventory()
@@ -158,6 +164,82 @@ function KR_Stash.locate(player, itemType)
     end
 
     return nil
+end
+
+--- First match of `itemType` whose hold flag equals `wantHeld`.
+function KR_Stash.locateMatching(player, itemType, wantHeld)
+    for _, container in ipairs(KR_Stash.containers(player)) do
+        local contents = container.getItems and container:getItems()
+        if contents then
+            for index = 0, contents:size() - 1 do
+                local item = contents:get(index)
+                if KR_Stash.matches(item, itemType) and KR_Stash.isHeld(item) == wantHeld then
+                    return item
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+function KR_Stash.isHeld(item)
+    if not item or not item.getModData then
+        return false
+    end
+
+    return item:getModData().knox_hold == true
+end
+
+--- Pin an item so the client cannot drop it, or release that pin.
+---
+--- Favorite is the engine's own "cannot drop this" flag. We remember whether
+--- the player had already favorited it so a failed take does not clear their
+--- own star.
+function KR_Stash.markHeld(item, held)
+    if not item or not item.getModData then
+        return
+    end
+
+    local data = item:getModData()
+
+    if held then
+        if data.knox_hold then
+            return
+        end
+        data.knox_hold = true
+        if item.isFavorite and item.setFavorite then
+            data.knox_hold_fav = item:isFavorite() == true
+            item:setFavorite(true)
+        end
+        return
+    end
+
+    if not data.knox_hold then
+        return
+    end
+
+    data.knox_hold = nil
+    if item.setFavorite then
+        item:setFavorite(data.knox_hold_fav == true)
+    end
+    data.knox_hold_fav = nil
+end
+
+--- Release every hold we placed on this player. Used after a drain so a
+--- leftover pin cannot trap an item that was not taken.
+function KR_Stash.unlockHeld(player)
+    for _, container in ipairs(KR_Stash.containers(player)) do
+        local contents = container.getItems and container:getItems()
+        if contents then
+            for index = 0, contents:size() - 1 do
+                local item = contents:get(index)
+                if KR_Stash.isHeld(item) then
+                    KR_Stash.markHeld(item, false)
+                end
+            end
+        end
+    end
 end
 
 --- How many of `itemType` the player is carrying, across every container.

@@ -179,6 +179,36 @@ interface DrawOptions {
   destination?: { x: number; y: number } | null
   /** Which extra pin is selected, so its label stays up even when zoomed out. */
   selectedId?: string | null
+  /** Painted flow areas, in world-tile cells. */
+  zones?: MapZone[]
+  /** In-progress rectangle while drawing a safe zone. */
+  draftRect?: MapRect | null
+  /** Brush ghost while painting a district, in world tiles. */
+  brush?: {
+    x: number
+    y: number
+    radius: number
+    erase?: boolean
+    cellSize?: number
+  } | null
+}
+
+export interface MapRect {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+export interface MapZone {
+  id?: string
+  cells: { x: number; y: number }[]
+  cellSize: number
+  color?: string
+  selected?: boolean
+  /** World-tile rectangle. Preferred over cells for large no-PvP boxes. */
+  rect?: MapRect
+  label?: string
 }
 
 /**
@@ -288,6 +318,243 @@ export function drawMapOverlays(
     const point = toScreen(options.destination.x, options.destination.y)
     drawDestination(ctx, point.x, point.y)
   }
+
+  for (const zone of options.zones ?? []) {
+    drawZone(ctx, zone, toScreen)
+  }
+
+  if (options.draftRect) {
+    drawRectZone(ctx, options.draftRect, 'rgba(255, 176, 0, 0.38)', true, toScreen)
+  }
+
+  if (options.brush) {
+    drawBrush(ctx, options.brush, toScreen)
+  }
+}
+
+function cellCorners(
+  cell: { x: number; y: number },
+  size: number,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+) {
+  const x = cell.x * size
+  const y = cell.y * size
+  return [
+    toScreen(x, y),
+    toScreen(x + size, y),
+    toScreen(x + size, y + size),
+    toScreen(x, y + size),
+  ]
+}
+
+function traceCell(
+  ctx: CanvasRenderingContext2D,
+  corners: { x: number; y: number }[],
+) {
+  ctx.moveTo(corners[0]!.x, corners[0]!.y)
+  ctx.lineTo(corners[1]!.x, corners[1]!.y)
+  ctx.lineTo(corners[2]!.x, corners[2]!.y)
+  ctx.lineTo(corners[3]!.x, corners[3]!.y)
+  ctx.closePath()
+}
+
+/** Magenta sits off the Knox iso palette (grass, dirt, tan roofs) so paint reads. */
+export const ZONE_FILL = 'rgba(214, 48, 255, 0.52)'
+export const ZONE_INK = '#ff9af5'
+
+function drawRectZone(
+  ctx: CanvasRenderingContext2D,
+  rect: MapRect,
+  color: string | undefined,
+  selected: boolean,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+): void {
+  const west = Math.min(rect.x1, rect.x2)
+  const east = Math.max(rect.x1, rect.x2)
+  const north = Math.min(rect.y1, rect.y2)
+  const south = Math.max(rect.y1, rect.y2)
+  const corners = [
+    toScreen(west, north),
+    toScreen(east, north),
+    toScreen(east, south),
+    toScreen(west, south),
+  ]
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(corners[0]!.x, corners[0]!.y)
+  for (let index = 1; index < corners.length; index += 1) {
+    ctx.lineTo(corners[index]!.x, corners[index]!.y)
+  }
+  ctx.closePath()
+  ctx.fillStyle = selected ? 'rgba(255, 176, 0, 0.34)' : (color ?? ZONE_FILL)
+  ctx.fill()
+  ctx.strokeStyle = selected ? '#ffb000' : lightenStroke(color ?? ZONE_INK)
+  ctx.lineWidth = selected ? 3 : 2
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawZone(
+  ctx: CanvasRenderingContext2D,
+  zone: MapZone,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+): void {
+  if (zone.rect) {
+    drawRectZone(ctx, zone.rect, zone.color, zone.selected === true, toScreen)
+    if (zone.label) {
+      const mid = toScreen((zone.rect.x1 + zone.rect.x2) / 2, (zone.rect.y1 + zone.rect.y2) / 2)
+      drawPinLabel(ctx, mid.x, mid.y, zone.label, zone.color ?? ZONE_INK)
+    }
+    return
+  }
+  if (zone.cells.length === 0) {
+    return
+  }
+
+  const size = Math.max(1, zone.cellSize)
+  const owned = new Set(zone.cells.map((cell) => `${cell.x},${cell.y}`))
+  const corners = zone.cells.map((cell) => cellCorners(cell, size, toScreen))
+  const span = cellScreenSpan(corners[0]!)
+
+  ctx.save()
+  ctx.beginPath()
+  for (const quad of corners) {
+    traceCell(ctx, quad)
+  }
+  ctx.fillStyle = 'rgba(18, 0, 28, 0.62)'
+  ctx.fill()
+  ctx.fillStyle = zone.color ?? ZONE_FILL
+  ctx.fill()
+
+  ctx.save()
+  ctx.clip()
+  ctx.strokeStyle = 'rgba(255, 210, 255, 0.42)'
+  ctx.lineWidth = 2
+  const hatch = Math.max(8, Math.min(16, span / 3))
+  const bounds = hatchBounds(zone.cells, size, toScreen)
+  for (let walk = bounds.min - bounds.height; walk < bounds.max + bounds.height; walk += hatch) {
+    ctx.beginPath()
+    ctx.moveTo(walk, bounds.top)
+    ctx.lineTo(walk + bounds.height, bounds.bottom)
+    ctx.stroke()
+  }
+  ctx.restore()
+
+  if (span >= 10) {
+    ctx.strokeStyle = 'rgba(255, 232, 255, 0.88)'
+    ctx.lineWidth = span >= 22 ? 1.35 : 1
+    ctx.beginPath()
+    for (const quad of corners) {
+      traceCell(ctx, quad)
+    }
+    ctx.stroke()
+  }
+
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = '#120016'
+  ctx.lineWidth = span >= 16 ? 7 : 5
+  strokeZoneEdge(ctx, zone.cells, owned, size, toScreen)
+  ctx.strokeStyle = zone.color ? lightenStroke(zone.color) : ZONE_INK
+  ctx.lineWidth = span >= 16 ? 3 : 2.25
+  strokeZoneEdge(ctx, zone.cells, owned, size, toScreen)
+  ctx.restore()
+}
+
+function cellScreenSpan(corners: { x: number; y: number }[]): number {
+  return Math.hypot(corners[0]!.x - corners[2]!.x, corners[0]!.y - corners[2]!.y)
+}
+
+function lightenStroke(color: string): string {
+  return color.startsWith('rgba') ? '#ffe27a' : color
+}
+
+function hatchBounds(
+  cells: { x: number; y: number }[],
+  size: number,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+) {
+  let left = Infinity
+  let top = Infinity
+  let right = -Infinity
+  let bottom = -Infinity
+  for (const cell of cells) {
+    for (const corner of cellCorners(cell, size, toScreen)) {
+      left = Math.min(left, corner.x)
+      top = Math.min(top, corner.y)
+      right = Math.max(right, corner.x)
+      bottom = Math.max(bottom, corner.y)
+    }
+  }
+  return { min: left, max: right, top, bottom, height: bottom - top }
+}
+
+function strokeZoneEdge(
+  ctx: CanvasRenderingContext2D,
+  cells: { x: number; y: number }[],
+  owned: Set<string>,
+  size: number,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+) {
+  ctx.beginPath()
+  for (const cell of cells) {
+    const corners = cellCorners(cell, size, toScreen)
+    const edges: [number, number, number, number][] = [
+      [0, 1, 0, -1],
+      [1, 2, 1, 0],
+      [2, 3, 0, 1],
+      [3, 0, -1, 0],
+    ]
+    for (const [from, to, dx, dy] of edges) {
+      if (owned.has(`${cell.x + dx},${cell.y + dy}`)) {
+        continue
+      }
+      ctx.moveTo(corners[from]!.x, corners[from]!.y)
+      ctx.lineTo(corners[to]!.x, corners[to]!.y)
+    }
+  }
+  ctx.stroke()
+}
+
+function drawBrush(
+  ctx: CanvasRenderingContext2D,
+  brush: { x: number; y: number; radius: number; erase?: boolean; cellSize?: number },
+  toScreen: (x: number, y: number) => { x: number; y: number },
+) {
+  const size = Math.max(1, brush.cellSize ?? 16)
+  const cells = cellsUnderBrush(brush.x, brush.y, brush.radius, size)
+  ctx.save()
+  ctx.beginPath()
+  for (const cell of cells) {
+    traceCell(ctx, cellCorners(cell, size, toScreen))
+  }
+  ctx.fillStyle = brush.erase ? 'rgba(196, 69, 54, 0.28)' : 'rgba(214, 48, 255, 0.28)'
+  ctx.fill()
+  ctx.strokeStyle = brush.erase ? '#ff8a7a' : '#ffe0ff'
+  ctx.lineWidth = 2
+  ctx.setLineDash([5, 4])
+  ctx.stroke()
+  ctx.restore()
+}
+
+function cellsUnderBrush(
+  worldX: number,
+  worldY: number,
+  radius: number,
+  size: number,
+): { x: number; y: number }[] {
+  const originX = Math.floor(worldX / size)
+  const originY = Math.floor(worldY / size)
+  const reach = Math.max(0, Math.round(radius / size))
+  const out: { x: number; y: number }[] = []
+  for (let dx = -reach; dx <= reach; dx += 1) {
+    for (let dy = -reach; dy <= reach; dy += 1) {
+      if (dx * dx + dy * dy <= reach * reach) {
+        out.push({ x: originX + dx, y: originY + dy })
+      }
+    }
+  }
+  return out
 }
 
 export interface WorldMapping {

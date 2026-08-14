@@ -1,40 +1,64 @@
 /**
  * Locale definitions and dictionaries.
  *
- * English is the source of truth: its keys define `TranslationKey`, and every
- * other dictionary is type-checked against that list, so a missing translation
- * is a build error rather than an English word appearing on a German page.
+ * English is the source of truth: its keys define `TranslationKey`. File
+ * dictionaries cover en/de. Any other language lives as database overrides
+ * and falls back to English.
  */
 import de from './de.json'
 import en from './en.json'
 
 export const LOCALES = ['en', 'de'] as const
-export type Locale = (typeof LOCALES)[number]
+export type BuiltinLocale = (typeof LOCALES)[number]
+export type Locale = string
 
 export type TranslationKey = keyof typeof en
 
-export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
+export const dictionaries: Record<BuiltinLocale, Partial<Record<TranslationKey, string>>> = {
   en,
   de,
 }
 
 export const fallback = en
 
-export const LOCALE_LABELS: Record<Locale, string> = {
+export const LOCALE_LABELS: Record<BuiltinLocale, string> = {
   en: 'EN',
   de: 'DE',
 }
 
 /** BCP 47 tags for Intl formatting. */
-export const INTL_LOCALES: Record<Locale, string> = {
+export const INTL_LOCALES: Record<BuiltinLocale, string> = {
   en: 'en-GB',
   de: 'de-DE',
 }
 
 export const STORAGE_KEY = 'knox.locale'
 
+export const TRANSLATION_KEYS = Object.keys(en) as TranslationKey[]
+
+export function isBuiltin(locale: string): locale is BuiltinLocale {
+  return (LOCALES as readonly string[]).includes(locale)
+}
+
 export function isLocale(value: string | null): value is Locale {
-  return value !== null && (LOCALES as readonly string[]).includes(value)
+  return value !== null && /^[a-z]{2}(-[a-z]{2})?$/.test(value)
+}
+
+export function dictionaryFor(locale: string): Partial<Record<TranslationKey, string>> {
+  return isBuiltin(locale) ? dictionaries[locale] : {}
+}
+
+export function intlFor(locale: string): string {
+  return isBuiltin(locale) ? INTL_LOCALES[locale] : locale
+}
+
+export function labelFor(locale: string): string {
+  return isBuiltin(locale) ? LOCALE_LABELS[locale] : locale.toUpperCase()
+}
+
+export function groupOf(key: string): string {
+  const dot = key.indexOf('.')
+  return dot === -1 ? key : key.slice(0, dot)
 }
 
 /** Stored choice first, then the browser's preference, then English. */
@@ -44,10 +68,11 @@ export function initialLocale(): Locale {
   }
 
   const stored = window.localStorage.getItem(STORAGE_KEY)
-  if (isLocale(stored)) {
+  if (isLocale(stored) && stored !== 'ka') {
     return stored
   }
 
-  // Matches de, de-DE, de-AT, de-CH alike.
-  return window.navigator.language.startsWith('de') ? 'de' : 'en'
+  const language = window.navigator.language.toLowerCase()
+  if (language.startsWith('de')) return 'de'
+  return 'en'
 }

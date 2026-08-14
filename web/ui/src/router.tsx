@@ -26,6 +26,8 @@ import { AdminOverviewPage } from '@/routes/admin/overview'
 import { AdminPlayerMapPage } from '@/routes/admin/player-map'
 import { AdminPlayersPage } from '@/routes/admin/players'
 import { AdminSitePage } from '@/routes/admin/site'
+import { AdminBackupsPage } from '@/routes/admin/backups'
+import { AdminAutomationsPage } from '@/routes/admin/automations'
 import { AdminWhitelistPage } from '@/routes/admin/whitelist'
 import { CharacterPage } from '@/routes/character'
 import { InventoryPage } from '@/routes/me/inventory'
@@ -39,7 +41,24 @@ import { RankingsPage } from '@/routes/rankings'
 import { RegisterPage } from '@/routes/auth/register'
 import { PlayerReportsPage } from '@/routes/me/reports'
 import { SettingsPage } from '@/routes/me/settings'
+import { WalletPage } from '@/routes/me/wallet'
+import { VaultPage } from '@/routes/me/vault'
+import { AdminVaultPage } from '@/routes/admin/vault'
+import { ShopPage } from '@/routes/shop'
+import { AuctionsPage } from '@/routes/auctions'
+import { AdminAuctionsPage } from '@/routes/admin/auctions'
+import { AdminShopPage } from '@/routes/admin/shop'
+import { AdminWalletsPage } from '@/routes/admin/wallets'
+import { AdminAuditPage } from '@/routes/admin/audit'
+import { AdminObjectivesPage } from '@/routes/admin/objectives'
+import { AdminQuestsPage } from '@/routes/admin/quests'
+import { AdminQuestEditorPage } from '@/routes/admin/quest-editor'
 import { StatusPage } from '@/routes/status'
+import { NewsPage } from '@/routes/news'
+import { NewsPostPage } from '@/routes/news/post'
+import { AdminNewsPage } from '@/routes/admin/news'
+import { AdminTranslationsPage } from '@/routes/admin/translations'
+import { AdminSafeZonesPage } from '@/routes/admin/safe-zones'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
@@ -88,6 +107,18 @@ const registerRoute = createRoute({
   component: RegisterPage,
 })
 
+const newsRoute = createRoute({
+  getParentRoute: () => publicLayout,
+  path: '/news',
+  component: NewsPage,
+})
+
+const newsPostRoute = createRoute({
+  getParentRoute: () => publicLayout,
+  path: '/news/$slug',
+  component: NewsPostPage,
+})
+
 // ── Player ──────────────────────────────────────────────────────────
 
 const playerLayout = createRoute({
@@ -119,6 +150,30 @@ const mapRoute = createRoute({
   getParentRoute: () => playerLayout,
   path: '/me/map',
   component: MapPage,
+})
+
+const walletRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/me/wallet',
+  component: WalletPage,
+})
+
+const shopRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/shop',
+  component: ShopPage,
+})
+
+const auctionsRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/auctions',
+  component: AuctionsPage,
+})
+
+const vaultRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/me/vault',
+  component: VaultPage,
 })
 
 const reportsRoute = createRoute({
@@ -158,6 +213,18 @@ const adminModsRoute = createRoute({
   getParentRoute: () => adminLayout,
   path: '/admin/mods',
   component: AdminModsPage,
+})
+
+const adminBackupsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/backups',
+  component: AdminBackupsPage,
+})
+
+const adminAutomationsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/automations',
+  component: AdminAutomationsPage,
 })
 
 const adminConsoleRoute = createRoute({
@@ -208,10 +275,76 @@ const adminWhitelistRoute = createRoute({
   component: AdminWhitelistPage,
 })
 
+const adminShopRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/shop',
+  component: AdminShopPage,
+})
+
+const adminAuctionsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/auctions',
+  component: AdminAuctionsPage,
+})
+
+const adminWalletsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/wallets',
+  component: AdminWalletsPage,
+})
+
+const adminObjectivesRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/objectives',
+  component: AdminObjectivesPage,
+})
+
+const adminQuestsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/quests',
+  component: AdminQuestsPage,
+})
+
+const adminQuestEditorRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/quests/$questId',
+  component: AdminQuestEditorPage,
+})
+
 const adminSiteRoute = createRoute({
   getParentRoute: () => adminLayout,
   path: '/admin/site',
   component: AdminSitePage,
+})
+
+const adminAuditRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/audit',
+  component: AdminAuditPage,
+})
+
+const adminVaultRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/vault',
+  component: AdminVaultPage,
+})
+
+const adminNewsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/news',
+  component: AdminNewsPage,
+})
+
+const adminTranslationsRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/translations',
+  component: AdminTranslationsPage,
+})
+
+const adminSafeZonesRoute = createRoute({
+  getParentRoute: () => adminLayout,
+  path: '/admin/safe-zones',
+  component: AdminSafeZonesPage,
 })
 
 // ── Moved ───────────────────────────────────────────────────────────
@@ -240,6 +373,8 @@ export const router = createRouter({
       statusRoute,
       rankingsRoute,
       obituaryRoute,
+      newsRoute,
+      newsPostRoute,
       loginRoute,
       registerRoute,
     ]),
@@ -248,6 +383,10 @@ export const router = createRouter({
       characterRoute,
       inventoryRoute,
       mapRoute,
+      walletRoute,
+      shopRoute,
+      auctionsRoute,
+      vaultRoute,
       reportsRoute,
       settingsRoute,
     ]),
@@ -255,6 +394,8 @@ export const router = createRouter({
       adminOverviewRoute,
       adminConfigRoute,
       adminModsRoute,
+      adminBackupsRoute,
+      adminAutomationsRoute,
       adminConsoleRoute,
       adminLogsRoute,
       adminBridgeRoute,
@@ -263,7 +404,18 @@ export const router = createRouter({
       adminModerationRoute,
       adminReportsRoute,
       adminWhitelistRoute,
+      adminShopRoute,
+      adminAuctionsRoute,
+      adminWalletsRoute,
+      adminObjectivesRoute,
+      adminQuestsRoute,
+      adminQuestEditorRoute,
       adminSiteRoute,
+      adminAuditRoute,
+      adminVaultRoute,
+      adminNewsRoute,
+      adminTranslationsRoute,
+      adminSafeZonesRoute,
     ]),
     ...movedRoutes,
   ]),

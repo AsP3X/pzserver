@@ -75,6 +75,7 @@ local sinceHoldings = 0
 local lastWorldExport = 0
 local lastBeaconExport = 0
 local lastProgressExport = 0
+local lastSettle = 0
 local framesSinceWorld = 0
 
 --- Roughly WORLD_SECONDS of frames, for when os.time is unavailable. Erring
@@ -131,7 +132,8 @@ local function onCreatePlayer(playerIndex, player)
     print(LOG .. "Player connected: " .. (player:getUsername() or "unknown"))
 
     Snapshot.capture(player)
-    Orders.drain()
+    -- Unreliable on dedicated, but when it fires we settle before they move.
+    Orders.settleOnline()
 end
 
 --- The heartbeat.
@@ -144,14 +146,16 @@ local function onEveryOneMinute()
     Report.poll()
     Tickets.poll()
 
+    -- Takes first, every tick: a joiner must not get a window to drop a
+    -- reserved item before the queue runs.
+    local delivered = Orders.settleOnline()
+    if delivered > 0 then
+        print(LOG .. "Processed " .. delivered .. " delivery entries")
+    end
+
     sinceDelivery = sinceDelivery + 1
     if sinceDelivery >= DELIVERY_TICKS then
         sinceDelivery = 0
-        local delivered = Orders.drain()
-        if delivered > 0 then
-            print(LOG .. "Processed " .. delivered .. " delivery entries")
-        end
-
         Conductor.drain()
     end
 
@@ -197,6 +201,14 @@ end
 --- PauseEmpty=true. exportWorld() throttles it to a write every WORLD_SECONDS.
 local function onTickEvenPaused()
     exportWorld()
+
+    -- Joiners can act before EveryOneMinute. Settle at least once a second
+    -- so a reserved item is pinned before they can drop it.
+    local settleDue
+    settleDue, lastSettle = due(lastSettle, 1)
+    if settleDue then
+        Orders.settleOnline()
+    end
 
     local beaconDue
     beaconDue, lastBeaconExport = due(lastBeaconExport, BEACON_SECONDS)

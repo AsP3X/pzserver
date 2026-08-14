@@ -49,6 +49,7 @@ pz_compose_cli_args() {
   local args=(
     -f "${PZ_REPO_ROOT}/docker-compose.yml"
     -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}"
+    -f "${PZ_REPO_ROOT}/docker-compose.web.yml"
   )
   case "$WEB_PROXY_MODE" in
     caddy)
@@ -85,13 +86,14 @@ pz_ensure_data_dirs() {
     "${PZ_REPO_ROOT}/data/app-node-modules" \
     "${PZ_REPO_ROOT}/data/app-build" \
     "${PZ_REPO_ROOT}/data/caddy-data" \
-    "${PZ_REPO_ROOT}/data/caddy-config"
+    "${PZ_REPO_ROOT}/data/caddy-config" \
+    "${PZ_REPO_ROOT}/data/web-postgres"
 
   # Never chmod -R the whole ./data tree: map-tiles (DZI pyramids) and postgres
   # can contain hundreds of thousands of files and make deploy look "stuck".
   # Only ensure top-level dirs are traversable/writable; Lua bridge needs recurse.
   local d
-  for d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config; do
+  for d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config web-postgres; do
     chmod a+rwx "${PZ_REPO_ROOT}/data/${d}" 2>/dev/null || true
   done
   if [[ -d "${PZ_REPO_ROOT}/data/zomboid/Lua" ]]; then
@@ -122,6 +124,9 @@ PZ_STACK_CONTAINERS=(
   pz-redis
   pz-docker-proxy
   pz-caddy
+  pz-web-db
+  pz-web-api
+  pz-web-ui
 )
 
 # Remove leftover containers by name (survives compose project / profile mismatches).
@@ -160,9 +165,9 @@ pz_up() {
   # Avoid "name already in use" after partial deploys / mode switches
   echo "→ Refreshing stack containers (stop + recreate)..."
   pz_force_remove_stack_containers
-  # Always build local fixed images (app + game-server overlay on upstream base)
-  echo "→ Building local images (app + game-server) — this can take several minutes..."
-  pz_compose build app game-server
+  # Always build local fixed images (web stack + game-server overlay)
+  echo "→ Building local images (web-api + web-ui + game-server) — this can take several minutes..."
+  pz_compose build web-api web-ui game-server
   echo "→ Starting containers..."
   pz_compose up -d --build --remove-orphans
   echo "→ Stack is up."
@@ -193,6 +198,7 @@ pz_down() {
   if ! docker compose \
     -f "${PZ_REPO_ROOT}/docker-compose.yml" \
     -f "${PZ_REPO_ROOT}/${PZ_COMPOSE_ARCH_FILE}" \
+    -f "${PZ_REPO_ROOT}/docker-compose.web.yml" \
     -f "${PZ_REPO_ROOT}/docker-compose.web-caddy.yml" \
     -f "${PZ_REPO_ROOT}/docker-compose.web-npm.yml" \
     --profile caddy \
@@ -213,7 +219,7 @@ pz_ps() {
 }
 
 pz_info() {
-  local APP_PORT="${APP_PORT:-8000}"
+  local WEB_UI_PORT="${WEB_UI_PORT:-8100}"
   local PZ_GAME_PORT="${PZ_GAME_PORT:-16261}"
   local PZ_DIRECT_PORT="${PZ_DIRECT_PORT:-16262}"
   if [[ -f "${PZ_REPO_ROOT}/.env" ]]; then
@@ -222,7 +228,7 @@ pz_info() {
     # shellcheck disable=SC1090
     source "${PZ_REPO_ROOT}/.env" 2>/dev/null || true
     set +a
-    APP_PORT="${APP_PORT:-8000}"
+    WEB_UI_PORT="${WEB_UI_PORT:-8100}"
     PZ_GAME_PORT="${PZ_GAME_PORT:-16261}"
     PZ_DIRECT_PORT="${PZ_DIRECT_PORT:-16262}"
   fi
@@ -236,7 +242,7 @@ pz_info() {
   echo "  Project Zomboid B42 — Status"
   echo "=============================================="
   echo ""
-  echo "  Local Admin:   http://127.0.0.1:${APP_PORT}"
+  echo "  Local Admin:   http://127.0.0.1:${WEB_UI_PORT}"
   echo "  Web mode:      ${WEB_PROXY_MODE}"
   case "$WEB_PROXY_MODE" in
     caddy)
@@ -244,7 +250,7 @@ pz_info() {
       ;;
     npm)
       echo "  Public Admin:  via Nginx Proxy Manager on proxy-network"
-      echo "                 Forward to: http://pz-app:8000"
+      echo "                 Forward to: http://pz-web-ui:8080"
       ;;
     local)
       echo "  Public Admin:  disabled (localhost only)"

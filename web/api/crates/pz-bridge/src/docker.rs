@@ -192,6 +192,57 @@ impl DockerClient {
         })
     }
 
+    /// Run a command inside the game container and return its exit code.
+    ///
+    /// Used to delete save trees the API user cannot chmod. The proxy must
+    /// allow EXEC. A missing or denied API is reported as an error so the
+    /// caller can fall back to the bind mount.
+    pub async fn exec(&self, command: &[&str]) -> Result<i32, DockerError> {
+        let create_url = format!("{}/containers/{}/exec", self.base_url, self.container);
+        let create = self
+            .http
+            .post(&create_url)
+            .json(&serde_json::json!({
+                "AttachStdout": true,
+                "AttachStderr": true,
+                "Cmd": command,
+            }))
+            .send()
+            .await?;
+
+        if !create.status().is_success() {
+            return Err(DockerError::Status {
+                status: create.status().as_u16(),
+            });
+        }
+
+        let created: ExecCreated = create.json().await?;
+        let start_url = format!("{}/exec/{}/start", self.base_url, created.id);
+        let start = self
+            .http
+            .post(&start_url)
+            .json(&serde_json::json!({ "Detach": false, "Tty": false }))
+            .send()
+            .await?;
+
+        if !start.status().is_success() {
+            return Err(DockerError::Status {
+                status: start.status().as_u16(),
+            });
+        }
+        let _ = start.bytes().await;
+
+        let inspect_url = format!("{}/exec/{}/json", self.base_url, created.id);
+        let inspect = self.http.get(&inspect_url).send().await?;
+        if !inspect.status().is_success() {
+            return Err(DockerError::Status {
+                status: inspect.status().as_u16(),
+            });
+        }
+        let info: ExecInspect = inspect.json().await?;
+        Ok(info.exit_code)
+    }
+
     /// Last `tail` lines of the container's stdout/stderr.
     ///
     /// This is what the old panel's Logs page shows. The game's own `Logs/`
@@ -297,6 +348,18 @@ struct InspectState {
 struct InspectHealth {
     #[serde(rename = "Status", default)]
     status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecCreated {
+    #[serde(rename = "Id")]
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecInspect {
+    #[serde(rename = "ExitCode", default)]
+    exit_code: i32,
 }
 
 #[cfg(test)]

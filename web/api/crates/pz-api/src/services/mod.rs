@@ -1,14 +1,22 @@
 //! Application services: everything between the HTTP layer and its sources.
 
 pub mod admin;
+pub mod audit;
 pub mod auth;
+pub mod automations;
+pub mod backups;
 pub mod character;
+pub mod economy;
+pub mod i18n;
+pub mod news;
 pub mod obituary;
 pub mod rate_limit;
 pub mod registration;
 pub mod reports;
+pub mod safezones;
 pub mod sanctions;
 pub mod site;
 pub mod stats;
 pub mod status;
 pub mod tasks;
+pub mod wipe;

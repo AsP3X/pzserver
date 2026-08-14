@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { Field, FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,28 +15,31 @@ export function SettingsPage() {
   const { user, isLoading } = useCurrentUser()
 
   return (
-    <Section>
-      <Container className="max-w-2xl">
-        <SectionHeading
-          eyebrow={t('account.eyebrow')}
-          title={t('account.title')}
-          description={t('account.description')}
-        />
+    <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:p-5">
+      <header>
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true" className="hazard-tape h-1 w-8" />
+          <span className="eyebrow">{t('account.eyebrow')}</span>
+        </div>
+        <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('account.title')}</h1>
+        <p className="mt-2 max-w-2xl text-sm text-smoke">{t('account.description')}</p>
+      </header>
 
-        <Panel bracketed>
-          <PanelHeader label={t('account.details')} />
-          <dl className="grid grid-cols-1 divide-y divide-fence sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-            <Detail label={t('auth.email')} value={isLoading ? undefined : user?.email} />
-            <Detail
-              label={t('account.linked_character')}
-              value={isLoading ? undefined : user?.username}
-            />
-          </dl>
-        </Panel>
+      <Panel bracketed className="max-w-2xl">
+        <PanelHeader label={t('account.details')} />
+        <dl className="grid grid-cols-1 divide-y divide-fence sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <Detail label={t('auth.email')} value={isLoading ? undefined : user?.email} />
+          <Detail
+            label={t('account.linked_character')}
+            value={isLoading ? undefined : user?.username}
+          />
+        </dl>
+      </Panel>
 
+      <div className="max-w-2xl">
         <ChangePasswordForm />
-      </Container>
-    </Section>
+      </div>
+    </section>
   )
 }
 
@@ -83,7 +85,7 @@ function ChangePasswordForm() {
   }
 
   return (
-    <Panel bracketed className="mt-8">
+    <Panel bracketed>
       <PanelHeader label={t('account.change_password')} />
 
       <form onSubmit={submit} className="flex flex-col gap-5 p-6" noValidate>

@@ -22,7 +22,7 @@ package.preload["KR_Codec"] = function() return Codec end
 local disk = {}
 package.preload["KR_Bridge"] = function()
     return {
-        VERSION = "1.18",
+        VERSION = "1.21",
         wallStamp = function() return "2026-08-13T09:00:00" end,
         writeJson = function(path, payload)
             disk[path] = Codec.encode(payload)

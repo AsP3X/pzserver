@@ -1,14 +1,14 @@
 # -----------------------------------------------------------------------------
-# Second web stack: Rust API + Vite UI + its own Postgres.
+# Web stack: Rust API + Vite UI + its own Postgres.
 #
-# Runs alongside the Laravel stack rather than replacing it in place, so both
-# can be up at once during the port. Nothing here touches pz-db, pz-app or the
-# game container's data beyond read-only mounts.
+# Included in the default `make up` / live compose start. The Laravel panel
+# (`app` / `queue` in docker-compose.yml) is commented out so a live server
+# only brings up this UI plus game-server and the shared infrastructure.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.<arch>.yml \
-#                  -f docker-compose.web.yml up -d web-db web-api web-ui
+#                  -f docker-compose.web.yml up -d
 #
-# or simply: make web-up
+# or simply: make up
 # -----------------------------------------------------------------------------
 services:
   # ---------------------------------------------------------------------------
@@ -61,6 +61,10 @@ services:
       # server.ini, for map name and player cap.
       # Writable: staff edit server.ini from the new admin panel.
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
+      # World archives. Same host folder the PHP stack writes to.
+      - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
+    tmpfs:
+      - /tmp
     environment:
       API_BIND: 0.0.0.0:8080
       DATABASE_URL: postgres://${WEB_DB_USERNAME:-knox}:${WEB_DB_PASSWORD:-knox}@web-db:5432/${WEB_DB_DATABASE:-knox}
@@ -76,6 +80,8 @@ services:
       PZ_DATA_PATH: /pz-data
       PZ_SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
       LUA_BRIDGE_PATH: /lua-bridge
+      BACKUP_PATH: /backups
+      PZ_STEAM_BRANCH: ${PZ_STEAM_BRANCH:-}
 
       PZ_CONNECT_HOST: ${PZ_CONNECT_HOST:-}
       PZ_GAME_PORT: ${PZ_GAME_PORT:-16261}
@@ -88,6 +94,7 @@ services:
       # Leave on unless the site is served over plain HTTP on something other
       # than localhost — browsers treat localhost itself as a secure origin.
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      PZ_DAILY_REWARD_COINS: ${PZ_DAILY_REWARD_COINS:-25}
     cap_drop:
       - ALL
     security_opt:

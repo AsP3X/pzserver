@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BoxSelect, Loader2, Maximize2, Minus, Plus } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
@@ -22,13 +22,16 @@ import {
   loadWorldmap,
   vectorMapping,
   type MapPin,
+  type MapRect,
+  type MapZone,
   type View,
   type WorldMapping,
   type Worldmap,
 } from '@/lib/worldmap'
+import { mergePins, useMapLayers } from '@/lib/map-layers'
 import { useTranslation } from '@/i18n/use-translation'
 
-export type { MapPin }
+export type { MapPin, MapRect, MapZone }
 
 export type MapBasemap = 'vector' | 'iso'
 
@@ -54,6 +57,16 @@ interface WorldmapViewProps {
   pickMode?: boolean
   onSelect?: (id: string) => void
   onPick?: (point: { x: number; y: number }) => void
+  /** Painted districts, in world-tile cells. */
+  zones?: MapZone[]
+  /** Left-drag paints or erases instead of panning. Right-drag still pans. */
+  paintMode?: 'paint' | 'erase' | null
+  /** Brush radius in world tiles. */
+  brushRadius?: number
+  onBrush?: (point: { x: number; y: number }, erase: boolean) => void
+  /** Left-drag draws a world rectangle instead of panning. */
+  rectMode?: boolean
+  onRect?: (rect: MapRect) => void
   className?: string
 }
 
@@ -100,9 +113,26 @@ export function WorldmapView({
   pickMode = false,
   onSelect,
   onPick,
+  zones,
+  paintMode = null,
+  brushRadius = 0,
+  onBrush,
+  rectMode = false,
+  onRect,
   className,
 }: WorldmapViewProps) {
   const { t } = useTranslation()
+  const { zoneOverlays, playerPins } = useMapLayers(selectedId)
+  const drawnZones = useMemo(
+    () => [...zoneOverlays, ...(zones ?? [])],
+    [zoneOverlays, zones],
+  )
+  const drawnMarkers = useMemo(() => {
+    const extras = marker
+      ? playerPins.filter((pin) => pin.x !== marker.x || pin.y !== marker.y)
+      : playerPins
+    return mergePins(extras, markers)
+  }, [marker, markers, playerPins])
 
   const canvas = useRef<HTMLCanvasElement>(null)
   const frame = useRef<HTMLDivElement>(null)
@@ -118,6 +148,9 @@ export function WorldmapView({
     y: number
   } | null>(null)
   const [isoTick, setIsoTick] = useState(0)
+  const [paintHover, setPaintHover] = useState<{ x: number; y: number } | null>(null)
+  const [draftRect, setDraftRect] = useState<MapRect | null>(null)
+  const rectStart = useRef<{ x: number; y: number } | null>(null)
 
   const viewRef = useRef<View | null>(null)
   const isoScaleRef = useRef(DEFAULT_ISO_SCALE)
@@ -256,9 +289,21 @@ export function WorldmapView({
         height: rect.height,
         marker,
         markerColor: '#ffb000',
-        markers,
+        markers: drawnMarkers,
         destination,
         selectedId,
+        zones: drawnZones,
+        draftRect,
+        brush:
+          paintMode && paintHover
+            ? {
+                x: paintHover.x,
+                y: paintHover.y,
+                radius: Math.max(0, brushRadius),
+                erase: paintMode === 'erase',
+                cellSize: drawnZones[0]?.cellSize ?? 16,
+              }
+            : null,
       }
 
       if (modeRef.current === 'iso') {
@@ -285,7 +330,21 @@ export function WorldmapView({
     const observer = new ResizeObserver(paint)
     observer.observe(box)
     return () => observer.disconnect()
-  }, [destination, isoTick, map, marker, markers, mode, selectedId, view])
+  }, [
+    brushRadius,
+    destination,
+    isoTick,
+    map,
+    marker,
+    drawnMarkers,
+    mode,
+    paintHover,
+    paintMode,
+    draftRect,
+    selectedId,
+    view,
+    drawnZones,
+  ])
 
   const zoomAt = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {
@@ -384,7 +443,7 @@ export function WorldmapView({
     return mappingAt(current, point.width, point.height)
   }
 
-  const pins = markers ?? []
+  const pins = drawnMarkers
 
   const resolveHover = (clientX: number, clientY: number) => {
     const point = localPoint(clientX, clientY)
@@ -449,7 +508,10 @@ export function WorldmapView({
     <div className={cn('relative overflow-hidden border border-fence bg-ash', className)}>
       <div
         ref={frame}
-        className={cn('absolute inset-0 touch-none', pickMode ? 'cursor-crosshair' : '')}
+        className={cn(
+          'absolute inset-0 touch-none',
+          pickMode || paintMode || rectMode ? 'cursor-crosshair' : '',
+        )}
         role="application"
         aria-label={t('map.canvas_label')}
         onContextMenu={(event) => {
@@ -467,6 +529,24 @@ export function WorldmapView({
             button: event.button,
           }
           event.currentTarget.setPointerCapture(event.pointerId)
+          if (paintMode && event.button === 0) {
+            const point = localPoint(event.clientX, event.clientY)
+            const mapping = point ? mappingNow(point) : null
+            if (point && mapping) {
+              const world = mapping.toWorld(point.x, point.y)
+              setPaintHover(world)
+              onBrush?.(world, paintMode === 'erase')
+            }
+          }
+          if (rectMode && event.button === 0) {
+            const point = localPoint(event.clientX, event.clientY)
+            const mapping = point ? mappingNow(point) : null
+            if (point && mapping) {
+              const world = mapping.toWorld(point.x, point.y)
+              rectStart.current = world
+              setDraftRect({ x1: world.x, y1: world.y, x2: world.x, y2: world.y })
+            }
+          }
         }}
         onPointerMove={(event) => {
           const held = gesture.current
@@ -475,12 +555,47 @@ export function WorldmapView({
 
           if (!held || held.id !== event.pointerId) {
             resolveHover(event.clientX, event.clientY)
+            if (paintMode) {
+              const point = localPoint(event.clientX, event.clientY)
+              const mapping = point ? mappingNow(point) : null
+              setPaintHover(point && mapping ? mapping.toWorld(point.x, point.y) : null)
+            }
             return
           }
 
           const distance = Math.hypot(event.clientX - held.startX, event.clientY - held.startY)
           if (distance > DRAG_SLOP) {
             held.dragged = true
+          }
+
+          if (paintMode && held.button === 0) {
+            const point = localPoint(event.clientX, event.clientY)
+            const mapping = point ? mappingNow(point) : null
+            if (point && mapping) {
+              const world = mapping.toWorld(point.x, point.y)
+              setPaintHover(world)
+              onBrush?.(world, paintMode === 'erase')
+            }
+            held.lastX = event.clientX
+            held.lastY = event.clientY
+            return
+          }
+
+          if (rectMode && held.button === 0 && rectStart.current) {
+            const point = localPoint(event.clientX, event.clientY)
+            const mapping = point ? mappingNow(point) : null
+            if (point && mapping) {
+              const world = mapping.toWorld(point.x, point.y)
+              setDraftRect({
+                x1: rectStart.current.x,
+                y1: rectStart.current.y,
+                x2: world.x,
+                y2: world.y,
+              })
+            }
+            held.lastX = event.clientX
+            held.lastY = event.clientY
+            return
           }
 
           if (!held.dragged || held.button === 2 || !current || !box) {
@@ -518,6 +633,23 @@ export function WorldmapView({
           const held = gesture.current
           gesture.current = null
           event.currentTarget.releasePointerCapture(event.pointerId)
+          if (rectMode && held?.button === 0) {
+            const start = rectStart.current
+            rectStart.current = null
+            setDraftRect(null)
+            const point = localPoint(event.clientX, event.clientY)
+            const mapping = point ? mappingNow(point) : null
+            if (held.dragged && start && point && mapping) {
+              const world = mapping.toWorld(point.x, point.y)
+              onRect?.({
+                x1: Math.round(Math.min(start.x, world.x)),
+                y1: Math.round(Math.min(start.y, world.y)),
+                x2: Math.round(Math.max(start.x, world.x)),
+                y2: Math.round(Math.max(start.y, world.y)),
+              })
+            }
+            return
+          }
           if (!held || held.dragged || held.button === 2) {
             return
           }
@@ -525,17 +657,24 @@ export function WorldmapView({
         }}
         onPointerCancel={() => {
           gesture.current = null
+          rectStart.current = null
+          setDraftRect(null)
           setHover(null)
+          setPaintHover(null)
         }}
         onPointerLeave={() => {
           if (!gesture.current) {
             setHover(null)
+            setPaintHover(null)
           }
         }}
       >
         <canvas
           ref={canvas}
-          className={cn('block', pickMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing')}
+          className={cn(
+            'block',
+            pickMode || paintMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing',
+          )}
         />
       </div>
 

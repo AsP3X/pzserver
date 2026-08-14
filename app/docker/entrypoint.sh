@@ -113,10 +113,10 @@ if [ -d "$LUA_BRIDGE_DIR" ]; then
 fi
 
 # ── Backup directory permissions ─────────────────────────────────────
+# World-writable: PHP writes as www-data, the Rust API as uid 10001.
 BACKUP_DIR="${BACKUP_PATH:-/backups}"
 if [ -d "$BACKUP_DIR" ]; then
-    chgrp www-data "$BACKUP_DIR" 2>/dev/null || true
-    chmod 775 "$BACKUP_DIR" 2>/dev/null || true
+    chmod 777 "$BACKUP_DIR" 2>/dev/null || true
 fi
 
 # ── APP_KEY generation ───────────────────────────────────────────────

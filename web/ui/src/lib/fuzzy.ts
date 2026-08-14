@@ -45,6 +45,55 @@ export function fuzzyMatch(query: string, text: string): FuzzyHit | null {
   return { score, indices }
 }
 
+/**
+ * Spaces split the query into words. Each word must match in order, but the
+ * gap between words can be a dot, underscore, or anything else — so
+ * "Base Bag register" hits `Base.Bag_Cloth… registeryID`.
+ */
+export function fuzzyMatchWords(query: string, text: string): FuzzyHit | null {
+  const tokens = query.trim().split(/\s+/).filter((token) => token.length > 0)
+
+  if (tokens.length === 0) {
+    return { score: 0, indices: [] }
+  }
+
+  if (tokens.length === 1) {
+    return fuzzyMatch(tokens[0], text)
+  }
+
+  const haystack = text.toLocaleLowerCase()
+  const indices: number[] = []
+  let score = 0
+  let cursor = 0
+
+  for (const token of tokens) {
+    const look = token.toLocaleLowerCase()
+    const exact = haystack.indexOf(look, cursor)
+
+    if (exact !== -1) {
+      for (let offset = 0; offset < look.length; offset += 1) {
+        indices.push(exact + offset)
+      }
+      score += look.length * 8
+      cursor = exact + look.length
+      continue
+    }
+
+    const hit = fuzzyMatch(token, text.slice(cursor))
+    if (!hit || hit.indices.length === 0) {
+      return null
+    }
+
+    for (const index of hit.indices) {
+      indices.push(cursor + index)
+    }
+    score += hit.score
+    cursor += (hit.indices[hit.indices.length - 1] ?? 0) + 1
+  }
+
+  return { score, indices }
+}
+
 function isBoundary(code: number): boolean {
   return (
     code === 32 ||

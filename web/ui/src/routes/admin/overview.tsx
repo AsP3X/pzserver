@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Clock, Crosshair, Play, RotateCcw, Save, Server, Skull, Square, Users } from 'lucide-react'
+import { Activity, Clock, Crosshair, Play, RotateCcw, Save, Server, Skull, Square, Trash2, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Container, Section, SectionHeading } from '@/components/ui/section'
-import { FormError } from '@/components/ui/field'
+import { Field, FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Sparkline } from '@/components/ui/sparkline'
 import { StatTile } from '@/components/ui/stat-tile'
@@ -152,7 +152,11 @@ function ServerControls() {
   const queryClient = useQueryClient()
   const { data: status } = useQuery(serverStatusQuery)
   const [pending, setPending] = useState<PendingAction>(null)
+  const [wiping, setWiping] = useState(false)
+  const [includeConfig, setIncludeConfig] = useState(false)
+  const [wipeTyped, setWipeTyped] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const running = status?.container === 'running'
 
@@ -182,12 +186,38 @@ function ServerControls() {
     },
   })
 
+  const wipe = useMutation({
+    mutationFn: () =>
+      api.adminWipe({
+        confirm: true,
+        include_config: includeConfig,
+        message: t('admin.wipe.broadcast'),
+      }),
+    onSuccess: (result) => {
+      setWiping(false)
+      setIncludeConfig(false)
+      setWipeTyped('')
+      setError(null)
+      setNotice(result.message)
+      invalidate()
+      void queryClient.invalidateQueries()
+    },
+    onError: (cause) => {
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
   return (
     <Panel bracketed className="mt-6">
       <PanelHeader label={t('admin.controls')} />
       <div className="flex flex-col gap-4 p-5">
         <p className="text-sm text-smoke">{t('admin.controls_hint')}</p>
         {error ? <FormError>{error}</FormError> : null}
+        {notice ? (
+          <p role="status" className="border border-moss/40 bg-moss-soft px-3 py-2 text-sm text-moss">
+            {notice}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
@@ -236,6 +266,22 @@ function ServerControls() {
             <Save aria-hidden="true" className="size-3.5" />
             {t('admin.action.save')}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-blood text-blood hover:border-blood hover:text-blood"
+            onClick={() => {
+              setError(null)
+              setNotice(null)
+              setIncludeConfig(false)
+              setWipeTyped('')
+              setWiping(true)
+            }}
+            disabled={wipe.isPending}
+          >
+            <Trash2 aria-hidden="true" className="size-3.5" />
+            {t('admin.wipe.button')}
+          </Button>
         </div>
       </div>
 
@@ -261,6 +307,54 @@ function ServerControls() {
         onClose={() => {
           if (!act.isPending) {
             setPending(null)
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={wiping}
+        title={t('admin.wipe.title')}
+        size="lg"
+        tone="danger"
+        confirmLabel={t('admin.wipe.confirm')}
+        busy={wipe.isPending}
+        confirmDisabled={wipeTyped.trim().toUpperCase() !== 'WIPE'}
+        description={
+          <div className="flex flex-col gap-3">
+            <p>{t('admin.wipe.description')}</p>
+            <ul className="list-disc pl-5 text-sm text-smoke">
+              <li>{t('admin.wipe.destroys')}</li>
+              <li>{t('admin.wipe.keeps')}</li>
+            </ul>
+            <label className="flex items-start gap-2 text-sm text-bone">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={includeConfig}
+                onChange={(event) => setIncludeConfig(event.target.checked)}
+              />
+              <span>{t('admin.wipe.include_config')}</span>
+            </label>
+            {includeConfig ? (
+              <p className="border border-blood/40 bg-blood-soft px-3 py-2 text-sm text-blood">
+                {t('admin.wipe.include_config_warning')}
+              </p>
+            ) : null}
+            <Field
+              label={t('admin.wipe.type_wipe')}
+              value={wipeTyped}
+              onChange={(event) => setWipeTyped(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        }
+        onConfirm={() => wipe.mutate()}
+        onClose={() => {
+          if (!wipe.isPending) {
+            setWiping(false)
+            setIncludeConfig(false)
+            setWipeTyped('')
           }
         }}
       />

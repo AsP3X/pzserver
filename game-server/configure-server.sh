@@ -462,8 +462,11 @@ if [ -d "$KR_STAGED_DIR" ]; then
     live_version="$(mod_version_of "$KR_LIVE_DIR")"
     newest="$(printf '%s\n%s\n' "$live_version" "$staged_version" | sort -V | tail -1)"
 
+    # Same version still seeds: SteamCMD has just restored the Workshop copy,
+    # which will not have unpublished local Lua (holds, desk fixes, …). A
+    # strictly older image never overwrites a newer Workshop build.
     if [ -z "$live_version" ] \
-        || { [ "$newest" = "$staged_version" ] && [ "$live_version" != "$staged_version" ]; }; then
+        || [ "$newest" = "$staged_version" ]; then
         rm -rf "$KR_LIVE_DIR"
         cp -r "$KR_STAGED_DIR" "$KR_LIVE_DIR"
         echo "[configure-server] Seeded Knox Relay ${staged_version:-?} from the image into" \

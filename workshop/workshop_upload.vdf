@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, and /report for filing a player report from inside the game."
-    "changenote"        "[h1]1.17 — Desk header[/h1]\n[b]Fixed[/b]\n[list]\n[*]REPORTS and NEW REPORT sat on the same row and read as one broken control. The rail is navigation only. + NEW lives in the ticket-list header.\n[/list]"
+    "changenote"        "[h1]1.21 — Packed vault bags, no drop-before-take, a desk you can type in[/h1]\n[b]Added[/b]\n[list]\n[*]Retrieving a packed bag from the vault also returns everything that was inside it. Older clients see those items in the main pack.\n[*]Items reserved for a shop deposit or vault store cannot be dropped while the take is still pending.\n[/list]\n[b]Fixed[/b]\n[list]\n[*]The report reply field is a full-width six-line box under the thread, with SEND on its own row.\n[*]Ticket status sits on the right of the row so OPEN/RESOLVED no longer draws through the subject.\n[/list]"
 }

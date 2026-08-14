@@ -588,7 +588,7 @@ if [ "$GENERATE_SELF_SIGNED" = "true" ]; then
 
 ${CADDY_SITE} {
 ${CADDY_TLS}
-	reverse_proxy app:8000
+	reverse_proxy web-ui:8080
 }
 
 :80 {
@@ -603,7 +603,7 @@ else
 
 ${CADDY_SITE} {
 ${CADDY_TLS}
-	reverse_proxy app:8000
+	reverse_proxy web-ui:8080
 }
 
 http://${CADDY_SITE} {

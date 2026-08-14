@@ -45,7 +45,7 @@ function Get-WebProxyMode {
 }
 
 function Get-ComposeArgs {
-    $args = @("compose", "-f", "docker-compose.yml", "-f", $ArchFile)
+    $args = @("compose", "-f", "docker-compose.yml", "-f", $ArchFile, "-f", "docker-compose.web.yml")
     switch (Get-WebProxyMode) {
         "caddy" {
             $args += @("-f", "docker-compose.web-caddy.yml", "--profile", "caddy")
@@ -78,7 +78,8 @@ function Ensure-DataDirs {
         "data\app-node-modules",
         "data\app-build",
         "data\caddy-data",
-        "data\caddy-config"
+        "data\caddy-config",
+        "data\web-postgres"
     )
     foreach ($d in $dirs) {
         if (-not (Test-Path $d)) {
@@ -97,7 +98,8 @@ function Ensure-Networks {
 
 $script:StackContainers = @(
     "pz-app", "pz-queue", "pz-game-server", "pz-db",
-    "pz-redis", "pz-docker-proxy", "pz-caddy"
+    "pz-redis", "pz-docker-proxy", "pz-caddy",
+    "pz-web-db", "pz-web-api", "pz-web-ui"
 )
 
 function Remove-StackContainers {
@@ -127,6 +129,7 @@ function Invoke-Compose {
             "compose",
             "-f", "docker-compose.yml",
             "-f", $ArchFile,
+            "-f", "docker-compose.web.yml",
             "-f", "docker-compose.web-caddy.yml",
             "-f", "docker-compose.web-npm.yml",
             "--profile", "caddy"
