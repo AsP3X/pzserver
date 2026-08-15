@@ -2,6 +2,18 @@
 
 These rules apply to every coding agent working in this repository (Claude, Grok, Cursor, Codex, Copilot, and anything else that reads `AGENTS.md` or `CLAUDE.md`).
 
+## The UI panel is the single point of truth
+
+The admin web panel is the source of truth for how this server is configured. `.env`, SteamCMD, a stock `server.ini`, and a Workshop download are bootstraps or caches — never the authority once the panel has written a value.
+
+What the panel last saved wins:
+
+- Mods and Workshop items: `data/zomboid/Server/.mod_state` (the panel writes this). `PZ_MOD_IDS` / `PZ_WORKSHOP_IDS` seed only a first boot that has no `.mod_state` yet.
+- Server settings the panel edits: `data/zomboid/Server/.config_state`.
+- Site copy, shop, translations, automations, vault settings: the panel’s Postgres rows.
+
+Do not “fix” a missing Knox Relay, a mod list, or a setting by writing `.env` defaults over those files. Do not delete `.mod_state`, `.config_state`, `server.ini`, sandbox, or spawn files on a world wipe. After a wipe or a restore, re-apply the panel’s saved state — do not generate a stock ini and hope Steam or compose env fills it in. `configure-server.sh` already treats `.mod_state` / `.config_state` as authoritative; keep it that way.
+
 ## Knox Relay — server and client always get the latest Lua
 
 When the user updates Knox Relay (Lua, `mod.info`, Workshop prep, publish, or "the mod is updated"), **both** the local dedicated server **and** the Project Zomboid client must be running that same Lua before you stop. A “no” to a Workshop release does **not** skip or delay this. Packaging, staging, writing a rule, and “the version string did not move” are not a deploy.

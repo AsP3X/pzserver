@@ -66,7 +66,7 @@ class WipeGameServer implements ShouldQueue
             Log::error('Docker stop failed during wipe', ['error' => $e->getMessage()]);
         }
 
-        // 3. Wipe world saves + website player accounts; keep SandboxVars/spawns + staff
+        // 3. Wipe world saves + every website account; keep SandboxVars/spawns and site config
         $wipe = $wipeService->wipeAll();
         $fs = $wipe['filesystem'];
         $web = $wipe['website'];

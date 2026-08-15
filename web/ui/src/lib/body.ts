@@ -1,5 +1,7 @@
 /** Helpers for the body data the mod reports. */
 
+import type { BodyPartHealth, BodyPartTemperature, PlayerBody } from '@/lib/api'
+import { BODY_PART_ORDER } from '@/lib/body-sprites'
 import type { TranslationKey } from '@/i18n/locales'
 
 /**
@@ -119,4 +121,55 @@ export function coldestPart(
   )
 
   return { part, skin: reading.skin }
+}
+
+/**
+ * What a character looks like before the server has ever reported one: whole,
+ * unwounded, and comfortable.
+ *
+ * Callers must label this as a placeholder. Showing invented numbers as
+ * though they were readings is the failure that made the 1.7 dashboard
+ * useless — these are declared defaults, not a swallowed error.
+ */
+export const DEFAULT_SKIN_CELSIUS = 36.6
+
+export function defaultBodyParts(): Record<string, BodyPartHealth> {
+  return Object.fromEntries(BODY_PART_ORDER.map((part) => [part, { health: 100, wounds: [] }]))
+}
+
+export function defaultBodyTemperature(): Record<string, BodyPartTemperature> {
+  return Object.fromEntries(
+    BODY_PART_ORDER.map((part) => [part, { skin: DEFAULT_SKIN_CELSIUS, insulation: 0 }]),
+  )
+}
+
+export interface BodyFigure {
+  parts: Record<string, BodyPartHealth>
+  temperature: Record<string, BodyPartTemperature>
+  overall: number
+  /** True when the figure is the declared default, not a reading. */
+  placeholder: boolean
+}
+
+/**
+ * The paper-doll the character page draws: the heartbeat when it has parts,
+ * otherwise the declared unhurt body so the figure never disappears.
+ */
+export function resolveBodyFigure(body: PlayerBody | null | undefined): BodyFigure {
+  const parts = body?.health?.parts
+  if (body && parts && Object.keys(parts).length > 0) {
+    return {
+      parts,
+      temperature: body.temperature?.parts ?? {},
+      overall: body.health?.overall ?? 100,
+      placeholder: false,
+    }
+  }
+
+  return {
+    parts: defaultBodyParts(),
+    temperature: defaultBodyTemperature(),
+    overall: 100,
+    placeholder: true,
+  }
 }

@@ -1,5 +1,5 @@
-//! Reset the world. Website-authored config stays unless the operator asks
-//! to wipe that too.
+//! Reset the world. Every website account goes with it. Server and site
+//! configuration stay unless the operator asks to wipe those too.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -10,10 +10,32 @@ use sqlx::PgPool;
 
 use crate::error::{ApiError, ApiResult};
 use crate::services::admin;
+use crate::services::auth;
 use crate::services::backups;
 use crate::state::AppState;
 
 const PER_PLAYER_DIRS: &[&str] = &["inventory", "vitals"];
+
+/// World-tied rows that are not owned by a `users` foreign key (or that
+/// survive `ON DELETE SET NULL`). User-owned wallets, vaults, sessions and
+/// shop history go with the account via CASCADE.
+///
+/// Must name tables that still exist after the latest migration. A dropped
+/// table here aborts the website half of the wipe and leaves every account
+/// standing — that is how `account_link_codes` (dropped in 0006) kept logins
+/// alive after a world reset.
+#[cfg_attr(not(test), allow(dead_code))]
+const WORLD_DATA_TABLES: &[&str] = &[
+    "game_events",
+    "player_stats",
+    "pvp_violations",
+    "player_sanctions",
+    "player_reports",
+    "item_orders",
+    "account_registrations",
+    "server_status_samples",
+    "audit_logs",
+];
 
 #[derive(Debug, Deserialize)]
 pub struct WipeRequest {
@@ -62,7 +84,7 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
     let mut filesystem_errors = Vec::new();
 
     if running {
-        if let Err(error) = exec_game_wipe(state, request.include_config).await {
+        if let Err(error) = exec_game_wipe(state).await {
             filesystem_errors.push(error);
         }
         if let Err(error) = admin::stop(state, None).await {
@@ -75,22 +97,45 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
         &state.config.data_path,
         &state.config.server_name,
         &state.config.lua_bridge_path,
-        request.include_config,
         &mut filesystem_errors,
     )
     .await;
 
     let players_deleted = wipe_website(&state.db, request.include_config).await?;
 
+    if let Some(admin) = state.config.admin_bootstrap.as_ref() {
+        match auth::ensure_admin(
+            &state.db,
+            &admin.username,
+            &admin.email,
+            &admin.password,
+        )
+        .await
+        {
+            Ok(true) => tracing::info!(username = %admin.username, "recreated the first administrator after wipe"),
+            Ok(false) => {}
+            Err(error) => {
+                filesystem_errors.push(format!(
+                    "Accounts were wiped but the first administrator could not be recreated: {error}"
+                ));
+            }
+        }
+    } else {
+        filesystem_errors.push(
+            "Accounts were wiped and ADMIN_USERNAME/ADMIN_PASSWORD are unset, so nobody can sign in until those are set and the API restarts."
+                .to_owned(),
+        );
+    }
+
     if let Err(error) = admin::start(state).await {
         filesystem_errors.push(format!("The world was wiped but the server did not start: {error}"));
     }
 
     let message = if request.include_config {
-        "World, players and website config have been wiped. The server is coming back up clean."
+        "World, accounts and website config have been wiped. Game server.ini, sandbox and Knox Relay were kept."
             .to_owned()
     } else {
-        "World and players have been wiped. Website and game config were kept and will apply on boot."
+        "World and website accounts have been wiped. Server and site configuration were kept."
             .to_owned()
     };
 
@@ -103,14 +148,14 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
     })
 }
 
-async fn exec_game_wipe(state: &AppState, include_config: bool) -> Result<(), String> {
+async fn exec_game_wipe(state: &AppState) -> Result<(), String> {
     let docker = DockerClient::new(
         &state.config.docker_proxy_url,
         &state.config.game_server_container,
         Duration::from_secs(300),
     );
     let name = &state.config.server_name;
-    let mut script = format!(
+    let script = format!(
         r#"
 set -e
 ROOT=/home/steam/Zomboid
@@ -128,20 +173,6 @@ if [ -d "$ROOT/Lua" ]; then
 fi
 "#
     );
-    if include_config {
-        script.push_str(&format!(
-            r#"
-rm -f "$ROOT/Server/{name}.ini" \
-      "$ROOT/Server/{name}_SandboxVars.lua" \
-      "$ROOT/Server/{name}_spawnpoints.lua" \
-      "$ROOT/Server/{name}_spawnregions.lua" \
-      "$ROOT/Server/.mod_state" \
-      "$ROOT/Server/.mod_state_applied" \
-      "$ROOT/Server/.mod_state_backup" \
-      "$ROOT/Server/.config_state" || true
-"#
-        ));
-    }
     let code = docker
         .exec(&["bash", "-lc", &script])
         .await
@@ -156,7 +187,6 @@ async fn wipe_save_tree(
     data: &Path,
     server_name: &str,
     lua: &Path,
-    include_config: bool,
     errors: &mut Vec<String>,
 ) {
     let multiplayer = data.join("Saves").join("Multiplayer");
@@ -217,24 +247,6 @@ async fn wipe_save_tree(
         }
     }
 
-    if include_config {
-        let server_dir = data.join("Server");
-        for file in [
-            format!("{server_name}.ini"),
-            format!("{server_name}_SandboxVars.lua"),
-            format!("{server_name}_spawnpoints.lua"),
-            format!("{server_name}_spawnregions.lua"),
-            ".mod_state".to_owned(),
-            ".mod_state_applied".to_owned(),
-            ".mod_state_backup".to_owned(),
-            ".config_state".to_owned(),
-        ] {
-            let path = server_dir.join(file);
-            if path.exists() {
-                force_remove(&path, errors).await;
-            }
-        }
-    }
 }
 
 async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
@@ -252,10 +264,10 @@ async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
     sqlx::query("DELETE FROM player_sanctions")
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM item_orders")
+    sqlx::query("DELETE FROM player_reports")
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM account_link_codes")
+    sqlx::query("DELETE FROM item_orders")
         .execute(&mut *tx)
         .await?;
     sqlx::query("DELETE FROM account_registrations")
@@ -264,8 +276,11 @@ async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
     sqlx::query("DELETE FROM server_status_samples")
         .execute(&mut *tx)
         .await?;
+    sqlx::query("DELETE FROM audit_logs")
+        .execute(&mut *tx)
+        .await?;
 
-    let deleted = sqlx::query("DELETE FROM users WHERE role = 'player'")
+    let deleted = sqlx::query("DELETE FROM users")
         .execute(&mut *tx)
         .await?
         .rows_affected() as i64;
@@ -360,5 +375,141 @@ async fn force_remove(path: &Path, errors: &mut Vec<String>) {
             Err(error) => error.to_string(),
         };
         errors.push(format!("{}: {detail}", path.display()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::fs;
+
+    #[test]
+    fn world_wipe_tables_exist_in_the_migrated_schema() {
+        let live = schema_tables();
+
+        for table in WORLD_DATA_TABLES {
+            assert!(
+                live.contains(*table),
+                "{table} is wiped on a world reset but is not in the migrated schema — \
+                 the website half of the wipe will abort and leave accounts in place"
+            );
+        }
+    }
+
+    #[test]
+    fn world_wipe_does_not_target_the_dropped_link_codes_table() {
+        assert!(
+            !WORLD_DATA_TABLES.contains(&"account_link_codes"),
+            "account_link_codes was dropped in 0006; deleting it rolls back the wipe"
+        );
+    }
+
+    #[test]
+    fn wipe_website_issues_a_delete_for_every_world_table() {
+        let source = include_str!("wipe.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        for table in WORLD_DATA_TABLES {
+            assert!(
+                production.contains(&format!("DELETE FROM {table}")),
+                "wipe_website is missing DELETE FROM {table}"
+            );
+        }
+        assert!(
+            production.contains("DELETE FROM users"),
+            "wipe_website must remove every account"
+        );
+        assert!(
+            !production.contains("role = 'player'"),
+            "a role filter leaves staff logins standing after a world reset"
+        );
+    }
+
+    #[test]
+    fn wipe_never_deletes_game_server_config() {
+        let production = include_str!("wipe.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        for needle in [
+            ".mod_state",
+            "_SandboxVars.lua",
+            "_spawnpoints.lua",
+            "_spawnregions.lua",
+            ".config_state",
+        ] {
+            assert!(
+                !production.contains(needle),
+                "wipe must not touch game server config ({needle})"
+            );
+        }
+    }
+
+    #[test]
+    fn world_wipe_does_not_clear_site_or_store_config() {
+        for table in [
+            "site_settings",
+            "vault_settings",
+            "backup_settings",
+            "store_items",
+            "automations",
+            "objectives",
+            "quests",
+            "ui_languages",
+            "ui_translations",
+            "news_posts",
+        ] {
+            assert!(
+                !WORLD_DATA_TABLES.contains(&table),
+                "{table} is site configuration and must survive a default wipe"
+            );
+        }
+    }
+
+    fn schema_tables() -> HashSet<String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let mut files: Vec<_> = fs::read_dir(&dir)
+            .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+            .map(|entry| entry.expect("dirent").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+            .collect();
+        files.sort();
+
+        let mut tables = HashSet::new();
+        for path in files {
+            let sql = fs::read_to_string(&path).expect("migration");
+            for name in idents_after(&sql, "CREATE TABLE ") {
+                tables.insert(name);
+            }
+            for name in idents_after(&sql, "DROP TABLE IF EXISTS ") {
+                tables.remove(&name);
+            }
+            for name in idents_after(&sql, "DROP TABLE ") {
+                tables.remove(&name);
+            }
+        }
+        tables
+    }
+
+    fn idents_after(sql: &str, needle: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut rest = sql;
+        while let Some(at) = rest.find(needle) {
+            let after = rest[at + needle.len()..].trim_start();
+            let name: String = after
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect();
+            if !name.is_empty() && name != "IF" {
+                names.push(name);
+            }
+            rest = &rest[at + needle.len()..];
+        }
+        names
     }
 }

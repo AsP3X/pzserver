@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Wipe Project Zomboid world/player save data + website player accounts,
+ * Wipe Project Zomboid world/player save data + every website account,
  * while preserving server sandbox/spawn config and staff/site/shop catalog.
  *
  * Kept (PZ "how the world behaves"):
@@ -21,12 +21,12 @@ use Illuminate\Support\Facades\Schema;
  * - Server/.mod_state* / .config_state* (mod + Map= persistence)
  *
  * Kept (website):
- * - staff users (super_admin, admin, moderator)
- * - shop catalog, site settings, translations, news, backups metadata, audit logs
+ * - shop catalog, site settings, translations, news, backups metadata
+ * - the first administrator is recreated from ADMIN_* after the wipe
  *
- * Cleared (world + characters + website players):
+ * Cleared (world + characters + every website account):
  * - Saves/Multiplayer/*, db/{name}.db, PZ auto-restore backups, Lua bridge state
- * - users with role=player and related wallets/vaults/purchases/whitelist/stats/events
+ * - all users and related wallets/vaults/purchases/whitelist/stats/events/audit logs
  */
 class WorldWipeService
 {
@@ -218,8 +218,9 @@ class WorldWipeService
     }
 
     /**
-     * Delete website player accounts and all related player data.
-     * Keeps staff accounts and non-player site configuration (shop catalog, settings, etc.).
+     * Delete every website account and all related player data.
+     * Keeps site configuration (shop catalog, settings, translations, news).
+     * Recreates the first administrator from ADMIN_* so the panel stays reachable.
      *
      * @return array{
      *     ok: bool,
@@ -237,7 +238,6 @@ class WorldWipeService
         try {
             DB::transaction(function () use (&$counts, &$playersDeleted): void {
                 $playerIds = User::query()
-                    ->where('role', UserRole::Player)
                     ->pluck('id')
                     ->map(fn ($id): int => (int) $id)
                     ->all();
@@ -247,11 +247,12 @@ class WorldWipeService
                 $counts['player_stats'] = $this->truncateIfExists('player_stats');
                 $counts['pvp_violations'] = $this->truncateIfExists('pvp_violations');
                 $counts['vehicle_key_holders'] = $this->truncateIfExists('vehicle_key_holders');
+                $counts['audit_logs'] = $this->truncateIfExists('audit_logs');
 
                 if ($playerIds === []) {
-                    // Still clear orphan whitelist rows not linked to staff
                     $counts['whitelist_entries'] = $this->deleteWhereInOrNullUser('whitelist_entries', []);
                     $playersDeleted = 0;
+                    $this->restoreBootstrapAdmin();
 
                     return;
                 }
@@ -335,6 +336,7 @@ class WorldWipeService
 
                 $playersDeleted = User::query()->whereIn('id', $playerIds)->delete();
                 $counts['users'] = $playersDeleted;
+                $this->restoreBootstrapAdmin();
             });
         } catch (\Throwable $e) {
             Log::error('Website player wipe failed', ['error' => $e->getMessage()]);
@@ -388,6 +390,34 @@ class WorldWipeService
         }
 
         return $found;
+    }
+
+    /**
+     * Recreate the operator account from ADMIN_* so the panel stays reachable.
+     */
+    private function restoreBootstrapAdmin(): void
+    {
+        $username = (string) config('zomboid.admin.username', '');
+        $password = (string) config('zomboid.admin.password', '');
+        $email = (string) config('zomboid.admin.email', '');
+
+        if ($username === '' || $password === '') {
+            Log::warning('World wipe cleared accounts but ADMIN_USERNAME/ADMIN_PASSWORD are empty');
+
+            return;
+        }
+
+        if ($email === '') {
+            $email = $username.'@localhost.invalid';
+        }
+
+        User::query()->create([
+            'username' => $username,
+            'name' => $username,
+            'email' => $email,
+            'password' => $password,
+            'role' => UserRole::SuperAdmin,
+        ]);
     }
 
     private function truncateIfExists(string $table): int

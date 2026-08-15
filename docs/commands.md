@@ -76,9 +76,9 @@ Admin → Dashboard → **Wipe** (or `POST /admin/server/wipe`).
 
 **Deletes (game):** `Saves/Multiplayer/*` (map, players, vehicles, zombie pop), `db/{ServerName}.db`, PZ `backups/startup` + `backups/version` (auto-restore archives), Lua bridge live JSON/inventory state.
 
-**Deletes (website):** all users with role `player`, plus wallets, vaults, shop purchases/deliveries, money deposits, reward claims, whitelist entries, player reports, player_stats, game_events, pvp_violations, vehicle_key_holders, their sessions/tokens.
+**Deletes (website):** every website account (players and staff), plus wallets, vaults, shop purchases/deliveries, money deposits, reward claims, whitelist entries, player reports, player_stats, game_events, pvp_violations, vehicle_key_holders, their sessions/tokens, and audit logs. The first administrator is recreated from `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
 
-**Keeps:** `Server/{name}.ini`, `{name}_SandboxVars.lua` (zombies/environment/loot), `{name}_spawnpoints.lua`, `{name}_spawnregions.lua`, mod state files; staff website accounts (`super_admin` / `admin` / `moderator`); shop catalog, site settings, translations, news, backup records, audit logs.
+**Keeps:** `Server/{name}.ini`, `{name}_SandboxVars.lua` (zombies/environment/loot), `{name}_spawnpoints.lua`, `{name}_spawnregions.lua`, mod state files; shop catalog, site settings, translations, news, backup records.
 
 Requires the **queue worker** (`pz-queue`) to be running. A pre-wipe backup is attempted first.
 

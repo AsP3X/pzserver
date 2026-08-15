@@ -2,6 +2,16 @@ import { useQuery } from '@tanstack/react-query'
 import { Clock, Crosshair, Hourglass, Skull } from 'lucide-react'
 
 import { LinkButton } from '@/components/ui/button'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { Skeleton } from '@/components/ui/skeleton'
+import { StatTile } from '@/components/ui/stat-tile'
+import { useTranslation } from '@/i18n/use-translation'
+import type { Character, PlayerBody } from '@/lib/api'
+import { useRequireUser } from '@/lib/auth-guards'
+import { resolveBodyFigure } from '@/lib/body'
+import { cn } from '@/lib/cn'
+import { formatNumber, formatRelativeTime } from '@/lib/format'
+import { myCharacterQuery } from '@/lib/queries'
 import { BodyMap } from '@/routes/character/body-map'
 import { Condition } from '@/routes/character/condition'
 import {
@@ -12,15 +22,6 @@ import {
   SkillsPanel,
   WeaponPanel,
 } from '@/routes/character/panels'
-import { Panel, PanelHeader } from '@/components/ui/panel'
-import { Skeleton } from '@/components/ui/skeleton'
-import { StatTile } from '@/components/ui/stat-tile'
-import { useRequireUser } from '@/lib/auth-guards'
-import { useTranslation } from '@/i18n/use-translation'
-import { formatNumber, formatRelativeTime } from '@/lib/format'
-import { myCharacterQuery } from '@/lib/queries'
-import type { Character, PlayerBody } from '@/lib/api'
-import { cn } from '@/lib/cn'
 
 export function CharacterPage() {
   const { t } = useTranslation()
@@ -48,7 +49,10 @@ export function CharacterPage() {
           username={user?.username ?? ''}
         />
       ) : (
-        <NotSeenYet username={user?.username ?? ''} />
+        <div className="flex flex-col gap-8">
+          <NotSeenYet username={user?.username ?? ''} />
+          <CharacterFigure body={null} />
+        </div>
       )}
     </section>
   )
@@ -152,13 +156,7 @@ function CharacterDetail({
         </div>
       </Panel>
 
-      {body?.health?.parts && Object.keys(body.health.parts).length > 0 ? (
-        <BodyMap
-          parts={body.health.parts}
-          temperature={body.temperature?.parts}
-          overall={body.health.overall}
-        />
-      ) : null}
+      <CharacterFigure body={body} />
 
       <Condition character={character} body={body} />
 
@@ -255,6 +253,30 @@ function Traits({ traits }: { traits: Array<{ id: string; label: string }> }) {
         </ul>
       )}
     </Panel>
+  )
+}
+
+/**
+ * The paper-doll: live heartbeat parts when they exist, otherwise the
+ * declared unhurt body. The placeholder is labelled so 100% never reads as
+ * a measurement.
+ */
+function CharacterFigure({ body }: { body: PlayerBody | null }) {
+  const { t } = useTranslation()
+  const figure = resolveBodyFigure(body)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <BodyMap
+        parts={figure.parts}
+        temperature={figure.temperature}
+        overall={figure.overall}
+        placeholder={figure.placeholder}
+      />
+      {figure.placeholder ? (
+        <p className="text-center text-sm text-dust">{t('body.no_heartbeat')}</p>
+      ) : null}
+    </div>
   )
 }
 

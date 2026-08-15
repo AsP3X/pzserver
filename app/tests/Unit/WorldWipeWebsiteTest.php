@@ -38,7 +38,13 @@ function makeWipeUser(string $username, UserRole $role): User
     ]);
 }
 
-it('deletes player users and related website data but keeps staff', function () {
+it('deletes every website account and related data, then restores the bootstrap admin', function () {
+    config([
+        'zomboid.admin.username' => 'bootstrap',
+        'zomboid.admin.password' => 'password123',
+        'zomboid.admin.email' => 'bootstrap@example.test',
+    ]);
+
     $admin = makeWipeUser('admin1', UserRole::Admin);
     $mod = makeWipeUser('mod1', UserRole::Moderator);
     $player = makeWipeUser('survivor1', UserRole::Player);
@@ -85,12 +91,13 @@ it('deletes player users and related website data but keeps staff', function () 
     $result = (new WorldWipeService)->wipeWebsitePlayerData();
 
     expect($result['ok'])->toBeTrue()
-        ->and($result['players_deleted'])->toBe(2)
-        ->and(User::query()->find($admin->id))->not->toBeNull()
-        ->and(User::query()->find($mod->id))->not->toBeNull()
+        ->and($result['players_deleted'])->toBe(4)
+        ->and(User::query()->find($admin->id))->toBeNull()
+        ->and(User::query()->find($mod->id))->toBeNull()
         ->and(User::query()->find($player->id))->toBeNull()
         ->and(User::query()->find($player2->id))->toBeNull()
-        ->and(Wallet::query()->find($wallet->id))->toBeNull();
+        ->and(Wallet::query()->find($wallet->id))->toBeNull()
+        ->and(User::query()->where('username', 'bootstrap')->where('role', UserRole::SuperAdmin)->exists())->toBeTrue();
 
     if (Schema::hasTable('player_stats')) {
         expect(DB::table('player_stats')->count())->toBe(0);

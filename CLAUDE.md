@@ -93,6 +93,10 @@ The Laravel app is the single control plane wrapping three integration points:
 - **File I/O** (`Services/ServerIniParser.php`, `Services/SandboxLuaParser.php`) — Read/write PZ config files mounted from game server volume.
 - **Map basemap** — Admin **Map view** toggle: **vector** (default schematic pack from vanilla + `Map=` / workshop `worldmap.xml`, `public/map-vector/vanilla/map.json`, Canvas) or **3D isometric** (live CDN first, optional local `tiles.sqlite` via `zomboid:generate-map-tiles --profile=lite|full`). Vector rebuild: `zomboid:build-worldmap-vector`. Docs: `docs/map-vector.md`, `docs/map-tiles.md`.
 
+## The UI panel is the single point of truth
+
+The admin panel is the authority for mods, server settings, and site config. `.env`, SteamCMD, and a stock `server.ini` only seed a first boot. After the panel has written `.mod_state`, `.config_state`, or Postgres rows, those win. Do not overwrite them from env defaults, and do not delete them on a world wipe. Canonical copy: `AGENTS.md`.
+
 ## Knox Relay — server and client always get the latest Lua
 
 When the user updates Knox Relay, the **local dedicated server and the PZ client** must both be running that same Lua before you stop. A “no” to Workshop does **not** skip this.

@@ -27,6 +27,8 @@ interface BodyMapProps {
   parts: Record<string, BodyPartHealth>
   temperature?: Record<string, BodyPartTemperature>
   overall?: number
+  /** The figure is the declared default, not a reading. */
+  placeholder?: boolean
 }
 
 interface Band {
@@ -90,7 +92,7 @@ function temperatureBand(celsius: number): Band {
 /** What an unreported part looks like: inert, not healthy. */
 const UNKNOWN_BAND: Band = { fill: 'bg-fence', ink: 'text-smoke', key: 'common.unknown' }
 
-export function BodyMap({ parts, temperature, overall }: BodyMapProps) {
+export function BodyMap({ parts, temperature, overall, placeholder = false }: BodyMapProps) {
   const { t } = useTranslation()
   const vocabulary = useGameVocabulary()
 
@@ -105,11 +107,18 @@ export function BodyMap({ parts, temperature, overall }: BodyMapProps) {
       <PanelHeader
         label={t('body.map')}
         action={
-          overall === undefined ? null : (
-            <span className="font-mono text-xs text-smoke tabular-nums">
-              {t('body.overall')} {Math.round(overall)}%
-            </span>
-          )
+          <span className="flex items-center gap-2">
+            {placeholder ? (
+              <span className="border border-fence-bright bg-ash-raised px-2 py-0.5 font-mono text-[0.625rem] tracking-wide text-dust uppercase">
+                {t('body.defaults')}
+              </span>
+            ) : null}
+            {overall === undefined ? null : (
+              <span className="font-mono text-xs text-smoke tabular-nums">
+                {t('body.overall')} {Math.round(overall)}%
+              </span>
+            )}
+          </span>
         }
       />
 

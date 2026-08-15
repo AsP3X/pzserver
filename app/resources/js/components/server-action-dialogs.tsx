@@ -358,16 +358,16 @@ export function WipeDialog({
                 <DialogHeader>
                     <DialogTitle className="text-destructive">Wipe Server</DialogTitle>
                     <DialogDescription>
-                        Deletes the multiplayer world, PZ player accounts, and website player users (wallets, vaults,
-                        shop history, whitelist links, stats). Sandbox/spawns/server.ini and staff accounts are kept. A
-                        safety backup is created first.
+                        Deletes the multiplayer world, PZ player accounts, and every website account (wallets, vaults,
+                        shop history, whitelist links, stats). Sandbox/spawns/server.ini and site configuration are
+                        kept. The first administrator is recreated from ADMIN_USERNAME. A safety backup is created first.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
                     <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-                        Destroyed: world saves, game account DB, website players and related data. Kept: SandboxVars,
-                        spawnpoints/spawnregions, mods/Map=, staff (admin/mod) website accounts, shop catalog and site
-                        settings. Clients may need to clear their local multiplayer map cache.
+                        Destroyed: world saves, game account DB, every website account and related data. Kept:
+                        SandboxVars, spawnpoints/spawnregions, mods/Map=, shop catalog and site settings. Clients may
+                        need to clear their local multiplayer map cache.
                     </div>
                     <div className="grid gap-2">
                         <Label htmlFor="wipe-countdown">Countdown</Label>
