@@ -69,6 +69,11 @@ services:
       API_BIND: 0.0.0.0:8080
       DATABASE_URL: postgres://${WEB_DB_USERNAME:-knox}:${WEB_DB_PASSWORD:-knox}@web-db:5432/${WEB_DB_DATABASE:-knox}
       WEB_CORS_ORIGINS: ${WEB_CORS_ORIGINS:-http://localhost:5174}
+      # Public origin of the site. Steam's OpenID needs an absolute return_to
+      # and refuses one that is not under the realm, so this has to be the
+      # address players actually reach the site on — not a container name.
+      # Falls back to the first CORS origin when unset.
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-}
       RUST_LOG: ${WEB_API_LOG:-pz_api=info,tower_http=info,warn}
 
       PZ_RCON_HOST: game-server

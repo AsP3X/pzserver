@@ -292,9 +292,6 @@ async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
         sqlx::query("DELETE FROM automations")
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM objectives")
-            .execute(&mut *tx)
-            .await?;
         sqlx::query("DELETE FROM quests")
             .execute(&mut *tx)
             .await?;
@@ -322,6 +319,13 @@ async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
                 features = '[]'::jsonb,
                 discord_url = NULL,
                 translations = '{}'::jsonb,
+                -- Branding goes with the rest of the copy: this branch is the
+                -- explicit "reset the site's identity too" option, and leaving
+                -- the old logo over default text would look half-wiped.
+                logo = NULL,
+                logo_type = NULL,
+                favicon = NULL,
+                favicon_type = NULL,
                 updated_at = now()
                WHERE id = 1"#,
         )
@@ -458,7 +462,6 @@ mod tests {
             "backup_settings",
             "store_items",
             "automations",
-            "objectives",
             "quests",
             "ui_languages",
             "ui_translations",

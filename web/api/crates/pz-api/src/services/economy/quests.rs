@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::services::character;
-use crate::services::economy::{self, inventory, objectives, wallet};
+use crate::services::economy::{self, inventory, measure, wallet};
 use crate::state::AppState;
 
 const NODE_TYPES: &[&str] = &[
@@ -377,6 +377,57 @@ pub async fn claim_node(
     award_node(state, user_id, quest_id, node, today).await
 }
 
+/// Staff marking a step done on a player's behalf.
+///
+/// A `manual` node has no measure the server can read, so `claim_node` refuses
+/// it and tells the player staff will handle it — but until this existed there
+/// was nothing for staff to call, and manual nodes could never be completed by
+/// anyone. It also doubles as the unstick for a node whose measure has drifted.
+///
+/// Deliberately still honours `unlocked` and audience: granting past a locked
+/// prerequisite would leave the flow in a state its own graph disallows.
+pub async fn grant_node(
+    state: &AppState,
+    username: &str,
+    quest_id: Uuid,
+    node_id: &str,
+) -> ApiResult<(i32, i64)> {
+    let target: (Uuid, String) =
+        sqlx::query_as("SELECT id, username FROM users WHERE lower(username) = lower($1)")
+            .bind(username.trim())
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or_else(|| ApiError::Validation("No account with that name.".to_owned()))?;
+    let (user_id, resolved) = target;
+
+    let quest = get(&state.db, quest_id).await?;
+    if !visible_to(&state.db, &quest, user_id, &resolved).await? {
+        return Err(ApiError::Validation("That flow is not for that player.".to_owned()));
+    }
+
+    let today = Utc::now().date_naive();
+    let view = progress(state, user_id, &resolved, today, &quest)
+        .await?
+        .ok_or_else(|| ApiError::Validation("That flow is not for that player.".to_owned()))?;
+    let node = view
+        .nodes
+        .iter()
+        .find(|item| item.id == node_id)
+        .ok_or_else(|| ApiError::Validation("Unknown node.".to_owned()))?;
+
+    if !CONDITIONS.contains(&node.kind.as_str()) && node.kind != "reward" {
+        return Err(ApiError::Validation("That node cannot be granted.".to_owned()));
+    }
+    if !node.unlocked {
+        return Err(ApiError::Validation("That stage is still locked.".to_owned()));
+    }
+    if node.claimed {
+        return Err(ApiError::Validation("Already claimed.".to_owned()));
+    }
+
+    award_node(state, user_id, quest_id, node, today).await
+}
+
 pub async fn list_groups(db: &PgPool) -> Result<Vec<PlayerGroup>, sqlx::Error> {
     sqlx::query_as::<_, PlayerGroup>(
         r#"SELECT g.id, g.name, COUNT(m.user_id)::bigint AS members, g.created_at
@@ -639,7 +690,7 @@ async fn measure_node(
                 return Ok(0);
             };
             let cadence = node.data.cadence.as_deref().unwrap_or("once");
-            objectives::measured_progress(state, user_id, username, today, kind, cadence).await
+            measure::measured_progress(state, user_id, username, today, kind, cadence).await
         }
         "area" => Ok(i64::from(inside_area(node, position))),
         "find" | "collect" => {
@@ -768,11 +819,7 @@ async fn award_node(
     node: &QuestNodeView,
     today: NaiveDate,
 ) -> ApiResult<(i32, i64)> {
-    let period = if node.cadence == "daily" {
-        today
-    } else {
-        NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch")
-    };
+    let period = measure::period_of(&node.cadence, today);
     let mut tx = state.db.begin().await?;
     let inserted = sqlx::query(
         r#"INSERT INTO quest_node_completions
@@ -890,10 +937,18 @@ fn validate_graph(graph: &Graph) -> ApiResult<()> {
             starts += 1;
         }
         if matches!(node.kind.as_str(), "task" | "objective") {
-            let measure = node.data.measure.as_deref().unwrap_or("");
-            if !["play", "kills", "hours", "spend", "trade", "manual"].contains(&measure) {
+            let kind = node.data.measure.as_deref().unwrap_or("");
+            if !measure::MEASURES.contains(&kind) {
                 return Err(ApiError::Validation(
                     "Every task or objective needs a measure.".to_owned(),
+                ));
+            }
+            // Unvalidated before, so a typo here silently fell through to the
+            // `once` branch and the step never reset.
+            let cadence = node.data.cadence.as_deref().unwrap_or("once");
+            if !measure::CADENCES.contains(&cadence) {
+                return Err(ApiError::Validation(
+                    "Cadence must be daily or once.".to_owned(),
                 ));
             }
         }

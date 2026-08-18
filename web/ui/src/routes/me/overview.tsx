@@ -6,6 +6,7 @@ import { Panel, PanelHeader } from '@/components/ui/panel'
 import { StatusPill } from '@/components/ui/status-pill'
 import { useCurrentUser } from '@/lib/auth'
 import { formatCoins, formatNumber, formatRelativeTime } from '@/lib/format'
+import { isCondition } from '@/lib/quest-graph'
 import {
   myCharacterQuery,
   myRewardsQuery,
@@ -33,10 +34,21 @@ export function PlayerOverviewPage() {
   const character = characterQuery.data?.character
   const health =
     characterQuery.data?.body?.health?.overall ?? character?.vitals?.health ?? null
+  // Objectives folded into flows, so their share of this badge comes from
+  // finished flow steps now rather than a list of its own.
+  const readySteps =
+    rewards.data?.quests.reduce(
+      (sum, quest) =>
+        sum +
+        quest.nodes.filter(
+          (node) => node.unlocked && node.complete && !node.claimed && isCondition(node.kind),
+        ).length,
+      0,
+    ) ?? 0
   const ready =
     (rewards.data?.daily.available ? 1 : 0) +
     (rewards.data?.tasks.filter((task) => task.complete && !task.claimed).length ?? 0) +
-    (rewards.data?.objectives.filter((item) => item.complete && !item.claimed).length ?? 0) +
+    readySteps +
     (rewards.data?.available_quests.length ?? 0)
 
   return (

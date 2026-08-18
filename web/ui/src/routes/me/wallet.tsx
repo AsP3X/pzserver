@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Coins, Gift, Lock, Search, Trophy, Wallet } from 'lucide-react'
+import { Banknote, Coins, Gift, Lock, Search, Trophy, Wallet } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { Bar } from '@/components/ui/bar'
@@ -12,16 +12,30 @@ import { TabPanel, TabStrip } from '@/components/ui/tabs'
 import {
   api,
   ApiError,
-  type ObjectiveProgress,
+  type DepositPreview,
+  type MoneyDeposit,
   type RewardTask,
   type RewardsView,
   type WalletTransaction,
 } from '@/lib/api'
-import type { QuestNodeView, QuestProgress } from '@/lib/quest-graph'
+import {
+  flatKey,
+  isCondition,
+  splitFlows,
+  type FlatObjective,
+  type QuestNodeView,
+  type QuestProgress,
+} from '@/lib/quest-graph'
 import { cn } from '@/lib/cn'
 import { formatCoins, formatDateTime, formatRelativeTime } from '@/lib/format'
 import { fuzzyMatchWords } from '@/lib/fuzzy'
-import { myRewardsQuery, myWalletQuery, myWalletTransactionsQuery } from '@/lib/queries'
+import {
+  depositPreviewQuery,
+  myDepositsQuery,
+  myRewardsQuery,
+  myWalletQuery,
+  myWalletTransactionsQuery,
+} from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TabItem } from '@/components/ui/tabs'
 import type { TranslationKey } from '@/i18n/locales'
@@ -34,6 +48,7 @@ const SOURCES: Record<string, TranslationKey> = {
   auction_refund: 'economy.source_auction_refund',
   auction_sale: 'economy.source_auction_sale',
   daily_reward: 'economy.source_daily_reward',
+  deposit: 'economy.source_deposit',
   quest: 'economy.source_quest',
   level: 'economy.source_level',
   vault_fee: 'economy.source_vault_fee',
@@ -109,6 +124,13 @@ export function WalletPage() {
   const wallet = useQuery(myWalletQuery)
   const ledger = useQuery(myWalletTransactionsQuery)
   const rewards = useQuery(myRewardsQuery)
+  const deposit = useQuery(depositPreviewQuery)
+  const deposits = useQuery(myDepositsQuery)
+
+  // A failure is only worth showing while it is the newest thing that
+  // happened: once a later deposit works, repeating the old one is noise.
+  const newestDeposit = deposits.data?.[0] ?? null
+  const lastDepositFailure = newestDeposit?.status === 'failed' ? newestDeposit : null
 
   const [surface, setSurface] = useState<Surface>('today')
   const [filter, setFilter] = useState('all')
@@ -133,9 +155,16 @@ export function WalletPage() {
   }, [filter, rows, search, t])
 
   const currentTx = visible.find((row) => row.id === selectedTx) ?? null
-  const objectives = rewards.data?.objectives ?? []
+
+  // Objectives are flows now. A flow with one step and nothing gated behind it
+  // is what an objective was, so it goes back on the objectives tab; only
+  // genuinely staged flows get the board.
+  const { flat, staged } = useMemo(
+    () => splitFlows(rewards.data?.quests ?? []),
+    [rewards.data?.quests],
+  )
   const currentObjective =
-    objectives.find((item) => item.id === selectedObjective) ?? objectives[0] ?? null
+    flat.find((item) => flatKey(item) === selectedObjective) ?? flat[0] ?? null
 
   const tabs = useMemo<TabItem<Surface>[]>(
     () => [
@@ -147,19 +176,16 @@ export function WalletPage() {
       {
         id: 'objectives',
         label: t('economy.objectives_title'),
-        count: readyCount(objectives),
+        count: readyCount(flat),
       },
       {
         id: 'flows',
         label: t('economy.tab_flows'),
-        count: (rewards.data?.quests ?? []).reduce(
+        count: staged.reduce(
           (sum, quest) =>
             sum +
             quest.nodes.filter(
-              (node) =>
-                node.unlocked &&
-                !node.claimed &&
-                ['task', 'objective', 'area', 'find', 'collect', 'kills'].includes(node.kind),
+              (node) => node.unlocked && !node.claimed && isCondition(node.kind),
             ).length,
           0,
         ),
@@ -170,7 +196,7 @@ export function WalletPage() {
         count: visible.length,
       },
     ],
-    [objectives, rewards.data?.tasks, t, visible.length],
+    [flat, staged, rewards.data?.tasks, t, visible.length],
   )
 
   function onClaimed(result: { rewards: RewardsView }) {
@@ -193,7 +219,8 @@ export function WalletPage() {
   })
 
   const claimObjective = useMutation({
-    mutationFn: (id: string) => api.claimObjective(id),
+    mutationFn: ({ questId, nodeId }: { questId: string; nodeId: string }) =>
+      api.claimQuestNode(questId, nodeId),
     onSuccess: onClaimed,
     onError: fail,
   })
@@ -214,7 +241,22 @@ export function WalletPage() {
     onError: fail,
   })
 
-  const busy = claim.isPending || claimObjective.isPending || claimQuest.isPending || pickQuest.isPending
+  const openDeposit = useMutation({
+    mutationFn: api.openDeposit,
+    onSuccess: () => {
+      setError(null)
+      setNotice(t('economy.deposit_queued'))
+      void queryClient.invalidateQueries({ queryKey: ['me', 'deposit'] })
+    },
+    onError: fail,
+  })
+
+  const busy =
+    claim.isPending ||
+    claimObjective.isPending ||
+    claimQuest.isPending ||
+    pickQuest.isPending ||
+    openDeposit.isPending
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:p-5">
@@ -273,6 +315,17 @@ export function WalletPage() {
         </div>
       ) : null}
 
+      {deposit.data ? (
+        <div className="shrink-0">
+          <DepositCard
+            preview={deposit.data}
+            lastFailure={lastDepositFailure}
+            busy={busy}
+            onDeposit={() => openDeposit.mutate()}
+          />
+        </div>
+      ) : null}
+
       <TabStrip
         items={tabs}
         active={surface}
@@ -294,18 +347,18 @@ export function WalletPage() {
 
           {surface === 'objectives' ? (
             <ObjectiveBoard
-              items={objectives}
+              items={flat}
               current={currentObjective}
               pending={rewards.isPending}
               busy={busy}
               onSelect={setSelectedObjective}
-              onClaim={(id) => claimObjective.mutate(id)}
+              onClaim={(questId, nodeId) => claimObjective.mutate({ questId, nodeId })}
             />
           ) : null}
 
           {surface === 'flows' ? (
             <FlowBoard
-              items={rewards.data?.quests ?? []}
+              items={staged}
               offers={rewards.data?.available_quests ?? []}
               pending={rewards.isPending}
               busy={busy}
@@ -406,6 +459,95 @@ function DailyCard({
   )
 }
 
+/**
+ * Banking the cash a character is carrying.
+ *
+ * The number shown comes from the mod's last inventory snapshot, so it is a
+ * recent reading rather than a live one. That is said plainly rather than
+ * dressed up as a quote: the mod counts again when it takes the cash, and
+ * anything picked up since will be included.
+ */
+function DepositCard({
+  preview,
+  lastFailure,
+  busy,
+  onDeposit,
+}: {
+  preview: DepositPreview
+  /** Shown so a failed deposit is not silent — it never reaches the ledger. */
+  lastFailure: MoneyDeposit | null
+  busy: boolean
+  onDeposit: () => void
+}) {
+  const { t, intlLocale } = useTranslation()
+  const { pending } = preview
+  const nothingToBank = preview.note_count === 0 && preview.bundle_count === 0
+
+  return (
+    <Panel bracketed>
+      <PanelHeader
+        label={t('economy.deposit_title')}
+        action={
+          <span className="font-mono text-[0.6875rem] text-dust">
+            {t('economy.deposit_rate', {
+              note: preview.note_value,
+              bundle: preview.bundle_value,
+            })}
+          </span>
+        }
+      />
+      <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Banknote aria-hidden="true" className="size-4 text-hazard" strokeWidth={1.5} />
+            <p className="text-sm text-smoke">
+              {preview.snapshot_missing
+                ? t('economy.deposit_no_snapshot')
+                : t('economy.deposit_carrying', {
+                    notes: preview.note_count,
+                    bundles: preview.bundle_count,
+                    coins: formatCoins(preview.coins, intlLocale),
+                  })}
+            </p>
+          </div>
+
+          {pending ? (
+            <p className="mt-2 font-mono text-[0.6875rem] text-hazard">
+              {t('economy.deposit_pending', {
+                when: formatRelativeTime(pending.created_at, intlLocale),
+              })}
+            </p>
+          ) : preview.snapshot_at ? (
+            <p className="mt-2 font-mono text-[0.6875rem] text-dust">
+              {t('economy.deposit_snapshot_at', {
+                when: formatRelativeTime(preview.snapshot_at, intlLocale),
+              })}
+            </p>
+          ) : null}
+
+          {lastFailure ? (
+            <p className="mt-2 text-xs text-blood">
+              {t('economy.deposit_last_failed', {
+                reason: lastFailure.detail ?? t('economy.deposit_failed'),
+              })}
+            </p>
+          ) : null}
+        </div>
+
+        <Button
+          size="sm"
+          className="shrink-0"
+          disabled={busy || nothingToBank || pending !== null || preview.snapshot_missing}
+          onClick={onDeposit}
+        >
+          <Banknote aria-hidden="true" className="size-3.5" />
+          {pending ? t('economy.deposit_waiting') : t('economy.deposit_action')}
+        </Button>
+      </div>
+    </Panel>
+  )
+}
+
 function RankCard({ view }: { view: RewardsView }) {
   const { t } = useTranslation()
   const { rank } = view
@@ -475,12 +617,12 @@ function ObjectiveBoard({
   onSelect,
   onClaim,
 }: {
-  items: ObjectiveProgress[]
-  current: ObjectiveProgress | null
+  items: FlatObjective[]
+  current: FlatObjective | null
   pending: boolean
   busy: boolean
-  onSelect: (id: string) => void
-  onClaim: (id: string) => void
+  onSelect: (key: string) => void
+  onClaim: (questId: string, nodeId: string) => void
 }) {
   const { t } = useTranslation()
 
@@ -510,13 +652,15 @@ function ObjectiveBoard({
         />
         <ul className="min-h-0 flex-1 divide-y divide-fence overflow-y-auto">
           {items.map((item) => (
-            <li key={item.id}>
+            <li key={flatKey(item)}>
               <button
                 type="button"
-                onClick={() => onSelect(item.id)}
+                onClick={() => onSelect(flatKey(item))}
                 className={cn(
                   'flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors',
-                  item.id === current?.id ? 'bg-hazard-soft' : 'hover:bg-ash-raised',
+                  current && flatKey(item) === flatKey(current)
+                    ? 'bg-hazard-soft'
+                    : 'hover:bg-ash-raised',
                 )}
               >
                 <span className="flex w-full items-baseline justify-between gap-2">
@@ -546,7 +690,11 @@ function ObjectiveBoard({
 
       <Panel bracketed className="overflow-y-auto">
         {current ? (
-          <ObjectiveDetail item={current} busy={busy} onClaim={() => onClaim(current.id)} />
+          <ObjectiveDetail
+            item={current}
+            busy={busy}
+            onClaim={() => onClaim(current.questId, current.id)}
+          />
         ) : (
           <>
             <PanelHeader label={t('economy.objectives_title')} />
@@ -563,14 +711,15 @@ function ObjectiveDetail({
   busy,
   onClaim,
 }: {
-  item: ObjectiveProgress
+  item: FlatObjective
   busy: boolean
   onClaim: () => void
 }) {
   const { t } = useTranslation()
-  const href = item.kind === 'spend' ? '/shop' : item.kind === 'trade' ? '/auctions' : null
-  const manual = item.kind === 'manual'
-  const kind = KIND_LABELS[item.kind]
+  const measure = item.measure ?? ''
+  const href = measure === 'spend' ? '/shop' : measure === 'trade' ? '/auctions' : null
+  const manual = measure === 'manual'
+  const kind = KIND_LABELS[measure]
 
   return (
     <>

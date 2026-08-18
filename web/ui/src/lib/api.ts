@@ -214,6 +214,7 @@ export interface Moodles {
 
 export interface Weapon {
   name: string | null
+  /** Wear, 0–100, as a percent of the item's own condition ceiling. */
   condition: number | null
   sharpness: number | null
   attachments: string[] | null
@@ -225,6 +226,7 @@ export interface Weapon {
 export interface ClothingItem {
   slot: string
   name: string
+  /** Wear, 0–100, as a percent of the garment's own condition ceiling. */
   condition: number
   holes: number
   /** Bite and scratch resistance, as percentages. */
@@ -268,7 +270,7 @@ export interface InventoryItem {
   name: string
   category: string
   count: number
-  /** Wear, 0–100. Null for items that do not degrade. */
+  /** Wear as a 0–1 fraction. Null for items that do not degrade. */
   condition: number | null
   equipped: boolean
   /** Display name of the container holding it. */
@@ -346,6 +348,31 @@ export interface User {
 /** `user` is null when nobody is signed in — this endpoint never 401s. */
 export interface MeResponse {
   user: User | null
+}
+
+/**
+ * What a correct password produces.
+ *
+ * With two-factor on it is not a session — the cookie is only set once a code
+ * is accepted, so a caller must handle both arms rather than assuming a user
+ * came back.
+ */
+export type LoginOutcome =
+  | { status: 'signed_in'; user: User }
+  | { status: 'two_factor_required'; challenge: string; expires_at: string }
+
+export interface TwoFactorStatus {
+  enabled: boolean
+  confirmed_at: string | null
+  recovery_codes_left: number
+}
+
+/** Handed out once at the start of enrolment. */
+export interface TwoFactorEnrolment {
+  /** Base32, for typing in by hand. */
+  secret: string
+  /** `otpauth://…`, rendered as a QR code in the browser. */
+  uri: string
 }
 
 export interface SessionResponse {
@@ -764,6 +791,110 @@ export interface WalletView {
   updated_at: string
 }
 
+/** One survivor's public record, as the profile page shows it. */
+export interface PlayerProfile {
+  username: string
+  zombie_kills: number
+  hours_survived: number
+  profession: string | null
+  is_dead: boolean
+  /** Perk name to level, as the mod exports it. */
+  skills: Record<string, number>
+  traits: unknown
+  first_seen_at: string
+  last_synced_at: string
+  deaths: number
+  pvp_kills: number
+  kills_rank: number | null
+  hours_rank: number | null
+}
+
+/** Steam branch the next game-server boot will install. */
+export interface UpdateStatus {
+  branch: string
+  branches: string[]
+}
+
+export interface WhitelistSync {
+  added: string[]
+  failed: string[]
+  /** On the game whitelist with no website account — reported, not removed. */
+  unmatched: string[]
+}
+
+/** One player waiting out a respawn cooldown. */
+export interface RespawnTimer {
+  username: string
+  died_at: string
+  minutes_left: number
+}
+
+/**
+ * The respawn cooldown, which the mod can only ask for.
+ *
+ * `KR_Cooldown` queues a kick and the API performs it over RCON — Lua cannot
+ * disconnect anyone on a dedicated server. With the setting off the mod still
+ * tracks deaths but queues nothing.
+ */
+export interface RespawnView {
+  enabled: boolean
+  delay_minutes: number
+  timers: RespawnTimer[]
+}
+
+/** Coins paid per cash item. Read from the mod's money_deposit_config.json. */
+export interface DepositRates {
+  money_value: number
+  bundle_value: number
+}
+
+/**
+ * One banking of in-game cash.
+ *
+ * `pending` means the mod has the request but the character has not been seen
+ * online yet. Coins only move on `credited` — the rates are frozen onto the row
+ * when it opens, so a later rate change never reprices it.
+ */
+export interface MoneyDeposit {
+  id: string
+  user_id: string
+  username: string
+  status: 'pending' | 'credited' | 'failed' | 'cancelled' | string
+  note_count: number
+  bundle_count: number
+  coins: number
+  note_value: number
+  bundle_value: number
+  detail: string | null
+  wallet_transaction_id: string | null
+  attempts: number
+  created_at: string
+  finished_at: string | null
+}
+
+/**
+ * What banking right now would pay, from the mod's last inventory snapshot.
+ *
+ * A reading, not a promise: the mod counts again when it strips the cash, so
+ * anything picked up since the snapshot is included and this number is low.
+ */
+export interface DepositPreview {
+  note_count: number
+  bundle_count: number
+  coins: number
+  note_value: number
+  bundle_value: number
+  snapshot_missing: boolean
+  snapshot_at: string | null
+  /** Set while one is in flight — a second would find no cash and fail. */
+  pending: MoneyDeposit | null
+}
+
+export interface AdminDeposits {
+  rates: DepositRates
+  deposits: MoneyDeposit[]
+}
+
 export interface WalletTransaction {
   id: string
   user_id: string
@@ -812,55 +943,9 @@ export interface AccountRank {
   per_rank: number
 }
 
-export type ObjectiveKind = 'play' | 'kills' | 'hours' | 'spend' | 'trade' | 'manual'
-export type ObjectiveCadence = 'daily' | 'once'
-
-export interface ObjectiveProgress {
-  id: string
-  title: string
-  description: string | null
-  kind: ObjectiveKind | string
-  cadence: ObjectiveCadence | string
-  xp: number
-  coins: number
-  progress: number
-  goal: number
-  complete: boolean
-  claimed: boolean
-}
-
-export interface Objective {
-  id: string
-  title: string
-  description: string | null
-  kind: ObjectiveKind | string
-  goal: number
-  xp: number
-  coins: number
-  cadence: ObjectiveCadence | string
-  active: boolean
-  sort_order: number
-  created_at: string
-  updated_at: string
-  completions: number
-}
-
-export interface ObjectiveInput {
-  title?: string
-  description?: string | null
-  kind?: string
-  goal?: number
-  xp?: number
-  coins?: number
-  cadence?: string
-  active?: boolean
-  sort_order?: number
-}
-
 export interface RewardsView {
   daily: DailyReward
   tasks: RewardTask[]
-  objectives: ObjectiveProgress[]
   quests: import('@/lib/quest-graph').QuestProgress[]
   available_quests: import('@/lib/quest-graph').QuestOffer[]
   rank: AccountRank
@@ -1191,7 +1276,21 @@ export const api = {
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),
 
-  login: (input: LoginInput) => post<SessionResponse>('/api/v1/auth/login', input),
+  login: (input: LoginInput) => post<LoginOutcome>('/api/v1/auth/login', input),
+
+  twoFactorStatus: () => request<TwoFactorStatus>('/api/v1/auth/2fa'),
+
+  beginTwoFactor: () => post<TwoFactorEnrolment>('/api/v1/auth/2fa/begin', {}),
+
+  confirmTwoFactor: (code: string) =>
+    post<{ recovery_codes: string[] }>('/api/v1/auth/2fa/confirm', { code }),
+
+  disableTwoFactor: (password: string) =>
+    post<void>('/api/v1/auth/2fa/disable', { password }),
+
+  /** `challenge` is null on the Steam path, where a cookie carries it. */
+  answerTwoFactor: (challenge: string | null, code: string) =>
+    post<SessionResponse>('/api/v1/auth/2fa/challenge', { challenge, code }),
 
   logout: () => post<void>('/api/v1/auth/logout', {}),
 
@@ -1220,6 +1319,36 @@ export const api = {
     }),
 
   adminSanctions: () => request<SanctionList>('/api/v1/admin/sanctions'),
+
+  playerProfile: (username: string) =>
+    request<PlayerProfile>(`/api/v1/stats/players/${encodeURIComponent(username)}`),
+
+  changeEmail: (input: { password: string; email: string }) =>
+    post<SessionResponse>('/api/v1/auth/email', input),
+
+  adminUpdateStatus: () => request<UpdateStatus>('/api/v1/admin/server/update'),
+
+  adminUpdateServer: (input: { branch?: string; message?: string }) =>
+    post<{ message: string }>('/api/v1/admin/server/update', input),
+
+  adminSetPlayerPassword: (username: string, password: string) =>
+    post<{ output: string }>(`/api/v1/admin/players/${username}/password`, { password }),
+
+  adminWhitelistToggle: (username: string) =>
+    post<{ whitelisted: boolean }>(`/api/v1/admin/whitelist/${username}/toggle`, {}),
+
+  adminWhitelistSync: () => post<WhitelistSync>('/api/v1/admin/whitelist/sync', {}),
+
+  adminRespawn: () => request<RespawnView>('/api/v1/admin/respawn'),
+
+  adminSetRespawn: (enabled: boolean, delayMinutes: number) =>
+    patch<RespawnView>('/api/v1/admin/respawn', {
+      enabled,
+      delay_minutes: delayMinutes,
+    }),
+
+  adminResetRespawn: (username: string) =>
+    post<RespawnView>(`/api/v1/admin/respawn/${username}/reset`, {}),
 
   adminAccess: (username: string, level: string) =>
     post<CommandReply>(`/api/v1/admin/players/${encodeURIComponent(username)}/access`, {
@@ -1410,28 +1539,31 @@ export const api = {
   myWalletTransactions: () =>
     request<WalletTransaction[]>('/api/v1/me/wallet/transactions'),
 
+  depositPreview: () => request<DepositPreview>('/api/v1/me/deposit'),
+
+  openDeposit: () => post<MoneyDeposit>('/api/v1/me/deposit', {}),
+
+  myDeposits: () => request<MoneyDeposit[]>('/api/v1/me/deposit/history'),
+
+  adminDeposits: () => request<AdminDeposits>('/api/v1/admin/bridge/deposits'),
+
+  adminSetDepositRates: (rates: DepositRates) =>
+    patch<DepositRates>('/api/v1/admin/bridge/deposits', rates),
+
+  adminCancelDeposit: (id: string) =>
+    post<MoneyDeposit>(`/api/v1/admin/bridge/deposits/${id}/cancel`, {}),
+
+  adminCreditDeposit: (id: string, coins: number) =>
+    post<MoneyDeposit>(`/api/v1/admin/bridge/deposits/${id}/credit`, { coins }),
+
   myRewards: () => request<RewardsView>('/api/v1/me/rewards'),
 
   claimReward: (key: string) =>
     post<RewardClaimResult>('/api/v1/me/rewards/claim', { key }),
 
-  claimObjective: (id: string) =>
-    post<RewardClaimResult>(`/api/v1/me/rewards/objectives/${id}`, {}),
-
-  adminObjectives: () => request<Objective[]>('/api/v1/admin/objectives'),
-
-  adminCreateObjective: (input: ObjectiveInput) =>
-    post<Objective>('/api/v1/admin/objectives', input),
-
-  adminUpdateObjective: (id: string, input: ObjectiveInput) =>
-    patch<Objective>(`/api/v1/admin/objectives/${id}`, input),
-
-  adminDeleteObjective: (id: string) =>
-    del<{ message: string }>(`/api/v1/admin/objectives/${id}`),
-
-  adminGrantObjective: (id: string, username: string) =>
+  adminGrantQuestNode: (questId: string, nodeId: string, username: string) =>
     post<{ xp: number; coins: number; message: string }>(
-      `/api/v1/admin/objectives/${id}/grant`,
+      `/api/v1/admin/quests/${questId}/nodes/${nodeId}/grant`,
       { username },
     ),
 

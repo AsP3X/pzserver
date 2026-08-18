@@ -8,7 +8,7 @@ use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use crate::services::audit;
 use crate::services::automations;
 use crate::services::backups;
 use crate::services::reports;
+use crate::services::respawn;
 use crate::services::sanctions;
 use crate::services::site::{self, SiteSettings};
 use crate::services::wipe::{self, WipeRequest, WipeResult};
@@ -32,6 +33,8 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/players/{username}/unban", post(unban))
         .route("/admin/players/{username}/suspend", post(suspend))
         .route("/admin/sanctions", get(sanctions))
+        .route("/admin/respawn", get(respawn_view).patch(configure_respawn))
+        .route("/admin/respawn/{username}/reset", post(reset_respawn))
         .route("/admin/players/{username}/access", post(access))
         .route("/admin/players/{username}/teleport", post(teleport))
         .route("/admin/players/{username}/inventory", get(inventory))
@@ -41,6 +44,10 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/server/stop", post(stop))
         .route("/admin/server/restart", post(restart))
         .route("/admin/server/save", post(save))
+        .route("/admin/server/update", get(update_status).post(update_server))
+        .route("/admin/players/{username}/password", post(set_player_password))
+        .route("/admin/whitelist/{username}/toggle", post(whitelist_toggle))
+        .route("/admin/whitelist/sync", post(whitelist_sync))
         .route("/admin/broadcast", post(broadcast))
         .route("/admin/console", post(console))
         .route("/admin/config", get(config).patch(update_config))
@@ -170,6 +177,39 @@ async fn sanctions(
     _staff: AdminUser,
 ) -> ApiResult<Json<sanctions::SanctionList>> {
     Ok(Json(sanctions::list(&state.db).await?))
+}
+
+/// The cooldown setting, plus who is currently sitting one out.
+async fn respawn_view(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<respawn::RespawnView>> {
+    Ok(Json(respawn::view(&state).await?))
+}
+
+#[derive(Deserialize)]
+struct RespawnConfigBody {
+    enabled: bool,
+    delay_minutes: i64,
+}
+
+async fn configure_respawn(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<RespawnConfigBody>,
+) -> ApiResult<Json<respawn::RespawnView>> {
+    Ok(Json(
+        respawn::configure(&state, body.enabled, body.delay_minutes).await?,
+    ))
+}
+
+/// Let one player back in early.
+async fn reset_respawn(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(username): Path<String>,
+) -> ApiResult<Json<respawn::RespawnView>> {
+    Ok(Json(respawn::reset(&state, &username).await?))
 }
 
 #[derive(Deserialize)]
@@ -504,6 +544,77 @@ async fn whitelist_remove(
     Ok(Json(CommandReply {
         output: admin::remove_from_whitelist(&state, &username).await?,
     }))
+}
+
+async fn whitelist_toggle(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(username): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let whitelisted = admin::toggle_whitelist(&state, &username).await?;
+
+    Ok(Json(serde_json::json!({ "whitelisted": whitelisted })))
+}
+
+async fn whitelist_sync(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<admin::WhitelistSync>> {
+    Ok(Json(admin::sync_whitelist(&state).await?))
+}
+
+#[derive(Deserialize)]
+struct PlayerPasswordBody {
+    password: String,
+}
+
+/// Set a player's *game* password. Never touches their website login.
+async fn set_player_password(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(username): Path<String>,
+    Json(body): Json<PlayerPasswordBody>,
+) -> ApiResult<Json<CommandReply>> {
+    Ok(Json(CommandReply {
+        output: admin::set_game_password(&state, &username, &body.password).await?,
+    }))
+}
+
+#[derive(Serialize)]
+struct UpdateStatus {
+    branch: String,
+    branches: Vec<String>,
+}
+
+async fn update_status(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<UpdateStatus>> {
+    Ok(Json(UpdateStatus {
+        branch: admin::steam_branch(&state).await,
+        branches: admin::STEAM_BRANCHES.iter().map(|s| (*s).to_owned()).collect(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct UpdateServerBody {
+    #[serde(default)]
+    branch: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// Reinstall the game from Steam. Takes the server down and brings it back.
+async fn update_server(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<UpdateServerBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    admin::update_game(&state, body.branch.as_deref(), body.message.as_deref()).await?;
+
+    Ok(Json(serde_json::json!({
+        "message": "Update started. The server will be down while Steam re-downloads it."
+    })))
 }
 
 // ── Bridge / logs / site ────────────────────────────────────────────

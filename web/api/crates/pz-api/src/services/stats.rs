@@ -129,6 +129,74 @@ pub async fn leaderboard(
         .await
 }
 
+/// One survivor's public record.
+///
+/// Deliberately built from `player_stats` and `game_events` only — both of
+/// which describe what happened in the world. Nothing from `users` appears
+/// here: this page is readable by anyone, and an email address or a role is
+/// not part of a character's story.
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct PlayerProfile {
+    pub username: String,
+    pub zombie_kills: i32,
+    pub hours_survived: f64,
+    pub profession: Option<String>,
+    pub is_dead: bool,
+    /// Perk name to level, as the mod exports it.
+    pub skills: serde_json::Value,
+    pub traits: Option<serde_json::Value>,
+    pub first_seen_at: DateTime<Utc>,
+    pub last_synced_at: DateTime<Utc>,
+    pub deaths: i64,
+    pub pvp_kills: i64,
+    /// Position on the kills board, or null when they have none.
+    pub kills_rank: Option<i64>,
+    pub hours_rank: Option<i64>,
+}
+
+/// Look a survivor up by name, case-insensitively.
+pub async fn profile(db: &PgPool, username: &str) -> Result<Option<PlayerProfile>, sqlx::Error> {
+    sqlx::query_as::<_, PlayerProfile>(
+        r#"
+        SELECT
+            p.username,
+            p.zombie_kills,
+            p.hours_survived::double precision AS hours_survived,
+            p.profession,
+            p.is_dead,
+            p.skills,
+            p.traits,
+            p.first_seen_at,
+            p.last_synced_at,
+            (
+                SELECT count(*) FROM game_events e
+                WHERE e.event_type = 'death' AND lower(e.player) = lower(p.username)
+            )::bigint AS deaths,
+            -- On a pvp_kill row `player` is the killer and the victim lives in
+            -- `detail`, which is the shape the moderation feed already assumes.
+            (
+                SELECT count(*) FROM game_events e
+                WHERE e.event_type = 'pvp_kill' AND lower(e.player) = lower(p.username)
+            )::bigint AS pvp_kills,
+            -- Ranked against everyone, so the number matches the leaderboard
+            -- rather than being a position within some filtered subset.
+            (
+                SELECT count(*) + 1 FROM player_stats r
+                WHERE r.zombie_kills > p.zombie_kills
+            )::bigint AS kills_rank,
+            (
+                SELECT count(*) + 1 FROM player_stats r
+                WHERE r.hours_survived > p.hours_survived
+            )::bigint AS hours_rank
+        FROM player_stats p
+        WHERE lower(p.username) = lower($1)
+        "#,
+    )
+    .bind(username)
+    .fetch_optional(db)
+    .await
+}
+
 /// Population samples for the last `hours`, oldest first.
 pub async fn history(db: &PgPool, hours: i32) -> Result<Vec<StatusSample>, sqlx::Error> {
     sqlx::query_as::<_, StatusSample>(

@@ -38,6 +38,7 @@ import { NotFoundPage } from '@/routes/not-found'
 import { PlayerOverviewPage } from '@/routes/me/overview'
 import { ObituaryPage } from '@/routes/obituary'
 import { RankingsPage } from '@/routes/rankings'
+import { PlayerProfilePage } from '@/routes/player-profile'
 import { RegisterPage } from '@/routes/auth/register'
 import { PlayerReportsPage } from '@/routes/me/reports'
 import { SettingsPage } from '@/routes/me/settings'
@@ -50,7 +51,6 @@ import { AdminAuctionsPage } from '@/routes/admin/auctions'
 import { AdminShopPage } from '@/routes/admin/shop'
 import { AdminWalletsPage } from '@/routes/admin/wallets'
 import { AdminAuditPage } from '@/routes/admin/audit'
-import { AdminObjectivesPage } from '@/routes/admin/objectives'
 import { AdminQuestsPage } from '@/routes/admin/quests'
 import { AdminQuestEditorPage } from '@/routes/admin/quest-editor'
 import { StatusPage } from '@/routes/status'
@@ -87,6 +87,12 @@ const rankingsRoute = createRoute({
   getParentRoute: () => publicLayout,
   path: '/rankings',
   component: RankingsPage,
+})
+
+const playerProfileRoute = createRoute({
+  getParentRoute: () => publicLayout,
+  path: '/rankings/$username',
+  component: PlayerProfilePage,
 })
 
 const obituaryRoute = createRoute({
@@ -293,12 +299,6 @@ const adminWalletsRoute = createRoute({
   component: AdminWalletsPage,
 })
 
-const adminObjectivesRoute = createRoute({
-  getParentRoute: () => adminLayout,
-  path: '/admin/objectives',
-  component: AdminObjectivesPage,
-})
-
 const adminQuestsRoute = createRoute({
   getParentRoute: () => adminLayout,
   path: '/admin/quests',
@@ -372,6 +372,7 @@ export const router = createRouter({
       indexRoute,
       statusRoute,
       rankingsRoute,
+      playerProfileRoute,
       obituaryRoute,
       newsRoute,
       newsPostRoute,
@@ -407,7 +408,6 @@ export const router = createRouter({
       adminShopRoute,
       adminAuctionsRoute,
       adminWalletsRoute,
-      adminObjectivesRoute,
       adminQuestsRoute,
       adminQuestEditorRoute,
       adminSiteRoute,

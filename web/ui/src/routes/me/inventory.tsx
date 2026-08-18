@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TabPanel, TabStrip } from '@/components/ui/tabs'
 import { api, ApiError, type InventoryHold } from '@/lib/api'
 import { cn } from '@/lib/cn'
-import { conditionTone } from '@/lib/condition-tone'
+import { conditionTone, wearFraction, wearPercent } from '@/lib/condition-tone'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
 import {
   ALL_ITEMS,
@@ -312,14 +312,14 @@ export function InventoryPage() {
                             </span>
                             {item.condition === null ? null : (
                               <span className="mt-0.5 flex w-16 shrink-0 items-center gap-2 sm:w-20">
-                                <Bar className="flex-1" fraction={item.condition / 100} />
+                                <Bar className="flex-1" fraction={wearFraction(item.condition)} />
                                 <span
                                   className={cn(
                                     'w-8 text-right font-mono text-[0.6875rem] tabular-nums',
-                                    conditionTone(item.condition),
+                                    conditionTone(wearPercent(item.condition)),
                                   )}
                                 >
-                                  {Math.round(item.condition)}%
+                                  {wearPercent(item.condition)}%
                                 </span>
                               </span>
                             )}
@@ -556,11 +556,16 @@ function Inspector({
               <span className="font-mono text-[0.625rem] tracking-widest text-dust uppercase">
                 {t('economy.condition')}
               </span>
-              <span className={cn('font-mono text-sm tabular-nums', conditionTone(item.condition))}>
-                {Math.round(item.condition)}%
+              <span
+                className={cn(
+                  'font-mono text-sm tabular-nums',
+                  conditionTone(wearPercent(item.condition)),
+                )}
+              >
+                {wearPercent(item.condition)}%
               </span>
             </div>
-            <Bar className="mt-2" fraction={item.condition / 100} />
+            <Bar className="mt-2" fraction={wearFraction(item.condition)} />
           </div>
         )}
 

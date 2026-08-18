@@ -42,7 +42,7 @@ package.preload["KR_Codec"] = function() return Codec end
 local written = {}
 package.preload["KR_Bridge"] = function()
     return {
-        VERSION = "1.21",
+        VERSION = "1.22",
         wallStamp = function() return "2026-08-10T12:00:00" end,
         worldStamp = function() return "1993-07-09T12:00:00" end,
         writeText = function(path, body)
@@ -101,18 +101,29 @@ local function assertPartType(value)
 end
 
 -- CharacterStat, the Build 42 replacement for the per-stat getters.
+-- Ceilings match zombie.characters.CharacterStat.register in the game jar.
+local STAT_MAX = {
+    BOREDOM = 100, DISCOMFORT = 100, INTOXICATION = 100, PAIN = 100,
+    PANIC = 100, POISON = 100, UNHAPPINESS = 100, WETNESS = 100,
+    TEMPERATURE = 40,
+}
+
 CharacterStat = {}
 for _, name in ipairs({
     "ANGER", "BOREDOM", "DISCOMFORT", "ENDURANCE", "FATIGUE", "FITNESS", "HUNGER",
     "IDLENESS", "INTOXICATION", "MORALE", "PAIN", "PANIC", "POISON", "SANITY",
     "SICKNESS", "STRESS", "TEMPERATURE", "THIRST", "UNHAPPINESS", "WETNESS",
 }) do
-    CharacterStat[name] = { isCharacterStat = true, name = name }
+    CharacterStat[name] = {
+        isCharacterStat = true,
+        name = name,
+        getMaximumValue = function() return STAT_MAX[name] or 1 end,
+    }
 end
 
 local STAT_VALUES = {
     HUNGER = 0.253, THIRST = 0.1, FATIGUE = 0, ENDURANCE = 0.9, STRESS = 0,
-    PANIC = 0, BOREDOM = 0, UNHAPPINESS = 0, PAIN = 0.05, WETNESS = 0,
+    PANIC = 20, BOREDOM = 25, UNHAPPINESS = 0, PAIN = 5, WETNESS = 0,
     INTOXICATION = 0, TEMPERATURE = 37, SICKNESS = 0, POISON = 0,
 }
 
@@ -223,7 +234,8 @@ local function fakePlayer(name, opts)
             if opts.unarmed then return nil end
             return {
                 getName = function() return "Axe" end,
-                getCondition = function() return 74.4 end,
+                getCondition = function() return 7 end,
+                getConditionMax = function() return 10 end,
                 hasSharpness = function() return true end,
                 getSharpness = function() return 3 end,
                 getMaxSharpness = function() return 5 end,
@@ -241,7 +253,8 @@ local function fakePlayer(name, opts)
                             IsClothing = function() return true end,
                             getBodyLocation = function() return "Torso" end,
                             getName = function() return "Jacket" end,
-                            getCondition = function() return 90 end,
+                            getCondition = function() return 9 end,
+                            getConditionMax = function() return 10 end,
                             getHolesNumber = function() return 1 end,
                             getBiteDefense = function() return 40 end,
                             getScratchDefense = function() return 55 end,
@@ -257,7 +270,24 @@ local function fakePlayer(name, opts)
                             IsClothing = function() return false end,
                             getBodyLocation = function() return "Back" end,
                             getName = function() return "Big Hiking Bag" end,
-                            getCondition = function() return 80 end,
+                            getCondition = function() return 8 end,
+                            getConditionMax = function() return 10 end,
+                        }
+                    end,
+                },
+                {
+                    --- Sneakers cap at 24, not 10. Reporting the raw count
+                    --- would show a pristine pair as 24% worn.
+                    getItem = function()
+                        return {
+                            IsClothing = function() return true end,
+                            getBodyLocation = function() return "Shoes" end,
+                            getName = function() return "Sneakers" end,
+                            getCondition = function() return 24 end,
+                            getConditionMax = function() return 24 end,
+                            getHolesNumber = function() return 0 end,
+                            getBiteDefense = function() return 0 end,
+                            getScratchDefense = function() return 10 end,
                         }
                     end,
                 },
@@ -355,17 +385,36 @@ check("per-part insulation is read from its node", beat.temperature.parts.Torso_
     "got " .. tostring(beat.temperature.parts.Torso_Upper.insulation))
 
 check("moodles are read through CharacterStat", beat.moodles.hunger == 0.25, "got " .. tostring(beat.moodles.hunger))
+check("a 0-1 stat is left as a fraction of its own maximum",
+    beat.moodles.endurance == 0.9, "got " .. tostring(beat.moodles.endurance))
+check("a 0-100 stat is reported as a fraction of its own maximum",
+    beat.moodles.boredom == 0.25, "got " .. tostring(beat.moodles.boredom))
+check("panic is a fraction of 100, not a raw count",
+    beat.moodles.panic == 0.2, "got " .. tostring(beat.moodles.panic))
+check("pain is a fraction of 100, not a raw count",
+    beat.moodles.pain == 0.05, "got " .. tostring(beat.moodles.pain))
+check("temperature stays in Celsius rather than being treated as a bar",
+    beat.moodles.temperature == 37, "got " .. tostring(beat.moodles.temperature))
 check("intoxication maps to drunk", beat.moodles.drunk == 0)
 check("sickness is a level, not a flag", beat.moodles.sickness == 0)
 check("has_cold comes off BodyDamage", beat.moodles.has_cold == false)
 
-check("the equipped weapon is reported", beat.weapon.name == "Axe" and beat.weapon.condition == 74.4)
+check("the equipped weapon is reported", beat.weapon.name == "Axe")
+check("weapon condition is a percent of the item's own maximum",
+    beat.weapon.condition == 70, "got " .. tostring(beat.weapon.condition))
 check("sharpness is a proportion of the item's maximum", beat.weapon.sharpness == 60,
     "got " .. tostring(beat.weapon.sharpness))
 check("attachments come from getAttachmentsProvided", beat.weapon.attachments[1] == "Scope")
 check("absent firearm fields are omitted", beat.weapon.ammo == nil and beat.weapon.chamber == nil)
 check("clothing is unwrapped from the worn entry", beat.clothing.items[1].name == "Jacket")
+check("clothing condition is a percent of the garment's own maximum",
+    beat.clothing.items[1].condition == 90, "got " .. tostring(beat.clothing.items[1].condition))
 check("a worn non-garment is still listed", beat.clothing.items[2].name == "Big Hiking Bag")
+check("a worn bag reports condition as a percent of its own maximum",
+    beat.clothing.items[2].condition == 80, "got " .. tostring(beat.clothing.items[2].condition))
+check("a garment whose ceiling is not 10 still reports 100 when full",
+    beat.clothing.items[3].name == "Sneakers" and beat.clothing.items[3].condition == 100,
+    "got " .. tostring(beat.clothing.items[3] and beat.clothing.items[3].condition))
 check("a worn non-garment reports no holes or defence", (function()
     local bag = beat.clothing.items[2]
     return bag.holes == 0 and bag.bite == 0 and bag.scratch == 0

@@ -117,7 +117,7 @@ pub struct Moodles {
 pub struct Weapon {
     #[serde(default)]
     pub name: Option<String>,
-    /// 0–100.
+    /// Wear, 0–100, as a percent of the item's own condition ceiling.
     #[serde(default)]
     pub condition: Option<f64>,
     #[serde(default)]
@@ -145,7 +145,7 @@ pub struct ClothingItem {
     pub slot: String,
     #[serde(default)]
     pub name: String,
-    /// 0–100.
+    /// Wear, 0–100, as a percent of the garment's own condition ceiling.
     #[serde(default)]
     pub condition: f64,
     #[serde(default)]

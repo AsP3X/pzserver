@@ -20,7 +20,7 @@ export interface StackedItem {
   name: string
   category: string
   count: number
-  /** Worst condition across the stack — the one that will break first. */
+  /** Worst wear across the stack (0–1) — the one that will break first. */
   condition: number | null
   equipped: boolean
   /** Container id this stack opens into, when the item is a bag. */

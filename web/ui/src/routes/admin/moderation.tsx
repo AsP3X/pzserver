@@ -14,12 +14,18 @@ import {
   type AdminEvent,
   type AdminEventType,
   type AdminPlayer,
+  type RespawnView,
   type Sanction,
 } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDateTime, formatNumber, formatRelativeTime } from '@/lib/format'
 import { fuzzyMatch } from '@/lib/fuzzy'
-import { adminEventsQuery, adminPlayersQuery, adminSanctionsQuery } from '@/lib/queries'
+import {
+  adminEventsQuery,
+  adminPlayersQuery,
+  adminRespawnQuery,
+  adminSanctionsQuery,
+} from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -636,6 +642,8 @@ export function AdminModerationPage() {
         </div>
       )}
 
+      <RespawnPanel />
+
       <ConfirmDialog
         open={pending !== null}
         title={confirmTitle}
@@ -650,6 +658,155 @@ export function AdminModerationPage() {
         }}
       />
     </section>
+  )
+}
+
+/**
+ * The respawn cooldown: how long a dead character stays locked out.
+ *
+ * Sits with moderation rather than with server config because it is a
+ * consequence applied to players, and because the mod owns the setting — it
+ * lives in `respawn_config.json`, not in `server.ini`.
+ */
+function RespawnPanel() {
+  const { t, intlLocale } = useTranslation()
+  const queryClient = useQueryClient()
+  const { data, isPending } = useQuery(adminRespawnQuery)
+
+  const [draftMinutes, setDraftMinutes] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Null until edited, so a background refetch cannot overwrite what an admin
+  // is halfway through typing.
+  const minutes = draftMinutes ?? String(data?.delay_minutes ?? '')
+
+  function fail(cause: unknown) {
+    setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+  }
+
+  function settle(next: RespawnView) {
+    setError(null)
+    setDraftMinutes(null)
+    queryClient.setQueryData(adminRespawnQuery.queryKey, next)
+  }
+
+  const save = useMutation({
+    mutationFn: ({ enabled, delay }: { enabled: boolean; delay: number }) =>
+      api.adminSetRespawn(enabled, delay),
+    onSuccess: settle,
+    onError: fail,
+  })
+
+  const release = useMutation({
+    mutationFn: (username: string) => api.adminResetRespawn(username),
+    onSuccess: settle,
+    onError: fail,
+  })
+
+  const busy = save.isPending || release.isPending
+  const unchanged = Number(minutes) === data?.delay_minutes
+
+  return (
+    <Panel bracketed className="shrink-0">
+      <PanelHeader
+        label={t('admin.respawn_title')}
+        action={
+          <span
+            className={cn(
+              'font-mono text-[0.6875rem] tracking-widest uppercase',
+              data?.enabled ? 'text-hazard' : 'text-dust',
+            )}
+          >
+            {t(data?.enabled ? 'common.enabled' : 'common.disabled')}
+          </span>
+        }
+      />
+
+      <div className="flex flex-col gap-3 p-4">
+        <p className="text-xs text-dust">{t('admin.respawn_description')}</p>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <Field
+            label={t('admin.respawn_minutes')}
+            type="number"
+            min={1}
+            className="w-32"
+            value={minutes}
+            onChange={(event) => setDraftMinutes(event.target.value)}
+          />
+
+          <Button
+            size="sm"
+            variant="outline"
+            className="mb-0.5"
+            disabled={busy || unchanged}
+            onClick={() =>
+              save.mutate({ enabled: data?.enabled ?? false, delay: Number(minutes) })
+            }
+          >
+            {save.isPending ? t('common.saving') : t('common.save')}
+          </Button>
+
+          <Button
+            size="sm"
+            className="mb-0.5"
+            disabled={busy || !data}
+            onClick={() =>
+              save.mutate({
+                enabled: !(data?.enabled ?? false),
+                delay: data?.delay_minutes ?? 60,
+              })
+            }
+          >
+            <Clock aria-hidden="true" className="size-3.5" />
+            {t(data?.enabled ? 'admin.respawn_turn_off' : 'admin.respawn_turn_on')}
+          </Button>
+        </div>
+
+        {error ? <FormError>{error}</FormError> : null}
+
+        {isPending ? (
+          <Skeleton className="h-16" />
+        ) : (data?.timers ?? []).length === 0 ? (
+          <p className="text-sm text-dust">{t('admin.respawn_nobody')}</p>
+        ) : (
+          <ul className="divide-y divide-fence border border-fence">
+            {(data?.timers ?? []).map((timer) => (
+              <li
+                key={timer.username}
+                className="flex items-center justify-between gap-3 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="font-mono text-sm text-bone">{timer.username}</p>
+                  <p className="font-mono text-[0.6875rem] text-dust">
+                    {formatRelativeTime(timer.died_at, intlLocale)}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-3">
+                  <span
+                    className={cn(
+                      'font-mono text-xs tabular-nums',
+                      timer.minutes_left > 0 ? 'text-hazard' : 'text-moss',
+                    )}
+                  >
+                    {t('admin.respawn_minutes_left', { count: timer.minutes_left })}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => release.mutate(timer.username)}
+                  >
+                    {t('admin.respawn_release')}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Panel>
   )
 }
 

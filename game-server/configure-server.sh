@@ -312,7 +312,10 @@ else
              "updates. Mods will run at whatever version is already cached." \
              "Set PZ_STEAMCMD_BIN to its path."
     else
-        SCMD_ARGS=("+force_install_dir" "$PZ_INSTALL_DIR" "+login" "anonymous")
+        # Same flags the ARM64 entrypoint uses for +app_update. Without
+        # ForcePlatformType, FEX can ask Steam for the host arch and get nothing.
+        SCMD_ARGS=("+@sSteamCmdForcePlatformType" "linux" \
+            "+force_install_dir" "$PZ_INSTALL_DIR" "+login" "anonymous")
         for wid in "${WORKSHOP_IDS[@]}"; do
             SCMD_ARGS+=("+workshop_download_item" "$PZ_WORKSHOP_APP_ID" "$wid")
         done
@@ -326,20 +329,32 @@ else
         # the exit status of its *last* command — `steamcmd | tee` is always a
         # success no matter how steamcmd did, which turned this check into a
         # rubber stamp when it was first written that way.
+        #
+        # On the joyfui ARM64 image SteamCMD is x86. The entrypoint already
+        # runs it under FEXBash for the game install; calling the binary
+        # here used to die with qemu-i386 / ld-linux.so.2 and never talk
+        # to Steam, which is why Workshop looked "impossible" on this box.
         SCMD_LOG="$(mktemp)"
         SCMD_STATUS=0
-        "$STEAMCMD_BIN" "${SCMD_ARGS[@]}" > "$SCMD_LOG" 2>&1 || SCMD_STATUS=$?
+        if command -v FEXBash >/dev/null 2>&1; then
+            steamcmd_cmd="$STEAMCMD_BIN"
+            for arg in "${SCMD_ARGS[@]}"; do
+                steamcmd_cmd="$steamcmd_cmd $(printf '%q' "$arg")"
+            done
+            echo "[configure-server] Running SteamCMD under FEXBash ($(uname -m))"
+            FEXBash "$steamcmd_cmd" > "$SCMD_LOG" 2>&1 || SCMD_STATUS=$?
+        else
+            "$STEAMCMD_BIN" "${SCMD_ARGS[@]}" > "$SCMD_LOG" 2>&1 || SCMD_STATUS=$?
+        fi
         cat "$SCMD_LOG"
 
         if [ "$SCMD_STATUS" -eq 0 ]; then
             echo "[configure-server] Workshop sync complete."
         elif grep -qE 'qemu-i386|ld-linux\.so\.2|Exec format error' "$SCMD_LOG"; then
-            # SteamCMD ships as a 32-bit x86 binary. On the ARM64 image there is
-            # no loader for it, so Workshop downloads cannot happen here at all
-            # — which is exactly why Knox Relay is staged into the image and
-            # copied over the cache further down.
-            echo "[configure-server] SteamCMD cannot run on $(uname -m) (it is a 32-bit x86" \
-                 "binary), so Workshop mods are not downloadable on this image."
+            # Reached only when FEXBash is missing. The ARM64 image has it;
+            # a stripped host or a bad PATH is the usual cause.
+            echo "[configure-server] SteamCMD cannot run on $(uname -m) without FEXBash" \
+                 "(it is a 32-bit x86 binary). Workshop mods were not refreshed."
             echo "[configure-server] Knox Relay is supplied by the image instead." \
                  "ANY OTHER Workshop mod must be pre-seeded into the cache or run on AMD64."
         else

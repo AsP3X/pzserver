@@ -334,6 +334,43 @@ assert_missing_arm64_mod_downloads_to_install_dir() {
 }
 assert_missing_arm64_mod_downloads_to_install_dir
 
+# The ARM64 entrypoint already runs SteamCMD under FEXBash. Workshop sync used
+# to call the x86 binary directly, hit qemu-i386 / ld-linux.so.2, and skip the
+# download. If FEXBash is on PATH it has to be the thing that launches steamcmd.
+assert_workshop_sync_uses_fexbash_when_present() {
+    local desc="Workshop sync runs SteamCMD under FEXBash when it is on PATH"
+    local home cfg args bin fexlog
+    home="$(mktemp -d)"
+    cfg="$(mktemp -d)"
+    args="$(mktemp)"
+    fexlog="$(mktemp)"
+    bin="$(mktemp -d)"
+    make_steamcmd_stub "$bin"
+    cat > "$bin/FEXBash" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${FEX_LOG:-/dev/null}"
+eval "$1"
+EOF
+    chmod +x "$bin/FEXBash"
+    mkdir -p "$cfg/Server"
+    seed_ini "$cfg/Server/ZomboidServer.ini"
+    install_marker "$home/pzserver"
+
+    PATH="$bin:$PATH" STEAMCMD_ARGS_FILE="$args" FEX_LOG="$fexlog" \
+        PZ_STEAM_HOME="$home" PZ_CONFIG_DIR="$cfg" SERVER_NAME="ZomboidServer" \
+        PZ_INSTALL_DIR="$home/pzserver" PZ_WORKSHOP_IDS="3777446787" \
+        bash "$CONFIGURE" >/dev/null
+
+    if grep -q 'steamcmd.sh' "$fexlog" && grep -q 'workshop_download_item' "$fexlog"; then
+        ok "$desc"
+    else
+        ng "$desc" "FEXBash saw: $(tr '\n' ' ' < "$fexlog")"
+    fi
+    rm -rf "$home" "$cfg" "$bin"
+    rm -f "$args" "$fexlog"
+}
+assert_workshop_sync_uses_fexbash_when_present
+
 # --- Retiring PZServerPulse --------------------------------------------------
 
 # The character dashboard used to ship as its own mod, seeded into Zomboid/mods/

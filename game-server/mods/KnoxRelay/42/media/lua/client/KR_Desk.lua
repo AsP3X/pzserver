@@ -1,8 +1,13 @@
 --
--- KR_Desk.lua — Knox Relay window shell.
+-- KR_Desk.lua — Knox Relay window shell and the shared UI kit.
 --
 -- Pages register. This file only owns the frame, the left rail, and a
 -- content hole. No page names except the default first page.
+--
+-- It also carries the palette, the spacing scale and the geometry helpers,
+-- because a second file holding them would have to load *before* the pages
+-- and PZ walks media/lua/client alphabetically: KR_Desk sorts ahead of
+-- KR_DeskHud and KR_DeskReports, a KR_Theme would not.
 --
 
 require "ISUI/ISCollapsableWindow"
@@ -28,17 +33,180 @@ KR_Desk.Color = {
     hazard = { r = 0.949, g = 0.635, b = 0.047, a = 1 },
     moss   = { r = 0.545, g = 0.690, b = 0.290, a = 1 },
     blood  = { r = 0.753, g = 0.224, b = 0.169, a = 1 },
+    ember  = { r = 0.231, g = 0.157, b = 0.020, a = 1 },
+    clear  = { r = 0, g = 0, b = 0, a = 0 },
 }
 
-local RAIL = 128
-local WIDTH = 860
-local HEIGHT = 560
-local MIN_W = 620
-local MIN_H = 460
+-- One spacing scale for the whole mod. Pages read these instead of inventing
+-- their own numbers, which is what let the old reply box and the send button
+-- land on the same row.
+KR_Desk.Metric = {
+    pad     = 12,
+    gap     = 8,
+    tight   = 4,
+    row     = 28,
+    rowTall = 32,
+    label   = 16,
+    field   = 26,
+}
 
-KR_Desk.RAIL = RAIL
+local WIDTH = 900
+local HEIGHT = 580
+local MIN_W = 560
+local MIN_H = 420
+
+-- The rail tracks window width instead of sitting at a fixed 128, so a narrow
+-- desk does not hand a fifth of itself to six words of navigation.
+local RAIL_MIN = 104
+local RAIL_MAX = 168
+local RAIL_SHARE = 0.17
+
 KR_Desk.MIN_WIDTH = MIN_W
 KR_Desk.MIN_HEIGHT = MIN_H
+
+--------------------------------------------------------------------------
+-- Geometry helpers, shared with the pages
+--------------------------------------------------------------------------
+
+--- Place an element and keep its Java peer in step.
+---
+--- ISUIElement:setWidth already forwards to javaObject, but ISScrollingListBox
+--- and ISTextEntryBox instantiate a peer that some builds do not re-read until
+--- it is written directly. Doing both is cheap and removes a class of "the box
+--- moved but the text did not" bugs.
+function KR_Desk.box(el, x, y, w, h)
+    if not el then
+        return
+    end
+    x = math.floor(x + 0.5)
+    y = math.floor(y + 0.5)
+    w = math.max(1, math.floor(w + 0.5))
+    h = math.max(1, math.floor(h + 0.5))
+
+    el:setX(x)
+    el:setY(y)
+    el:setWidth(w)
+    el:setHeight(h)
+
+    pcall(function()
+        local peer = el.javaObject
+        if peer then
+            peer:setX(x)
+            peer:setY(y)
+            peer:setWidth(w)
+            peer:setHeight(h)
+        end
+    end)
+
+    KR_Desk.refit(el)
+end
+
+--- Re-derive whatever a widget caches from its own size.
+---
+--- setWidth/setHeight are plain field writes in ISUIElement — they do not run
+--- onResize — so a scrolling list keeps the scrollbar it sized on creation and
+--- a rich text panel keeps line breaks measured against the old width. Every
+--- call is guarded because which of these exist varies across builds.
+function KR_Desk.refit(el)
+    if not el then
+        return
+    end
+
+    if el.items and el.itemheight then
+        pcall(function() el:setScrollHeight(#el.items * el.itemheight) end)
+    end
+    pcall(function() el:updateScrollbars() end)
+    pcall(function() el:paginate() end)
+
+    -- Shrinking can leave the view scrolled past the end, which reads as an
+    -- empty widget until the player scrolls back up.
+    pcall(function()
+        local extent = el:getScrollHeight() or 0
+        local visible = el:getHeight() or 0
+        local top = el:getYScroll() or 0
+        local floorY = math.min(0, visible - extent)
+        if top < floorY then
+            el:setYScroll(floorY)
+        elseif top > 0 then
+            el:setYScroll(0)
+        end
+    end)
+end
+
+--- Buttons come in three flavours and nothing else.
+function KR_Desk.styleButton(button, kind)
+    if not button then
+        return
+    end
+    local C = KR_Desk.Color
+
+    if kind == "primary" then
+        button.backgroundColor = C.void
+        button.backgroundColorMouseOver = C.ember
+        button.borderColor = C.hazard
+        button.textColor = C.hazard
+    elseif kind == "nav" then
+        button.backgroundColor = C.clear
+        button.backgroundColorMouseOver = C.raised
+        button.borderColor = C.clear
+        button.textColor = C.smoke
+    else
+        button.backgroundColor = C.void
+        button.backgroundColorMouseOver = C.raised
+        button.borderColor = C.fence
+        button.textColor = C.bone
+    end
+end
+
+--- Height of one line in the small font, floored so a missing text manager
+--- (headless test, early boot) cannot produce a zero-height row.
+function KR_Desk.lineHeight()
+    local height = 0
+    pcall(function()
+        local tm = getTextManager()
+        local font = tm:getFontFromEnum(UIFont.Small)
+        if font and font.getLineHeight then
+            height = font:getLineHeight()
+        else
+            height = tm:getFontHeight(UIFont.Small)
+        end
+    end)
+    if not height or height < 14 then
+        height = 14
+    end
+    return height
+end
+
+function KR_Desk.measure(text, fallback)
+    local width = nil
+    pcall(function()
+        width = getTextManager():MeasureStringX(UIFont.Small, tostring(text or ""))
+    end)
+    if not width or width < 1 then
+        width = fallback or (#tostring(text or "") * 7)
+    end
+    return width
+end
+
+--- Trim to fit, with an ellipsis, so a long subject cannot run under the
+--- status pill next to it.
+function KR_Desk.clip(text, maxWidth)
+    text = tostring(text or "")
+    if maxWidth < 12 then
+        return ""
+    end
+    if KR_Desk.measure(text) <= maxWidth then
+        return text
+    end
+    while #text > 1 and KR_Desk.measure(text .. "...") > maxWidth do
+        text = string.sub(text, 1, #text - 1)
+    end
+    return text .. "..."
+end
+
+--------------------------------------------------------------------------
+-- Page registry
+--------------------------------------------------------------------------
 
 local function sortedPages()
     local list = {}
@@ -65,15 +233,21 @@ function KR_Desk.register(page)
     print(LOG .. "Desk: registered page '" .. tostring(page.id) .. "'")
 end
 
+local function pageUnread(page)
+    if type(page.unread) ~= "function" then
+        return 0
+    end
+    local ok, count = pcall(page.unread)
+    if ok and type(count) == "number" then
+        return count
+    end
+    return 0
+end
+
 function KR_Desk.unreadTotal()
     local total = 0
     for _, page in pairs(pages) do
-        if type(page.unread) == "function" then
-            local ok, count = pcall(page.unread)
-            if ok and type(count) == "number" then
-                total = total + count
-            end
-        end
+        total = total + pageUnread(page)
     end
     return total
 end
@@ -85,6 +259,53 @@ end
 function KR_Desk.instance()
     return instance
 end
+
+--------------------------------------------------------------------------
+-- Rail navigation button
+--------------------------------------------------------------------------
+
+-- ISButton draws a label in a box. The rail wants an active marker and an
+-- unread count that does not shove the label around, so it draws its own.
+KnoxNavButton = ISButton:derive("KnoxNavButton")
+
+function KnoxNavButton:render()
+    local C = KR_Desk.Color
+    local w = self:getWidth()
+    local h = self:getHeight()
+    local hovered = self:isMouseOver()
+
+    if self.knoxActive then
+        self:drawRect(0, 0, w, h, 1, C.raised.r, C.raised.g, C.raised.b)
+        self:drawRect(0, 0, 3, h, 1, C.hazard.r, C.hazard.g, C.hazard.b)
+    elseif hovered then
+        self:drawRect(0, 0, w, h, 1, C.ash.r, C.ash.g, C.ash.b)
+    end
+
+    local tint = self.knoxActive and C.hazard or (hovered and C.bone or C.smoke)
+    local textY = math.floor((h - KR_Desk.lineHeight()) / 2)
+
+    local badge = self.knoxUnread or 0
+    local room = w - 14
+    if badge > 0 then
+        room = room - 26
+    end
+
+    self:drawText(KR_Desk.clip(self.title or "", room), 11, textY, tint.r, tint.g, tint.b, 1, UIFont.Small)
+
+    if badge > 0 then
+        local label = badge > 99 and "99+" or tostring(badge)
+        local pillW = KR_Desk.measure(label, 14) + 10
+        local pillX = w - pillW - 8
+        local pillH = KR_Desk.lineHeight() + 2
+        local pillY = math.floor((h - pillH) / 2)
+        self:drawRect(pillX, pillY, pillW, pillH, 1, C.hazard.r, C.hazard.g, C.hazard.b)
+        self:drawText(label, pillX + 5, pillY + 1, C.void.r, C.void.g, C.void.b, 1, UIFont.Small)
+    end
+end
+
+--------------------------------------------------------------------------
+-- The window
+--------------------------------------------------------------------------
 
 KnoxDeskWindow = ISCollapsableWindow:derive("KnoxDeskWindow")
 
@@ -100,10 +321,11 @@ function KnoxDeskWindow:createChildren()
     ISCollapsableWindow.createChildren(self)
 
     -- No left+right / top+bottom anchors. Those stretch the hole over the rail.
-    self.rail = ISPanel:new(0, 20, RAIL, 100)
+    -- Everything here is placed by hand in placeChrome.
+    self.rail = ISPanel:new(0, 20, RAIL_MIN, 100)
     self.rail:initialise()
     self.rail.backgroundColor = KR_Desk.Color.void
-    self.rail.borderColor = KR_Desk.Color.fence
+    self.rail.borderColor = KR_Desk.Color.clear
     self.rail.keepOnScreen = false
     self.rail.anchorLeft = true
     self.rail.anchorRight = false
@@ -111,10 +333,10 @@ function KnoxDeskWindow:createChildren()
     self.rail.anchorBottom = false
     self:addChild(self.rail)
 
-    self.host = ISPanel:new(RAIL, 20, 100, 100)
+    self.host = ISPanel:new(RAIL_MIN, 20, 100, 100)
     self.host:initialise()
     self.host.backgroundColor = KR_Desk.Color.ash
-    self.host.borderColor = KR_Desk.Color.fence
+    self.host.borderColor = KR_Desk.Color.clear
     self.host.keepOnScreen = false
     self.host.anchorLeft = true
     self.host.anchorRight = false
@@ -123,102 +345,138 @@ function KnoxDeskWindow:createChildren()
     self:addChild(self.host)
 
     self.railButtons = {}
-    if self.resizeWidget then
-        self.resizeWidget.resizeFunction = KnoxDeskWindow.applySize
-    end
-    if self.resizeWidget2 then
-        self.resizeWidget2.resizeFunction = KnoxDeskWindow.applySize
-    end
+
+    -- Deliberately *not* overriding resizeWidget.resizeFunction. ISResizeWidget
+    -- does not call it as (self, w, h) — the old code assumed it did, so a drag
+    -- ran a signature the widget never passes. Vanilla already clamps to
+    -- minimumWidth/minimumHeight set above; prerender notices the new size and
+    -- relays out from there, which is the one path that always fires.
     self:placeChrome()
     self:rebuildRail()
 end
 
-function KnoxDeskWindow:clampSize()
+--- Rail width for a given frame width. Free function so the layout tests can
+--- ask for it without standing up a window.
+function KR_Desk.railWidth(w)
+    local rail = math.floor(w * RAIL_SHARE)
+    if rail < RAIL_MIN then
+        rail = RAIL_MIN
+    end
+    if rail > RAIL_MAX then
+        rail = RAIL_MAX
+    end
+    -- Never let the rail take so much that the page has nothing left.
+    if rail > w - 220 then
+        rail = math.max(72, w - 220)
+    end
+    return rail
+end
+
+--- Size the rail and the content hole to the current frame.
+---
+--- This never writes the window's own width or height. The old version called
+--- clampSize() here, so a prerender could push back against the resize widget
+--- mid-drag and the frame stuttered.
+function KnoxDeskWindow:placeChrome()
     local w = self:getWidth()
     local h = self:getHeight()
-    if w < MIN_W then
-        self:setWidth(MIN_W)
-        w = MIN_W
-    end
-    if h < MIN_H then
-        self:setHeight(MIN_H)
-        h = MIN_H
-    end
-    return w, h
-end
 
-function KnoxDeskWindow:applySize(w, h)
-    if w < MIN_W then
-        w = MIN_W
-    end
-    if h < MIN_H then
-        h = MIN_H
-    end
-    self:setWidth(w)
-    self:setHeight(h)
-    self:placeChrome()
-    if mounted and type(mounted.layout) == "function" then
-        pcall(mounted.layout, mounted, self.host)
-    end
-end
-
-function KnoxDeskWindow:placeChrome()
-    local w, h = self:clampSize()
-    local th = self:titleBarHeight()
+    local th = 16
+    pcall(function() th = self:titleBarHeight() end)
     local rh = 8
-    if self.resizeWidgetHeight then
-        rh = self:resizeWidgetHeight()
+    pcall(function() rh = self:resizeWidgetHeight() end)
+
+    local innerH = h - th - rh
+    local rail = KR_Desk.railWidth(w)
+
+    -- Collapsed, or dragged smaller than one row: there is no content area, so
+    -- take it off screen rather than letting it hang below the title bar.
+    if innerH < 40 then
+        if self.rail then
+            self.rail:setVisible(false)
+        end
+        if self.host then
+            self.host:setVisible(false)
+        end
+        self._chromeW, self._chromeH = w, h
+        return
     end
-    local innerH = math.max(80, h - th - rh)
 
     if self.rail then
+        self.rail:setVisible(true)
         self.rail.keepOnScreen = false
-        self.rail:setX(0)
-        self.rail:setY(th)
-        self.rail:setWidth(RAIL)
-        self.rail:setHeight(innerH)
+        KR_Desk.box(self.rail, 0, th, rail, innerH)
     end
     if self.host then
+        self.host:setVisible(true)
         self.host.keepOnScreen = false
-        self.host:setX(RAIL)
-        self.host:setY(th)
-        self.host:setWidth(math.max(80, w - RAIL))
-        self.host:setHeight(innerH)
-        if self.host.javaObject then
-            self.host.javaObject:setX(RAIL)
-            self.host.javaObject:setY(th)
-            self.host.javaObject:setWidth(math.max(80, w - RAIL))
-            self.host.javaObject:setHeight(innerH)
+        KR_Desk.box(self.host, rail, th, w - rail, innerH)
+    end
+
+    self:layoutRail()
+    self._chromeW, self._chromeH = w, h
+end
+
+--- Fit the nav buttons to the rail, shrinking rows before letting them spill.
+function KnoxDeskWindow:layoutRail()
+    if not self.rail or not self.railButtons then
+        return
+    end
+
+    local count = #self.railButtons
+    if count == 0 then
+        return
+    end
+
+    local railW = self.rail:getWidth()
+    local railH = self.rail:getHeight()
+    local top = 34
+    local gap = 4
+    local rowH = KR_Desk.Metric.rowTall
+
+    local available = railH - top - KR_Desk.Metric.gap
+    local needed = count * rowH + (count - 1) * gap
+    if needed > available then
+        rowH = math.floor((available - (count - 1) * gap) / count)
+        if rowH < 20 then
+            rowH = 20
         end
+    end
+
+    local y = top
+    for _, button in ipairs(self.railButtons) do
+        KR_Desk.box(button, 6, y, math.max(40, railW - 12), rowH)
+        button:setVisible(y + rowH <= railH)
+        y = y + rowH + gap
     end
 end
 
 function KnoxDeskWindow:prerender()
     local w = self:getWidth()
     local h = self:getHeight()
-    if w ~= self._laidW or h ~= self._laidH then
-        self._laidW = w
-        self._laidH = h
+    if w ~= self._chromeW or h ~= self._chromeH then
         self:placeChrome()
-        if mounted and type(mounted.layout) == "function" then
-            pcall(mounted.layout, mounted, self.host)
-        end
+        self:layoutPage()
     end
 
-    local th = self:titleBarHeight()
-    local void = KR_Desk.Color.void
-    local ash = KR_Desk.Color.ash
-    local fence = KR_Desk.Color.fence
-    local hazard = KR_Desk.Color.hazard
-    local bone = KR_Desk.Color.bone
+    local th = 16
+    pcall(function() th = self:titleBarHeight() end)
 
-    self:drawRect(0, 0, self.width, self.height, 0.97, void.r, void.g, void.b)
-    self:drawRect(0, 0, self.width, th, 1, ash.r, ash.g, ash.b)
-    self:drawRect(0, th - 1, self.width, 1, 1, hazard.r, hazard.g, hazard.b)
-    self:drawRectBorder(0, 0, self.width, self.height, 1, fence.r, fence.g, fence.b)
+    local C = KR_Desk.Color
+    self:drawRect(0, 0, self.width, self.height, 0.97, C.void.r, C.void.g, C.void.b)
+    self:drawRect(0, 0, self.width, th, 1, C.ash.r, C.ash.g, C.ash.b)
+    self:drawRect(0, th - 1, self.width, 1, 1, C.hazard.r, C.hazard.g, C.hazard.b)
+
+    -- Hairline between rail and page, drawn by the frame so neither panel needs
+    -- a border that would double up along the shared edge.
+    if self.host and self.host:getIsVisible() then
+        self:drawRect(self.host:getX(), th, 1, self.host:getHeight(), 1, C.fence.r, C.fence.g, C.fence.b)
+    end
+
+    self:drawRectBorder(0, 0, self.width, self.height, 1, C.fence.r, C.fence.g, C.fence.b)
 
     if self.title then
-        self:drawTextCentre(self.title, self.width / 2, 2, bone.r, bone.g, bone.b, 1, UIFont.Small)
+        self:drawTextCentre(self.title, self.width / 2, 2, C.bone.r, C.bone.g, C.bone.b, 1, UIFont.Small)
     end
 end
 
@@ -230,52 +488,42 @@ function KnoxDeskWindow:rebuildRail()
     self.rail:clearChildren()
     self.railButtons = {}
 
-    local y = 16
     for _, page in ipairs(sortedPages()) do
-        local unread = 0
-        if type(page.unread) == "function" then
-            local ok, count = pcall(page.unread)
-            if ok and type(count) == "number" then
-                unread = count
-            end
-        end
-
-        local label = tostring(page.label or page.id)
-        if unread > 0 then
-            label = label .. "  " .. tostring(unread)
-        end
-
-        local selected = page.id == activeId
         local id = page.id
-        local button = ISButton:new(10, y, RAIL - 20, 28, label, self, function()
-            KR_Desk.show(id)
-        end)
-        -- Nav item, not an action. A yellow box here sat on NEW REPORT.
-        button.backgroundColor = selected and KR_Desk.Color.raised or KR_Desk.Color.void
-        button.backgroundColorMouseOver = KR_Desk.Color.raised
-        button.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-        button.textColor = selected and KR_Desk.Color.hazard or KR_Desk.Color.smoke
-        if unread > 0 then
-            button.textColor = KR_Desk.Color.hazard
-        end
+        local button = KnoxNavButton:new(6, 0, 40, KR_Desk.Metric.rowTall,
+            string.upper(tostring(page.label or page.id)), self, function()
+                KR_Desk.show(id)
+            end)
+        KR_Desk.styleButton(button, "nav")
+        button.knoxActive = (id == activeId)
+        button.knoxUnread = pageUnread(page)
         button:initialise()
         self.rail:addChild(button)
         self.railButtons[#self.railButtons + 1] = button
-        y = y + 34
+    end
+
+    self:layoutRail()
+end
+
+function KnoxDeskWindow:layoutPage()
+    if mounted and type(mounted.layout) == "function" and self.host then
+        pcall(mounted.layout, mounted, self.host)
     end
 end
 
 function KnoxDeskWindow:onResize()
     ISCollapsableWindow.onResize(self)
     self:placeChrome()
-    if mounted and type(mounted.layout) == "function" then
-        pcall(mounted.layout, mounted, self.host)
-    end
+    self:layoutPage()
 end
 
 function KnoxDeskWindow:close()
     KR_Desk.hide()
 end
+
+--------------------------------------------------------------------------
+-- Open / close
+--------------------------------------------------------------------------
 
 local function defaultPageId()
     local list = sortedPages()
@@ -295,23 +543,37 @@ local function unmountCurrent()
     end
 end
 
+--- Starting size, shrunk to fit a small screen rather than opening off it.
+local function openGeometry()
+    local screenW, screenH = 1280, 720
+    pcall(function()
+        screenW = getCore():getScreenWidth()
+        screenH = getCore():getScreenHeight()
+    end)
+
+    local w = math.min(WIDTH, math.max(MIN_W, screenW - 80))
+    local h = math.min(HEIGHT, math.max(MIN_H, screenH - 120))
+    local x = math.max(10, math.floor((screenW - w) / 2))
+    local y = math.max(10, math.floor((screenH - h) / 2))
+
+    return x, y, w, h
+end
+
 function KR_Desk.show(pageId)
     if not instance then
-        local x = math.max(20, (getCore():getScreenWidth() - WIDTH) / 2)
-        local y = math.max(20, (getCore():getScreenHeight() - HEIGHT) / 2)
-        instance = KnoxDeskWindow:new(x, y, WIDTH, HEIGHT)
+        local x, y, w, h = openGeometry()
+        instance = KnoxDeskWindow:new(x, y, w, h)
         instance:setTitle("KNOX DESK")
         instance:initialise()
         instance:addToUIManager()
         instance:setVisible(true)
         instance.pin = true
         pcall(function() instance:pin() end)
-        instance:placeChrome()
     else
         instance:setVisible(true)
         instance:addToUIManager()
-        instance:placeChrome()
     end
+    instance:placeChrome()
 
     pageId = pageId or activeId or defaultPageId()
     if not pageId or not pages[pageId] then
@@ -332,9 +594,7 @@ function KR_Desk.show(pageId)
     end
 
     instance:rebuildRail()
-    if mounted and type(mounted.layout) == "function" then
-        pcall(mounted.layout, mounted, instance.host)
-    end
+    instance:layoutPage()
 end
 
 function KR_Desk.hide()

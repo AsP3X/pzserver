@@ -71,12 +71,29 @@ pub struct Config {
 
     /// Coins paid by the daily wallet drop. Zero disables it.
     pub daily_reward_coins: i64,
+
+    /// Public origin of the site, e.g. `https://knox.example`.
+    ///
+    /// Steam's OpenID needs an absolute `realm` and `return_to`, and it checks
+    /// that one is a prefix of the other — so this cannot be derived from the
+    /// request, which an attacker controls the Host header of. Defaults to the
+    /// first CORS origin, which is the same value in every deployment so far.
+    pub public_url: String,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let data_path = string("PZ_DATA_PATH", "/pz-data");
         let server_name = string("PZ_SERVER_NAME", "ZomboidServer");
+        let cors_origins = list("WEB_CORS_ORIGINS", "http://localhost:5174");
+
+        let public_url = optional("WEB_PUBLIC_URL")
+            .or_else(|| cors_origins.first().cloned())
+            .unwrap_or_else(|| "http://localhost:5174".to_owned())
+            // A trailing slash would produce `//auth/steam/callback`, which
+            // Steam compares literally against the realm and rejects.
+            .trim_end_matches('/')
+            .to_owned();
 
         let server_ini_path = optional("PZ_SERVER_INI_PATH")
             .map(PathBuf::from)
@@ -96,7 +113,7 @@ impl Config {
             bind: parse("API_BIND", "0.0.0.0:8080", "socket address")?,
             database_url: require("DATABASE_URL")?,
             database_max_connections: parse("DATABASE_MAX_CONNECTIONS", "10", "integer")?,
-            cors_origins: list("WEB_CORS_ORIGINS", "http://localhost:5174"),
+            cors_origins,
 
             rcon: pz_rcon::RconConfig {
                 host: string("PZ_RCON_HOST", "game-server"),
@@ -134,6 +151,7 @@ impl Config {
             stats_sync_interval: seconds("STATS_SYNC_INTERVAL", "5")?,
             bridge_stale_after: seconds("BRIDGE_STALE_AFTER", "120")?,
             daily_reward_coins: parse("PZ_DAILY_REWARD_COINS", "25", "integer")?,
+            public_url,
         })
     }
 

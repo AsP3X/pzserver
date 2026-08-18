@@ -44,11 +44,40 @@ function useSessionChange() {
   }
 }
 
+/**
+ * Sign in with a password.
+ *
+ * Only updates the session when one was actually issued: with two-factor on the
+ * server answers `two_factor_required` and no cookie is set, so treating that
+ * as a login would show a signed-in header over a session that does not exist.
+ * The caller is responsible for taking the challenge to [`useAnswerTwoFactor`].
+ */
 export function useLogin() {
   const onSession = useSessionChange()
 
   return useMutation({
     mutationFn: (input: LoginInput) => api.login(input),
+    onSuccess: (response) => {
+      if (response.status === 'signed_in') {
+        onSession(response.user)
+      }
+    },
+  })
+}
+
+/**
+ * Second step of a two-factor sign-in: a code in exchange for a session.
+ *
+ * `challenge` is null when the sign-in came through Steam — that path leaves
+ * the token in an httpOnly cookie the browser sends automatically, precisely so
+ * it never has to travel through a URL.
+ */
+export function useAnswerTwoFactor() {
+  const onSession = useSessionChange()
+
+  return useMutation({
+    mutationFn: ({ challenge, code }: { challenge: string | null; code: string }) =>
+      api.answerTwoFactor(challenge, code),
     onSuccess: (response) => onSession(response.user),
   })
 }

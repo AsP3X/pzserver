@@ -158,7 +158,6 @@ export const ADMIN_NAV: NavGroup[] = [
       { to: '/admin/shop', label: 'nav.catalogue', icon: Store },
       { to: '/admin/auctions', label: 'nav.auctions', icon: Tag },
       { to: '/admin/wallets', label: 'nav.wallets', icon: Coins },
-      { to: '/admin/objectives', label: 'nav.objectives', icon: Trophy },
       { to: '/admin/quests', label: 'nav.flows', icon: GitBranch },
       { to: '/admin/shop/promotions', label: 'nav.promotions', icon: Tag, planned: true },
       { to: '/admin/vault', label: 'nav.vault', icon: Vault },

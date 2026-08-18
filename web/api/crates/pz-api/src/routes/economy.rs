@@ -1,15 +1,17 @@
-//! Wallet, store and auction house.
+//! Wallet, store, auction house and cash deposits.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{AdminUser, AuthUser};
-use crate::services::economy::{self, auction, objectives, quests, rewards, store, vault, wallet};
+use crate::services::economy::{
+    self, auction, deposit, quests, rewards, store, vault, wallet,
+};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -18,19 +20,16 @@ pub fn routes() -> Router<AppState> {
         .route("/me/wallet/transactions", get(my_transactions))
         .route("/me/rewards", get(my_rewards))
         .route("/me/rewards/claim", post(claim_reward))
-        .route("/me/rewards/objectives/{id}", post(claim_objective))
-        .route("/admin/objectives", get(admin_objectives).post(create_objective))
-        .route(
-            "/admin/objectives/{id}",
-            axum::routing::patch(update_objective).delete(delete_objective),
-        )
-        .route("/admin/objectives/{id}/grant", post(grant_objective))
         .route("/me/rewards/quests/{id}/claim", post(claim_quest))
         .route("/me/rewards/quests/{id}/nodes/{node_id}", post(claim_quest_node))
         .route("/admin/quests", get(admin_quests).post(create_quest))
         .route(
             "/admin/quests/{id}",
             get(show_quest).patch(update_quest).delete(delete_quest),
+        )
+        .route(
+            "/admin/quests/{id}/nodes/{node_id}/grant",
+            post(grant_quest_node),
         )
         .route("/admin/groups", get(admin_groups).post(create_group))
         .route("/admin/groups/{id}", axum::routing::delete(delete_group))
@@ -63,6 +62,17 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/auctions", get(admin_auctions))
         .route("/admin/auctions/{id}/bids", get(admin_auction_bids))
         .route("/admin/auctions/{id}/cancel", post(admin_cancel_auction))
+        .route("/me/deposit", get(deposit_preview).post(open_deposit))
+        .route("/me/deposit/history", get(my_deposits))
+        .route(
+            "/admin/bridge/deposits",
+            get(admin_deposits).patch(update_deposit_rates),
+        )
+        .route("/admin/bridge/deposits/{id}/cancel", post(cancel_deposit))
+        .route(
+            "/admin/bridge/deposits/{id}/credit",
+            post(force_credit_deposit),
+        )
         .route("/me/vault", get(my_vault))
         .route("/me/vault/store", post(store_in_vault))
         .route("/me/vault/retrieve", post(retrieve_from_vault))
@@ -121,68 +131,24 @@ async fn claim_reward(
     ))
 }
 
-async fn claim_objective(
-    State(state): State<AppState>,
-    AuthUser(user): AuthUser,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<rewards::ClaimResult>> {
-    Ok(Json(
-        rewards::claim_objective(&state, user.id, &user.username, id).await?,
-    ))
-}
-
-async fn admin_objectives(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-) -> ApiResult<Json<Vec<objectives::Objective>>> {
-    Ok(Json(objectives::list_admin(&state.db).await?))
-}
-
-async fn create_objective(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-    Json(body): Json<objectives::ObjectivePatch>,
-) -> ApiResult<(StatusCode, Json<objectives::Objective>)> {
-    Ok((
-        StatusCode::CREATED,
-        Json(objectives::create(&state.db, body).await?),
-    ))
-}
-
-async fn update_objective(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-    Path(id): Path<Uuid>,
-    Json(body): Json<objectives::ObjectivePatch>,
-) -> ApiResult<Json<objectives::Objective>> {
-    Ok(Json(objectives::update(&state.db, id, body).await?))
-}
-
-async fn delete_objective(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
-    objectives::delete(&state.db, id).await?;
-    Ok(Json(serde_json::json!({ "message": "Objective removed." })))
-}
-
 #[derive(Deserialize)]
 struct GrantBody {
     username: String,
 }
 
-async fn grant_objective(
+/// Staff completing a step for a player. The only way to finish a `manual`
+/// node, which by definition has no measure the server can read.
+async fn grant_quest_node(
     State(state): State<AppState>,
     _staff: AdminUser,
-    Path(id): Path<Uuid>,
+    Path((id, node_id)): Path<(Uuid, String)>,
     Json(body): Json<GrantBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let (xp, coins) = objectives::grant(&state, &body.username, id).await?;
+    let (xp, coins) = quests::grant_node(&state, &body.username, id, &node_id).await?;
     Ok(Json(serde_json::json!({
         "xp": xp,
         "coins": coins,
-        "message": "Objective granted.",
+        "message": "Step granted.",
     })))
 }
 
@@ -517,6 +483,100 @@ async fn admin_cancel_auction(
 ) -> ApiResult<Json<serde_json::Value>> {
     auction::cancel(&state, id, staff.id, true).await?;
     Ok(Json(serde_json::json!({ "message": "Listing cancelled." })))
+}
+
+// ── Cash deposits ───────────────────────────────────────────────────
+
+/// What the signed-in player would get for banking the cash they carry.
+async fn deposit_preview(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<deposit::DepositPreview>> {
+    Ok(Json(
+        deposit::preview(&state, user.id, &user.username).await?,
+    ))
+}
+
+/// Hand a deposit to the mod. The wallet moves later, once the cash is gone.
+async fn open_deposit(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<(StatusCode, Json<deposit::MoneyDeposit>)> {
+    let row = deposit::request(&state, user.id, &user.username).await?;
+
+    Ok((StatusCode::ACCEPTED, Json(row)))
+}
+
+async fn my_deposits(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<Vec<deposit::MoneyDeposit>>> {
+    Ok(Json(deposit::history(&state.db, user.id, 20).await?))
+}
+
+#[derive(Serialize)]
+struct AdminDepositsResponse {
+    rates: pz_bridge::DepositRates,
+    deposits: Vec<deposit::MoneyDeposit>,
+}
+
+async fn admin_deposits(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<AdminDepositsResponse>> {
+    Ok(Json(AdminDepositsResponse {
+        rates: deposit::rates(&state).await?,
+        deposits: deposit::list(&state.db, None, 100).await?,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DepositRatesBody {
+    money_value: i64,
+    bundle_value: i64,
+}
+
+async fn update_deposit_rates(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<DepositRatesBody>,
+) -> ApiResult<Json<pz_bridge::DepositRates>> {
+    let rates = deposit::set_rates(
+        &state,
+        pz_bridge::DepositRates {
+            money_value: body.money_value,
+            bundle_value: body.bundle_value,
+        },
+    )
+    .await?;
+
+    Ok(Json(rates))
+}
+
+async fn cancel_deposit(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<deposit::MoneyDeposit>> {
+    Ok(Json(deposit::cancel(&state, id).await?))
+}
+
+#[derive(Deserialize)]
+struct ForceCreditBody {
+    coins: i64,
+}
+
+/// Pay a deposit whose credit never landed. Deliberately staff-only and
+/// audited: it moves coins without the mod having said anything new.
+async fn force_credit_deposit(
+    State(state): State<AppState>,
+    AdminUser(staff): AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ForceCreditBody>,
+) -> ApiResult<Json<deposit::MoneyDeposit>> {
+    Ok(Json(
+        deposit::force_credit(&state, id, body.coins, &staff.username).await?,
+    ))
 }
 
 async fn my_vault(

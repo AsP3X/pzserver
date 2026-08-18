@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::error::{ApiError, ApiResult};
+use crate::services::backups;
 use crate::state::AppState;
 
 const PLAYER_NAME: &str = r"^[A-Za-z0-9_]{1,50}$";
@@ -133,6 +134,98 @@ pub async fn restart(state: &AppState, message: Option<&str>) -> ApiResult<()> {
 
 pub async fn save_world(state: &AppState) -> ApiResult<String> {
     rcon(state, "save").await
+}
+
+/// Steam branches the game server entrypoint understands.
+pub const STEAM_BRANCHES: &[&str] = &["public", "unstable", "iwillbackupmysave"];
+
+/// Which branch the next boot will install.
+pub async fn steam_branch(state: &AppState) -> String {
+    tokio::fs::read_to_string(state.config.data_path.join(".steam_branch"))
+        .await
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .or_else(|| state.config.steam_branch.clone())
+        .unwrap_or_else(|| "public".to_owned())
+}
+
+/// Reinstall the game from Steam and bring the server back up.
+///
+/// The update itself is done by the game server's own entrypoint, not here: it
+/// looks for a `.force_update` flag in the shared data directory on boot, wipes
+/// the install and re-runs SteamCMD. So this writes the flag, takes the
+/// container down cleanly and starts it again — the same sequence the PHP
+/// stack's `UpdateGameServer` job used, minus the queue.
+///
+/// A pre-update backup is taken first and a failure to take one does not stop
+/// the update, because a server that cannot be updated is the worse outcome —
+/// but it is logged loudly, since that is the backup you would want.
+pub async fn update_game(
+    state: &AppState,
+    branch: Option<&str>,
+    message: Option<&str>,
+) -> ApiResult<()> {
+    if let Some(branch) = branch {
+        if !STEAM_BRANCHES.contains(&branch) {
+            return Err(ApiError::Validation(format!(
+                "Unknown branch. Pick one of: {}.",
+                STEAM_BRANCHES.join(", ")
+            )));
+        }
+    }
+
+    if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
+        let body = sanitise_message(message);
+        let _ = rcon(state, &format!("servermsg \"{body}\"")).await;
+    }
+
+    match backups::create_now(state, "pre_update", Some("Automatic pre-update backup")).await {
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(%error, "pre-update backup failed — updating anyway");
+        }
+    }
+
+    if let Some(branch) = branch {
+        let path = state.config.data_path.join(".steam_branch");
+
+        tokio::fs::write(&path, branch)
+            .await
+            .map_err(|error| ApiError::Internal(format!("could not set the branch: {error}")))?;
+    }
+
+    // Written last of the preparation steps: everything above can fail without
+    // consequence, but once this exists the next boot wipes the install.
+    let flag = state.config.data_path.join(".force_update");
+    tokio::fs::write(&flag, chrono::Utc::now().timestamp().to_string())
+        .await
+        .map_err(|error| {
+            ApiError::Internal(format!("could not request the update: {error}"))
+        })?;
+
+    // Best effort: a server that is already down still needs updating, and the
+    // container stop below is what actually guarantees a clean shutdown.
+    let _ = rcon(state, "save").await;
+    let _ = rcon(state, "quit").await;
+
+    if let Err(error) = state.docker.stop(30).await {
+        // The flag is on disk, so an operator restarting by hand still gets the
+        // update. Leaving it there is deliberate.
+        return Err(ApiError::Internal(format!(
+            "the update is queued but the server could not be stopped: {error}"
+        )));
+    }
+
+    state
+        .docker
+        .start()
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+
+    tracing::warn!(branch, "game server update started");
+
+    Ok(())
 }
 
 pub async fn broadcast(state: &AppState, message: &str) -> ApiResult<String> {
@@ -493,6 +586,136 @@ pub async fn add_to_whitelist(state: &AppState, username: &str) -> ApiResult<Str
 pub async fn remove_from_whitelist(state: &AppState, username: &str) -> ApiResult<String> {
     let name = player_name(username)?;
     rcon(state, &format!("removeuserfromwhitelist \"{name}\"")).await
+}
+
+/// Names currently on the game's whitelist.
+pub fn whitelist_names(state: &AppState) -> Vec<String> {
+    state
+        .config
+        .whitelist_db_path()
+        .map(|path| {
+            pz_bridge::whitelist::list(&path)
+                .into_iter()
+                .map(|row| row.username)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Add the name if it is absent, remove it if it is present.
+///
+/// PZ has no "on the list but disabled" state — the whitelist is the list — so
+/// a toggle is genuinely an add or a remove rather than a flag.
+pub async fn toggle_whitelist(state: &AppState, username: &str) -> ApiResult<bool> {
+    let name = player_name(username)?;
+
+    let present = whitelist_names(state)
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(name));
+
+    if present {
+        remove_from_whitelist(state, name).await?;
+    } else {
+        add_to_whitelist(state, name).await?;
+    }
+
+    Ok(!present)
+}
+
+#[derive(Debug, Serialize)]
+pub struct WhitelistSync {
+    pub added: Vec<String>,
+    /// Website accounts that could not be added, with the reason.
+    pub failed: Vec<String>,
+    /// On the game whitelist but with no website account. Reported rather than
+    /// removed: these are usually staff or people who joined before the site
+    /// existed, and deleting their access on a reconcile would be a nasty
+    /// surprise.
+    pub unmatched: Vec<String>,
+}
+
+/// Put every website account on the game whitelist.
+///
+/// Goes through RCON rather than writing the SQLite file, so the running server
+/// picks the change up at once — the game keeps the whitelist in memory and
+/// would not notice a file edited underneath it. That does mean the server has
+/// to be up, which is why an offline server is rejected with a clear message
+/// rather than reported as a sync that added nothing.
+pub async fn sync_whitelist(state: &AppState) -> ApiResult<WhitelistSync> {
+    if !state.status.current().await.online {
+        return Err(ApiError::Validation(
+            "The game server has to be running to change the whitelist.".to_owned(),
+        ));
+    }
+
+    let existing = whitelist_names(state);
+    let known = |name: &str| existing.iter().any(|row| row.eq_ignore_ascii_case(name));
+
+    let accounts = sqlx::query_scalar::<_, String>("SELECT username FROM users ORDER BY username")
+        .fetch_all(&state.db)
+        .await?;
+
+    let mut sync = WhitelistSync {
+        added: Vec::new(),
+        failed: Vec::new(),
+        unmatched: existing
+            .iter()
+            .filter(|name| {
+                !accounts
+                    .iter()
+                    .any(|account| account.eq_ignore_ascii_case(name))
+            })
+            .cloned()
+            .collect(),
+    };
+
+    for account in accounts {
+        if known(&account) {
+            continue;
+        }
+
+        match add_to_whitelist(state, &account).await {
+            Ok(_) => sync.added.push(account),
+            Err(error) => sync.failed.push(format!("{account}: {error}")),
+        }
+    }
+
+    tracing::info!(
+        added = sync.added.len(),
+        failed = sync.failed.len(),
+        unmatched = sync.unmatched.len(),
+        "whitelist synced",
+    );
+
+    Ok(sync)
+}
+
+/// Set the password a player uses to join the game.
+///
+/// This is the game whitelist password, not the website one — the two are
+/// separate, and changing this does not touch how they sign in here.
+pub async fn set_game_password(
+    state: &AppState,
+    username: &str,
+    password: &str,
+) -> ApiResult<String> {
+    let name = player_name(username)?;
+
+    // The command is built by string interpolation, so a quote in the password
+    // would end the argument early and hand the rest to RCON as commands.
+    if password.len() < 6 || password.len() > 64 {
+        return Err(ApiError::Validation(
+            "Password must be between 6 and 64 characters.".to_owned(),
+        ));
+    }
+
+    if password.contains(['"', '\\', '\n', '\r']) {
+        return Err(ApiError::Validation(
+            "Password cannot contain quotes or backslashes.".to_owned(),
+        ));
+    }
+
+    rcon(state, &format!("changepwd \"{name}\" \"{password}\"")).await
 }
 
 // ── Config / mods ───────────────────────────────────────────────────

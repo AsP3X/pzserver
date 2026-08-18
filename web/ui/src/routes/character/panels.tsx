@@ -41,6 +41,16 @@ interface MoodleRow {
   invert: boolean
 }
 
+/**
+ * Needs are 0–1. Older heartbeats wrote 0–100 stats (boredom, panic, pain)
+ * raw, which painted a 2 as 200%. Anything above 1 is that older scale.
+ */
+function moodleFraction(value: number): number {
+  const unit = value > 1 ? value / 100 : value
+
+  return Math.max(0, Math.min(1, unit))
+}
+
 export function MoodlesPanel({ moodles }: { moodles: Moodles }) {
   const { t } = useTranslation()
 
@@ -87,10 +97,10 @@ export function MoodlesPanel({ moodles }: { moodles: Moodles }) {
                 {t(row.label)}
               </span>
               <span className="font-mono text-dust tabular-nums">
-                {Math.round(row.value * 100)}%
+                {Math.round(moodleFraction(row.value) * 100)}%
               </span>
             </div>
-            <Bar className="mt-1" fraction={row.value} invert={row.invert} />
+            <Bar className="mt-1" fraction={moodleFraction(row.value)} invert={row.invert} />
           </div>
         ))}
       </div>

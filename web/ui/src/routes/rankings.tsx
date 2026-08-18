@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 
 import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { Panel } from '@/components/ui/panel'
@@ -106,7 +107,13 @@ export function RankingsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3.5">
-                      <span className="display text-lg text-bone">{entry.username}</span>
+                      <Link
+                        to="/rankings/$username"
+                        params={{ username: entry.username }}
+                        className="display text-lg text-bone hover:text-hazard hover:underline"
+                      >
+                        {entry.username}
+                      </Link>
                       {entry.is_dead ? (
                         <span className="ml-2 border border-blood/40 bg-blood-soft px-1.5 py-0.5 font-mono text-[0.625rem] tracking-widest text-blood uppercase">
                           {t('survivors.dead')}

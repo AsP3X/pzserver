@@ -260,6 +260,60 @@ export const myRewardsQuery = queryOptions({
   staleTime: 5_000,
 })
 
+/**
+ * Polled a little faster than the rest of the wallet: a player who has just
+ * asked to bank cash is watching this line waiting for it to clear, and the
+ * mod resolves it within a tick or two of them being online.
+ */
+export const depositPreviewQuery = queryOptions({
+  queryKey: ['me', 'deposit'],
+  queryFn: api.depositPreview,
+  refetchInterval: 10_000,
+  staleTime: 2_000,
+})
+
+export const myDepositsQuery = queryOptions({
+  queryKey: ['me', 'deposit', 'history'],
+  queryFn: api.myDeposits,
+  refetchInterval: 30_000,
+  staleTime: 5_000,
+})
+
+export const playerProfileQuery = (username: string) =>
+  queryOptions({
+    queryKey: ['stats', 'player', username.toLowerCase()],
+    queryFn: () => api.playerProfile(username),
+    staleTime: 30_000,
+    // A name that is not a survivor stays not a survivor; retrying is noise.
+    retry: false,
+  })
+
+export const adminUpdateStatusQuery = queryOptions({
+  queryKey: ['admin', 'update'],
+  queryFn: api.adminUpdateStatus,
+  staleTime: 60_000,
+})
+
+export const twoFactorStatusQuery = queryOptions({
+  queryKey: ['auth', '2fa'],
+  queryFn: api.twoFactorStatus,
+  staleTime: 30_000,
+})
+
+export const adminRespawnQuery = queryOptions({
+  queryKey: ['admin', 'respawn'],
+  queryFn: api.adminRespawn,
+  refetchInterval: 30_000,
+  staleTime: 10_000,
+})
+
+export const adminDepositsQuery = queryOptions({
+  queryKey: ['admin', 'deposits'],
+  queryFn: api.adminDeposits,
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+})
+
 export const storeItemsQuery = queryOptions({
   queryKey: ['store', 'items'],
   queryFn: api.storeItems,
@@ -318,12 +372,6 @@ export const adminWalletsQuery = queryOptions({
   queryKey: ['admin', 'wallets'],
   queryFn: api.adminWallets,
   refetchInterval: 15_000,
-  staleTime: 5_000,
-})
-
-export const adminObjectivesQuery = queryOptions({
-  queryKey: ['admin', 'objectives'],
-  queryFn: api.adminObjectives,
   staleTime: 5_000,
 })
 

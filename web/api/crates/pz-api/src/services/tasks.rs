@@ -40,6 +40,7 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(backup_schedule_loop(state.clone())),
         tokio::spawn(automation_loop(state.clone())),
         tokio::spawn(economy_loop(state.clone())),
+        tokio::spawn(respawn_loop(state.clone())),
         tokio::spawn(safezone_loop(state)),
     ]
 }
@@ -54,6 +55,19 @@ async fn safezone_loop(state: AppState) {
     }
 }
 
+/// Faster than the mod's own 2.5-second sweep would strictly need, because the
+/// window between a player respawning and being bounced is time they spend
+/// walking around a world they are supposed to be locked out of.
+const RESPAWN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn respawn_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(RESPAWN_INTERVAL);
+    loop {
+        ticker.tick().await;
+        crate::services::respawn::tick(&state).await;
+    }
+}
+
 const ECONOMY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
 async fn economy_loop(state: AppState) {
@@ -61,6 +75,7 @@ async fn economy_loop(state: AppState) {
     loop {
         ticker.tick().await;
         crate::services::economy::delivery::tick(&state).await;
+        crate::services::economy::deposit::tick(&state).await;
         crate::services::economy::auction::tick(&state).await;
     }
 }
@@ -707,6 +722,14 @@ async fn session_cleanup_loop(state: AppState) {
             Ok(0) => {}
             Ok(removed) => tracing::info!(codes = removed, "pruned expired registration codes"),
             Err(error) => tracing::error!(%error, "failed to prune expired registration codes"),
+        }
+
+        // Expired challenges are already refused by the query that reads them,
+        // so this is housekeeping rather than enforcement.
+        match crate::services::twofactor::prune_challenges(&state.db).await {
+            Ok(0) => {}
+            Ok(removed) => tracing::info!(challenges = removed, "pruned expired 2FA challenges"),
+            Err(error) => tracing::error!(%error, "failed to prune expired 2FA challenges"),
         }
     }
 }

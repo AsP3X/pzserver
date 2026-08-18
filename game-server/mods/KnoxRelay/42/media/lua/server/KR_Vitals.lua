@@ -95,6 +95,27 @@ local function round2(value)
     return math.floor(value * 100 + 0.5) / 100
 end
 
+--- Wear as a 0–100 percentage of the item's own ceiling.
+---
+--- getCondition() is a raw count against getConditionMax(), not a percent.
+--- Most clothing is 10/10, sneakers are 24/24, weapons vary. Reporting the
+--- raw count made a pristine t-shirt look 10% worn on the dashboard.
+local function conditionPercent(item)
+    local current = safe(function() return item:getCondition() end)
+    if current == nil then
+        return 100
+    end
+
+    local ceiling = safe(function() return item:getConditionMax() end, 0)
+    if ceiling and ceiling > 0 then
+        return round1((current / ceiling) * 100)
+    end
+
+    --- No ceiling: treat the reading as already a percent, which is how the
+    --- older export and the unit stubs without getConditionMax behave.
+    return round1(current)
+end
+
 --- Whether a keyed table has no entries.
 ---
 --- `next` is the obvious way to write this and is not available: PZ runs Kahlua,
@@ -366,6 +387,11 @@ local MOODLE_STATS = {
 }
 
 --- The full HUD moodle stack.
+---
+--- Each CharacterStat has its own ceiling. Hunger is 0–1, boredom/panic/pain/
+--- wetness/unhappiness/intoxication/poison are 0–100, temperature is Celsius.
+--- The dashboard always wants a 0–1 fraction, so we divide by getMaximumValue()
+--- except for temperature, which is shown as degrees, not a bar.
 local function collectMoodles(player)
     local stats = safe(function() return player:getStats() end)
     if not stats or not CharacterStat then
@@ -378,7 +404,19 @@ local function collectMoodles(player)
         local member = CharacterStat[entry.stat]
 
         if member then
-            moodles[entry.key] = round2(safe(function() return stats:get(member) end, entry.default))
+            local current = safe(function() return stats:get(member) end, entry.default)
+
+            if entry.key == "temperature" then
+                moodles[entry.key] = round2(current)
+            else
+                local ceiling = safe(function() return member:getMaximumValue() end, 0)
+
+                if ceiling and ceiling > 0 then
+                    moodles[entry.key] = round2(current / ceiling)
+                else
+                    moodles[entry.key] = round2(current)
+                end
+            end
         end
     end
 
@@ -399,7 +437,7 @@ local function collectWeapon(player)
 
     local weapon = {
         name = safe(function() return item:getName() end),
-        condition = round1(safe(function() return item:getCondition() end, 100)),
+        condition = conditionPercent(item),
     }
 
     --- Sharpness is an absolute value against the item's own maximum, so it
@@ -456,7 +494,7 @@ local function collectClothing(player)
                 local garment = {
                     slot = tostring(safe(function() return item:getBodyLocation() end, "unknown")),
                     name = safe(function() return item:getName() end, "unknown"),
-                    condition = round1(safe(function() return item:getCondition() end, 100)),
+                    condition = conditionPercent(item),
                     holes = 0,
                     bite = 0,
                     scratch = 0,

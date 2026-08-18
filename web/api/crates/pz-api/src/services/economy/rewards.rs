@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::services::character;
-use crate::services::economy::{self, objectives, quests, wallet};
+use crate::services::economy::{self, measure, quests, wallet};
 use crate::state::AppState;
 
 const DAILY_KEY: &str = "daily_login";
@@ -33,7 +33,6 @@ const TASKS: &[TaskSpec] = &[
 pub struct RewardsView {
     pub daily: DailyView,
     pub tasks: Vec<TaskView>,
-    pub objectives: Vec<objectives::ObjectiveProgress>,
     pub quests: Vec<quests::QuestProgress>,
     pub available_quests: Vec<quests::QuestOffer>,
     pub rank: RankView,
@@ -109,23 +108,6 @@ pub async fn claim(
     })
 }
 
-pub async fn claim_objective(
-    state: &AppState,
-    user_id: Uuid,
-    username: &str,
-    id: Uuid,
-) -> ApiResult<ClaimResult> {
-    let today = Utc::now().date_naive();
-    let snapshot = character::for_username(&state.db, username).await?;
-    ensure_baseline(&state.db, user_id, today, snapshot.as_ref()).await?;
-    let (xp, coins) = objectives::claim(state, user_id, username, id, today).await?;
-    Ok(ClaimResult {
-        claimed: coins,
-        xp: i64::from(xp),
-        rewards: load(state, user_id, username, today).await?,
-    })
-}
-
 async fn load(
     state: &AppState,
     user_id: Uuid,
@@ -147,7 +129,6 @@ async fn load(
             last_claim_at,
         },
         tasks: task_views(state, user_id, username, today).await?,
-        objectives: objectives::for_player(state, user_id, username, today).await?,
         quests: quests::for_player(state, user_id, username, today).await?,
         available_quests: quests::offers_for(&state.db, user_id).await?,
         rank: rank_view(&state.db, user_id).await?,
@@ -293,7 +274,7 @@ async fn task_views(
 }
 
 async fn rank_view(db: &PgPool, user_id: Uuid) -> ApiResult<RankView> {
-    let xp = objectives::xp_of(db, user_id).await?;
+    let xp = measure::xp_of(db, user_id).await?;
     Ok(RankView {
         current: rank_of(xp),
         xp,
@@ -323,8 +304,8 @@ async fn ensure_baseline(
     let kills = snapshot.map(|row| row.zombie_kills).unwrap_or(0);
     let hours = snapshot.map(|row| row.hours_survived).unwrap_or(0.0);
     let played_today = snapshot.is_some_and(|row| row.last_synced_at.date_naive() == today);
-    let kill_goal = objectives::daily_goal(db, "kills").await?.max(10);
-    let hour_goal = objectives::daily_goal(db, "hours").await?.max(1);
+    let kill_goal = measure::daily_goal(db, "kills").await?.max(10);
+    let hour_goal = measure::daily_goal(db, "hours").await?.max(1);
     let start_kills = if played_today { (kills - kill_goal).max(0) } else { kills };
     let start_hours = if played_today {
         (hours - f64::from(hour_goal)).max(0.0)

@@ -59,6 +59,12 @@ struct Credentials {
 /// `/account register` is how a player recovers a lost login; refusing because
 /// a row already exists is how AsP3X got locked out.
 ///
+/// Two-factor deliberately survives this. Re-registering proves control of the
+/// character in game, which is a good reason to hand back a password and a bad
+/// reason to drop a second factor — otherwise anyone who took over someone's PZ
+/// account could strip their 2FA by typing one command. A player who has lost
+/// both their phone and their recovery codes needs an admin, not a back door.
+///
 /// Accounts exist only for characters that have proven themselves on the server.
 pub async fn apply_registration(
     transaction: &mut Transaction<'_, Postgres>,
@@ -390,6 +396,65 @@ pub async fn change_password(
     transaction.commit().await?;
 
     Ok(revoked)
+}
+
+/// Change the address on an account.
+///
+/// The password is required. An email address is a recovery-adjacent field —
+/// whoever holds it looks like the owner to anyone reading the account — so an
+/// open browser must not be enough to move it.
+pub async fn change_email(
+    db: &PgPool,
+    user_id: Uuid,
+    password: &str,
+    email: &str,
+) -> Result<User, ApiError> {
+    if !password_matches(db, user_id, password).await? {
+        return Err(ApiError::Validation(
+            "Your current password is not correct.".to_owned(),
+        ));
+    }
+
+    let email = email.trim();
+    validate_email(email)?;
+
+    let user = sqlx::query_as::<_, User>(
+        r#"
+        UPDATE users
+        SET email = $2, updated_at = now()
+        WHERE id = $1
+        RETURNING id, username, email, role, steam_id, created_at
+        "#,
+    )
+    .bind(user_id)
+    .bind(email)
+    .fetch_one(db)
+    .await
+    .map_err(taken_field)?;
+
+    tracing::info!(username = %user.username, "email changed");
+
+    Ok(user)
+}
+
+/// Whether `password` is this user's current password.
+///
+/// For actions that weaken the account rather than change it — turning
+/// two-factor off, unlinking a sign-in method — where an open session is not
+/// enough on its own, because the whole point is that the session might not be
+/// the owner's.
+pub async fn password_matches(
+    db: &PgPool,
+    user_id: Uuid,
+    password: &str,
+) -> Result<bool, ApiError> {
+    let credentials =
+        sqlx::query_as::<_, Credentials>("SELECT id, password_hash FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(db)
+            .await?;
+
+    Ok(verify_password(password, &credentials.password_hash))
 }
 
 /// Delete sessions that are past their expiry.

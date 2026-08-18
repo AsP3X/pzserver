@@ -4,6 +4,8 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 
+use crate::error::ApiError;
+
 /// Locale the stored columns themselves are written in.
 pub const SOURCE_LOCALE: &str = "en";
 
@@ -175,6 +177,129 @@ fn empty_to_none(value: Option<String>) -> Option<String> {
         let trimmed = text.trim().to_owned();
         if trimmed.is_empty() { None } else { Some(trimmed) }
     })
+}
+
+// ── Branding ────────────────────────────────────────────────────────
+
+/// Ceiling on an uploaded image. A logo is a header graphic, not a wallpaper.
+pub const MAX_IMAGE_BYTES: usize = 512 * 1024;
+
+/// Image types we will store and serve back.
+///
+/// SVG is deliberately absent. An SVG is a document that can carry script, and
+/// serving one from our own origin would run it there — turning "upload a logo"
+/// into stored XSS against every visitor. Only admins can upload, but a
+/// compromised admin session should not also be a way to own the front page.
+const ALLOWED_IMAGE_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Branding {
+    Logo,
+    Favicon,
+}
+
+/// An image and the content type to serve it with.
+pub struct StoredImage {
+    pub bytes: Vec<u8>,
+    pub content_type: String,
+}
+
+/// Whether this is something we are willing to serve back to a browser.
+pub fn is_allowed_image(content_type: &str) -> bool {
+    let base = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+
+    ALLOWED_IMAGE_TYPES.contains(&base.as_str())
+}
+
+pub async fn store_image(
+    db: &PgPool,
+    which: Branding,
+    bytes: &[u8],
+    content_type: &str,
+) -> Result<(), ApiError> {
+    if bytes.is_empty() {
+        return Err(ApiError::Validation("That file is empty.".to_owned()));
+    }
+
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(ApiError::Validation(format!(
+            "Images must be under {} KB.",
+            MAX_IMAGE_BYTES / 1024
+        )));
+    }
+
+    if !is_allowed_image(content_type) {
+        return Err(ApiError::Validation(
+            "Use a PNG, JPEG, WebP, GIF or ICO.".to_owned(),
+        ));
+    }
+
+    // Column names come from a closed enum, never from the request.
+    let sql = match which {
+        Branding::Logo => {
+            "UPDATE site_settings SET logo = $1, logo_type = $2, updated_at = now() WHERE id = 1"
+        }
+        Branding::Favicon => {
+            "UPDATE site_settings SET favicon = $1, favicon_type = $2, updated_at = now() WHERE id = 1"
+        }
+    };
+
+    sqlx::query(sql)
+        .bind(bytes)
+        .bind(content_type.trim().to_ascii_lowercase())
+        .execute(db)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn clear_image(db: &PgPool, which: Branding) -> Result<(), ApiError> {
+    let sql = match which {
+        Branding::Logo => {
+            "UPDATE site_settings SET logo = NULL, logo_type = NULL, updated_at = now() WHERE id = 1"
+        }
+        Branding::Favicon => {
+            "UPDATE site_settings SET favicon = NULL, favicon_type = NULL, updated_at = now() WHERE id = 1"
+        }
+    };
+
+    sqlx::query(sql).execute(db).await?;
+
+    Ok(())
+}
+
+/// Read an image back, or `None` when none has been uploaded.
+pub async fn read_image(db: &PgPool, which: Branding) -> Result<Option<StoredImage>, ApiError> {
+    // Two literals rather than a formatted column name: sqlx refuses a
+    // runtime-built query outright, which is the right call even when the
+    // input is a closed enum.
+    let sql = match which {
+        Branding::Logo => "SELECT logo, logo_type FROM site_settings WHERE id = 1",
+        Branding::Favicon => "SELECT favicon, favicon_type FROM site_settings WHERE id = 1",
+    };
+
+    let row = sqlx::query_as::<_, (Option<Vec<u8>>, Option<String>)>(sql)
+        .fetch_optional(db)
+        .await?;
+
+    Ok(row.and_then(|(bytes, content_type)| {
+        Some(StoredImage {
+            bytes: bytes?,
+            content_type: content_type?,
+        })
+    }))
 }
 
 #[cfg(test)]

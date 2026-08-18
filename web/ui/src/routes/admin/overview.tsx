@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Clock, Crosshair, Play, RotateCcw, Save, Server, Skull, Square, Trash2, Users } from 'lucide-react'
+import { Activity, Clock, Crosshair, Download, Play, RotateCcw, Save, Server, Skull, Square, Trash2, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { api, ApiError } from '@/lib/api'
 import { formatNumber, formatUptime } from '@/lib/format'
 import {
+  adminUpdateStatusQuery,
   serverHistoryQuery,
   serverStatusQuery,
   statsSummaryQuery,
@@ -153,6 +154,8 @@ function ServerControls() {
   const { data: status } = useQuery(serverStatusQuery)
   const [pending, setPending] = useState<PendingAction>(null)
   const [wiping, setWiping] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [branch, setBranch] = useState('public')
   const [includeConfig, setIncludeConfig] = useState(false)
   const [wipeTyped, setWipeTyped] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -182,6 +185,22 @@ function ServerControls() {
     },
     onError: (cause) => {
       setPending(null)
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
+  const updateStatus = useQuery(adminUpdateStatusQuery)
+
+  const update = useMutation({
+    mutationFn: () => api.adminUpdateServer({ branch, message: t('admin.update.broadcast') }),
+    onSuccess: (result) => {
+      setUpdating(false)
+      setError(null)
+      setNotice(result.message)
+      invalidate()
+    },
+    onError: (cause) => {
+      setUpdating(false)
       setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
     },
   })
@@ -269,6 +288,20 @@ function ServerControls() {
           <Button
             size="sm"
             variant="outline"
+            onClick={() => {
+              setError(null)
+              setNotice(null)
+              setBranch(updateStatus.data?.branch ?? 'public')
+              setUpdating(true)
+            }}
+            disabled={update.isPending}
+          >
+            <Download aria-hidden="true" className="size-3.5" />
+            {t('admin.update.button')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             className="border-blood text-blood hover:border-blood hover:text-blood"
             onClick={() => {
               setError(null)
@@ -307,6 +340,41 @@ function ServerControls() {
         onClose={() => {
           if (!act.isPending) {
             setPending(null)
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={updating}
+        title={t('admin.update.title')}
+        size="lg"
+        tone="danger"
+        confirmLabel={t('admin.update.confirm')}
+        busy={update.isPending}
+        description={
+          <div className="flex flex-col gap-3">
+            <p>{t('admin.update.description')}</p>
+            <label className="flex flex-col gap-2">
+              <span className="eyebrow">{t('admin.update.branch')}</span>
+              <select
+                value={branch}
+                onChange={(event) => setBranch(event.target.value)}
+                className="h-11 border border-fence-bright bg-void px-3 font-mono text-sm text-bone"
+              >
+                {(updateStatus.data?.branches ?? ['public']).map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-sm text-dust">{t('admin.update.warning')}</p>
+          </div>
+        }
+        onConfirm={() => update.mutate()}
+        onClose={() => {
+          if (!update.isPending) {
+            setUpdating(false)
           }
         }}
       />

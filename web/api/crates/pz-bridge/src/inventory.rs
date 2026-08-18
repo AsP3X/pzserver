@@ -55,7 +55,7 @@ pub struct InventoryItem {
     pub category: String,
     #[serde(default = "one")]
     pub count: i64,
-    /// Wear, 0–100. Absent for items that do not degrade.
+    /// Wear as a 0–1 fraction. Absent for items that do not degrade.
     #[serde(default)]
     pub condition: Option<f64>,
     #[serde(default)]
@@ -204,7 +204,7 @@ mod tests {
         "timestamp": "2026-08-12T09:00:00Z",
         "items": [
             { "id": "1", "full_type": "Base.Axe", "name": "Axe", "category": "Weapon",
-              "count": 1, "condition": 64, "equipped": true,
+              "count": 1, "condition": 0.64, "equipped": true,
               "container": "inventory", "container_id": "inventory" },
             { "id": "2", "full_type": "Base.Bag_Normal", "name": "Bag", "category": "Container",
               "count": 1, "condition": null, "equipped": false,

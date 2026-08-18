@@ -7,6 +7,7 @@ import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, ApiError } from '@/lib/api'
+import { cn } from '@/lib/cn'
 import { adminConfigQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 
@@ -51,12 +52,37 @@ export function AdminWhitelistPage() {
     },
   })
 
-  const error =
-    [toggle.error, add.error, remove.error].find(Boolean) instanceof ApiError
-      ? ([toggle.error, add.error, remove.error].find(Boolean) as ApiError).message
-      : [toggle.error, add.error, remove.error].find(Boolean)
-        ? t('auth.unexpected_error')
-        : null
+  const toggleOne = useMutation({
+    mutationFn: () => api.adminWhitelistToggle(username.trim()),
+    onSuccess: (result) => {
+      setUsername('')
+      setNotice(t(result.whitelisted ? 'admin.whitelist_added' : 'admin.whitelist_removed'))
+    },
+  })
+
+  const sync = useMutation({
+    mutationFn: () => api.adminWhitelistSync(),
+    onSuccess: (result) => {
+      setNotice(t('admin.whitelist_synced', { count: result.added.length }))
+    },
+  })
+
+  // Whichever action failed most recently. Evaluated once rather than as three
+  // near-identical searches over the same list, which is how the two new
+  // mutations initially got left out of two of them.
+  const failure = [
+    toggle.error,
+    add.error,
+    remove.error,
+    toggleOne.error,
+    sync.error,
+  ].find(Boolean)
+
+  const error = failure
+    ? failure instanceof ApiError
+      ? failure.message
+      : t('auth.unexpected_error')
+    : null
 
   function onAdd(event: FormEvent) {
     event.preventDefault()
@@ -140,12 +166,80 @@ export function AdminWhitelistPage() {
                   >
                     {t('admin.whitelist_remove')}
                   </Button>
+                  {/* Add-or-remove in one press, for when you do not already
+                      know whether the name is on the list. */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!username.trim() || toggleOne.isPending}
+                    onClick={() => {
+                      setNotice(null)
+                      toggleOne.mutate()
+                    }}
+                  >
+                    {t('admin.whitelist_toggle')}
+                  </Button>
                 </div>
               </form>
+            </Panel>
+
+            <Panel bracketed className="lg:col-span-2">
+              <PanelHeader label={t('admin.whitelist_sync')} />
+              <div className="flex flex-col gap-4 p-5">
+                <p className="text-sm text-smoke">{t('admin.whitelist_sync_hint')}</p>
+
+                <div>
+                  <Button
+                    size="sm"
+                    disabled={sync.isPending}
+                    onClick={() => {
+                      setNotice(null)
+                      sync.mutate()
+                    }}
+                  >
+                    {sync.isPending ? t('admin.whitelist_syncing') : t('admin.whitelist_sync_run')}
+                  </Button>
+                </div>
+
+                {sync.data ? (
+                  <dl className="grid gap-3 sm:grid-cols-3">
+                    <SyncResult
+                      label={t('admin.whitelist_sync_added')}
+                      names={sync.data.added}
+                      tone="text-moss"
+                    />
+                    <SyncResult
+                      label={t('admin.whitelist_sync_unmatched')}
+                      names={sync.data.unmatched}
+                      tone="text-dust"
+                    />
+                    <SyncResult
+                      label={t('admin.whitelist_sync_failed')}
+                      names={sync.data.failed}
+                      tone="text-blood"
+                    />
+                  </dl>
+                ) : null}
+              </div>
             </Panel>
           </div>
         )}
       </Container>
     </Section>
+  )
+}
+
+/** One column of a sync result. An empty list still shows, as a zero. */
+function SyncResult({ label, names, tone }: { label: string; names: string[]; tone: string }) {
+  return (
+    <div>
+      <dt className="eyebrow">
+        {label} <span className={cn('tabular-nums', tone)}>{names.length}</span>
+      </dt>
+      <dd className="mt-1 max-h-32 overflow-y-auto font-mono text-xs text-smoke">
+        {names.length === 0 ? '—' : names.map((name) => <p key={name}>{name}</p>)}
+      </dd>
+    </div>
   )
 }

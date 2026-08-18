@@ -1,11 +1,11 @@
 //! Aggregate stats and leaderboards.
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::services::stats::{self, LeaderboardEntry, LeaderboardStat, StatsSummary};
 use crate::state::AppState;
 
@@ -17,10 +17,22 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/stats/summary", get(summary))
         .route("/stats/leaderboard", get(leaderboard))
+        .route("/stats/players/{username}", get(player_profile))
 }
 
 async fn summary(State(state): State<AppState>) -> ApiResult<Json<StatsSummary>> {
     Ok(Json(stats::summary(&state.db).await?))
+}
+
+/// One survivor's public record. Anyone can read this, signed in or not.
+async fn player_profile(
+    State(state): State<AppState>,
+    Path(username): Path<String>,
+) -> ApiResult<Json<stats::PlayerProfile>> {
+    stats::profile(&state.db, &username)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::Validation("No survivor by that name.".to_owned()))
 }
 
 #[derive(Deserialize)]

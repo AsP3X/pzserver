@@ -81,6 +81,41 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     password == stored
 }
 
+/// Every name on the game's whitelist.
+///
+/// Read-only, like everything else here: rows are added and removed over RCON
+/// so the running server sees the change immediately. Writing this file behind
+/// its back would leave the in-memory list stale until a restart.
+///
+/// Returns an empty list when the file is missing or unreadable — a server that
+/// has never booted has no whitelist, which is not an error.
+pub fn list(db_path: &Path) -> Vec<WhitelistAccount> {
+    let Ok(connection) = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return Vec::new();
+    };
+
+    let Ok(mut statement) =
+        connection.prepare("SELECT username, steamid FROM whitelist ORDER BY lower(username)")
+    else {
+        return Vec::new();
+    };
+
+    let rows = statement.query_map([], |row| {
+        Ok(WhitelistAccount {
+            username: row.get(0)?,
+            steam_id: empty_to_none(row.get(1)?),
+        })
+    });
+
+    match rows {
+        Ok(rows) => rows.filter_map(Result::ok).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 fn read_row(db_path: &Path, username: &str) -> Option<(String, String, Option<String>)> {
     let connection = Connection::open_with_flags(
         db_path,

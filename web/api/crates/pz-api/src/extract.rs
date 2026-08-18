@@ -106,6 +106,45 @@ pub fn session_cookie(
         .build())
 }
 
+/// Carries a two-factor challenge across a redirect.
+///
+/// Only the Steam flow needs this. A password login gets its challenge token in
+/// the response body, because the client is already holding the request — but a
+/// Steam sign-in comes back as a browser navigation, and the alternative to a
+/// cookie is a token in the query string, where it would be written to history
+/// and to every log on the path.
+pub const CHALLENGE_COOKIE: &str = "knox_2fa";
+
+pub fn challenge_cookie(
+    token: String,
+    expires_at: DateTime<Utc>,
+    secure: bool,
+) -> Result<Cookie<'static>, ApiError> {
+    let expiry = OffsetDateTime::from_unix_timestamp(expires_at.timestamp())
+        .map_err(|error| ApiError::Internal(format!("challenge expiry out of range: {error}")))?;
+
+    Ok(Cookie::build((CHALLENGE_COOKIE, token))
+        .path("/")
+        .http_only(true)
+        // Lax rather than Strict: the browser is arriving from steamcommunity
+        // .com, and Strict would withhold the cookie on that first navigation.
+        .same_site(SameSite::Lax)
+        .secure(secure)
+        .expires(expiry)
+        .build())
+}
+
+/// The challenge cookie, already expired — sent once it has been spent.
+pub fn expired_challenge_cookie(secure: bool) -> Cookie<'static> {
+    Cookie::build((CHALLENGE_COOKIE, ""))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(secure)
+        .max_age(time::Duration::ZERO)
+        .build()
+}
+
 /// The same cookie, already expired — what logging out sends back.
 pub fn expired_session_cookie(secure: bool) -> Cookie<'static> {
     Cookie::build((SESSION_COOKIE, ""))

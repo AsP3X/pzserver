@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, Search, Shield, UserX } from 'lucide-react'
+import { Ban, KeyRound, Search, Shield, UserX } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,7 @@ type Filter = 'all' | 'online' | 'offline'
 type Pending =
   | { kind: 'kick'; player: AdminPlayer }
   | { kind: 'ban'; player: AdminPlayer }
+  | { kind: 'password'; player: AdminPlayer }
   | null
 
 /**
@@ -35,6 +36,7 @@ export function AdminPlayersPage() {
   const [filter, setFilter] = useState<Filter>('all')
   const [pending, setPending] = useState<Pending>(null)
   const [reason, setReason] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const players = data ?? []
@@ -56,11 +58,15 @@ export function AdminPlayersPage() {
     mutationFn: async () => {
       if (!pending) return
       if (pending.kind === 'kick') return api.adminKick(pending.player.username, reason || undefined)
+      if (pending.kind === 'password') {
+        return api.adminSetPlayerPassword(pending.player.username, password)
+      }
       return api.adminBan(pending.player.username)
     },
     onSuccess: async () => {
       setPending(null)
       setReason('')
+      setPassword('')
       await queryClient.invalidateQueries({ queryKey: ['admin', 'players'] })
     },
     onError: (cause) => {
@@ -211,6 +217,20 @@ export function AdminPlayersPage() {
                             variant="ghost"
                             onClick={() => {
                               setError(null)
+                              setPassword('')
+                              setPending({ kind: 'password', player })
+                            }}
+                          >
+                            <KeyRound aria-hidden="true" className="size-3.5" />
+                            <span className="sr-only sm:not-sr-only">
+                              {t('admin.action.password')}
+                            </span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setError(null)
                               setPending({ kind: 'ban', player })
                             }}
                           >
@@ -238,14 +258,18 @@ export function AdminPlayersPage() {
         title={
           pending?.kind === 'ban'
             ? t('admin.action.ban_named', { name: pending.player.username })
-            : t('admin.action.kick_named', { name: pending?.player.username ?? '' })
+            : pending?.kind === 'password'
+              ? t('admin.action.password_named', { name: pending.player.username })
+              : t('admin.action.kick_named', { name: pending?.player.username ?? '' })
         }
         description={
           <div className="flex flex-col gap-3">
             <p>
               {pending?.kind === 'ban'
                 ? t('admin.action.ban_confirm')
-                : t('admin.action.kick_confirm')}
+                : pending?.kind === 'password'
+                  ? t('admin.action.password_confirm')
+                  : t('admin.action.kick_confirm')}
             </p>
             {pending?.kind === 'kick' ? (
               <Field
@@ -255,15 +279,30 @@ export function AdminPlayersPage() {
                 hint={t('common.optional')}
               />
             ) : null}
+            {pending?.kind === 'password' ? (
+              <Field
+                label={t('admin.action.password_new')}
+                // Typed by staff on behalf of someone else and read back to
+                // them, so it is deliberately not masked.
+                type="text"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                hint={t('admin.action.password_hint')}
+              />
+            ) : null}
           </div>
         }
-        tone="danger"
+        tone={pending?.kind === 'password' ? 'primary' : 'danger'}
         busy={act.isPending}
+        confirmDisabled={pending?.kind === 'password' && password.trim().length < 6}
         onConfirm={() => act.mutate()}
         onClose={() => {
           if (!act.isPending) {
             setPending(null)
             setReason('')
+            setPassword('')
           }
         }}
       />

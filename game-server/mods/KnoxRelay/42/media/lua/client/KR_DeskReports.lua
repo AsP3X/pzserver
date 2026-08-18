@@ -1,6 +1,12 @@
 --
 -- KR_DeskReports.lua — Reports page. Registers with the Desk; owns its widgets.
 --
+-- Layout rule for this file: solve bottom-up. Everything with a fixed height
+-- (the action row, the reply box) is pinned to the bottom edge first, and the
+-- one flexible widget above it absorbs whatever is left. Laying out top-down
+-- was what let the send button walk off the panel on a short window, and what
+-- put the status label on the same row as the button.
+--
 
 require "ISUI/ISPanel"
 require "ISUI/ISButton"
@@ -18,17 +24,22 @@ local mode = "browse"
 local composeKind = "report"
 local view = nil
 
-local C = {
-    void   = { r = 0.027, g = 0.031, b = 0.024, a = 1 },
-    ash    = { r = 0.047, g = 0.059, b = 0.047, a = 1 },
-    raised = { r = 0.071, g = 0.086, b = 0.071, a = 1 },
-    fence  = { r = 0.114, g = 0.137, b = 0.110, a = 1 },
-    bone   = { r = 0.910, g = 0.902, b = 0.867, a = 1 },
-    hazard = { r = 0.949, g = 0.635, b = 0.047, a = 1 },
-    moss   = { r = 0.545, g = 0.690, b = 0.290, a = 1 },
-    blood  = { r = 0.753, g = 0.224, b = 0.169, a = 1 },
-    smoke  = { r = 0.604, g = 0.627, b = 0.576, a = 1 },
-}
+-- The shell owns the palette, the spacing scale and the geometry helpers. PZ
+-- walks this directory alphabetically so KR_Desk is always in place first; if
+-- it somehow is not, bail out rather than paint the page black on black.
+if not (KR_Desk and KR_Desk.Color and KR_Desk.Metric) then
+    print(LOG .. "Desk Reports: shell missing, page not registered")
+    return
+end
+
+local C = KR_Desk.Color
+local M = KR_Desk.Metric
+
+-- Below this the two columns stop making sense and the page stacks.
+local STACK_AT = 250
+local MIN_THREAD = 70
+local MIN_LIST = 64
+local MIN_REPLY = 44
 
 local function findReport(id)
     for _, report in ipairs(inbox.reports or {}) do
@@ -99,17 +110,16 @@ end
 
 local function threadText(report)
     if not report then
-        return " <RGB:0.40,0.43,0.38> No ticket selected. <LINE> File a new one with NEW REPORT, or pick a ticket on the left. "
+        return " <RGB:0.40,0.43,0.38> Nothing selected. <LINE> <LINE> Pick a ticket on the left, or start a new one with NEW REPORT. "
     end
 
     local bits = {}
     bits[#bits + 1] = " <H2> " .. escapeRich(report.subject or "")
     bits[#bits + 1] = " <LINE> <RGB:0.95,0.64,0.05> " .. string.upper(tostring(report.status or "open"))
-    bits[#bits + 1] = " <LINE> "
     if report.accused and report.accused ~= "" then
-        bits[#bits + 1] = " <RGB:0.40,0.43,0.38> about " .. escapeRich(report.accused) .. " <LINE> "
+        bits[#bits + 1] = " <RGB:0.40,0.43,0.38>  ·  about " .. escapeRich(report.accused)
     end
-    bits[#bits + 1] = " <LINE> "
+    bits[#bits + 1] = " <LINE> <LINE> "
 
     local messages = report.messages
     if type(messages) ~= "table" or #messages == 0 then
@@ -129,302 +139,42 @@ local function threadText(report)
     return table.concat(bits)
 end
 
-local function styleButton(button, border, text)
-    button.backgroundColor = C.void
-    button.backgroundColorMouseOver = C.raised
-    button.borderColor = border
-    button.textColor = text
-end
+local box = function(...) return KR_Desk.box(...) end
 
 KnoxReportsView = ISPanel:derive("KnoxReportsView")
 
 function KnoxReportsView:initialise()
     ISPanel.initialise(self)
     self.backgroundColor = C.ash
-    self.borderColor = C.fence
+    self.borderColor = C.clear
+    self.noticeText = ""
 end
 
-function KnoxReportsView:createChildren()
-    self.newBtn = ISButton:new(0, 0, 220, 26, "+ NEW REPORT", self, KnoxReportsView.onNew)
-    styleButton(self.newBtn, C.hazard, C.hazard)
-    self.newBtn:initialise()
-    self:addChild(self.newBtn)
-
-    self.backBtn = ISButton:new(0, 0, 72, 22, "BACK", self, KnoxReportsView.onBack)
-    styleButton(self.backBtn, C.fence, C.bone)
-    self.backBtn:initialise()
-    self:addChild(self.backBtn)
-
-    self.notice = ISLabel:new(0, 0, 20, "", 0.95, 0.64, 0.05, 1, UIFont.Small, true)
-    self.notice:initialise()
-    self:addChild(self.notice)
-
-    self.list = ISScrollingListBox:new(0, 0, 200, 200)
-    self.list:initialise()
-    self.list:instantiate()
-    self.list.itemheight = KnoxReportsView.rowHeight()
-    self.list.selected = 0
-    self.list.font = UIFont.Small
-    self.list.drawBorder = true
-    self.list.backgroundColor = C.void
-    self.list.borderColor = C.fence
-    self.list.textColor = C.bone
-    self.list.selectedTextColor = C.hazard
-    self.list.selectionColor = { r = 0.23, g = 0.16, b = 0.02, a = 1 }
-    self.list.doDrawItem = KnoxReportsView.drawTicket
-    self.list:setOnMouseDownFunction(self, KnoxReportsView.onPick)
-    self:addChild(self.list)
-
-    self.thread = ISRichTextPanel:new(0, 0, 200, 200)
-    self.thread:initialise()
-    self.thread.background = true
-    self.thread.backgroundColor = C.void
-    self.thread.borderColor = C.fence
-    self.thread.autosetheight = false
-    self.thread.clip = true
-    self.thread.marginLeft = 12
-    self.thread.marginRight = 16
-    self.thread.marginTop = 8
-    self.thread.marginBottom = 8
-    self:addChild(self.thread)
-
-    self.reply = ISTextEntryBox:new("", 0, 0, 200, KnoxReportsView.replyHeight())
-    self.reply:initialise()
-    self.reply:instantiate()
-    self.reply.backgroundColor = C.void
-    self.reply.borderColor = C.fence
-    self.reply.font = UIFont.Small
-    self:addChild(self.reply)
-    KnoxReportsView.makeMultiline(self.reply, 8)
-
-    self.sendBtn = ISButton:new(0, 0, 80, 28, "SEND", self, KnoxReportsView.onSend)
-    styleButton(self.sendBtn, C.hazard, C.hazard)
-    self.sendBtn:initialise()
-    self:addChild(self.sendBtn)
-
-    self.kindReport = ISButton:new(0, 0, 100, 26, "REPORT", self, KnoxReportsView.onKindReport)
-    self.kindSupport = ISButton:new(0, 0, 100, 26, "SUPPORT", self, KnoxReportsView.onKindSupport)
-    styleButton(self.kindReport, C.hazard, C.hazard)
-    styleButton(self.kindSupport, C.fence, C.bone)
-    self.kindReport:initialise()
-    self.kindSupport:initialise()
-    self:addChild(self.kindReport)
-    self:addChild(self.kindSupport)
-
-    self.accusedLbl = ISLabel:new(0, 0, 16, "WHO", 0.60, 0.63, 0.58, 1, UIFont.Small, true)
-    self.subjectLbl = ISLabel:new(0, 0, 16, "SUBJECT", 0.60, 0.63, 0.58, 1, UIFont.Small, true)
-    self.bodyLbl = ISLabel:new(0, 0, 16, "WHAT HAPPENED", 0.60, 0.63, 0.58, 1, UIFont.Small, true)
-    self.accusedLbl:initialise()
-    self.subjectLbl:initialise()
-    self.bodyLbl:initialise()
-    self:addChild(self.accusedLbl)
-    self:addChild(self.subjectLbl)
-    self:addChild(self.bodyLbl)
-
-    self.accused = ISTextEntryBox:new("", 0, 0, 200, 26)
-    self.subject = ISTextEntryBox:new("", 0, 0, 200, 26)
-    self.body = ISTextEntryBox:new("", 0, 0, 200, 80)
-    self.accused:initialise()
-    self.subject:initialise()
-    self.body:initialise()
-    self.body:instantiate()
-    self.body.font = UIFont.Small
-    self:addChild(self.accused)
-    self:addChild(self.subject)
-    self:addChild(self.body)
-    KnoxReportsView.makeMultiline(self.body, 10)
-
-    self.fileBtn = ISButton:new(0, 0, 140, 28, "FILE REPORT", self, KnoxReportsView.onFile)
-    styleButton(self.fileBtn, C.hazard, C.hazard)
-    self.fileBtn:initialise()
-    self:addChild(self.fileBtn)
-
-    self:relayout()
-    self:applyMode()
-    self:populate()
-    self:showThread()
-end
-
-local function box(el, x, y, w, h)
-    if not el then
-        return
-    end
-    if w < 1 then
-        w = 1
-    end
-    if h < 1 then
-        h = 1
-    end
-    el:setX(x)
-    el:setY(y)
-    el:setWidth(w)
-    el:setHeight(h)
-    pcall(function()
-        if el.javaObject then
-            el.javaObject:setX(x)
-            el.javaObject:setY(y)
-            el.javaObject:setWidth(w)
-            el.javaObject:setHeight(h)
-        end
-    end)
-end
-
-function KnoxReportsView:relayout()
-    local w = self:getWidth()
-    local h = self:getHeight()
-    if w < 40 or h < 40 then
-        return
-    end
-
-    local pad = 10
-    local gap = 8
-    local toolH = 26
-    local sendW = 80
-    local sendH = 28
-    local replyH = KnoxReportsView.replyHeight()
-    local composerH = replyH + gap + sendH
-    local innerW = math.max(40, w - pad * 2)
-    local compose = mode == "compose"
-
-    -- Compose is a single column that always fits the hole.
-    if compose then
-        local y = pad
-        box(self.backBtn, pad, y, 80, toolH)
-        self.notice:setX(pad + 88)
-        self.notice:setY(y + 4)
-        y = y + toolH + gap
-
-        local kindW = math.min(110, math.floor((innerW - gap) / 2))
-        box(self.kindReport, pad, y, kindW, toolH)
-        box(self.kindSupport, pad + kindW + gap, y, kindW, toolH)
-        y = y + toolH + gap
-
-        local fieldH = 26
-        local accusedH = 0
-        if composeKind == "report" then
-            self.accusedLbl:setX(pad)
-            self.accusedLbl:setY(y)
-            y = y + 16
-            box(self.accused, pad, y, innerW, fieldH)
-            y = y + fieldH + gap
-            accusedH = 16 + fieldH + gap
-        end
-
-        self.subjectLbl:setX(pad)
-        self.subjectLbl:setY(y)
-        y = y + 16
-        box(self.subject, pad, y, innerW, fieldH)
-        y = y + fieldH + gap
-
-        self.bodyLbl:setX(pad)
-        self.bodyLbl:setY(y)
-        y = y + 16
-
-        local fileH = 28
-        local bodyH = h - y - pad - fileH - gap
-        if bodyH < 60 then
-            bodyH = 60
-        end
-        box(self.body, pad, y, innerW, bodyH)
-        KnoxReportsView.makeMultiline(self.body, 10)
-        box(self.fileBtn, pad, y + bodyH + gap, math.min(160, innerW), fileH)
-        return
-    end
-
-    -- Browse: side-by-side when there is room, otherwise stacked.
-    local listW = math.floor(innerW * 0.34)
-    if listW < 180 then
-        listW = 180
-    end
-    if listW > 280 then
-        listW = 280
-    end
-    local threadW = innerW - listW - gap
-    local stacked = threadW < 200
-    if stacked then
-        listW = innerW
-        threadW = innerW
-    end
-
-    local listX = pad
-    local listY = pad
-    local usableH = h - pad * 2
-
-    if stacked then
-        local listH = math.floor((usableH - toolH - composerH - gap * 3) * 0.36)
-        if listH < 80 then
-            listH = 80
-        end
-        local threadH = usableH - listH - toolH - composerH - gap * 3
-        if threadH < 80 then
-            threadH = 80
-            listH = math.max(70, usableH - threadH - toolH - composerH - gap * 3)
-        end
-
-        box(self.list, listX, listY, listW, listH)
-        box(self.newBtn, listX, listY + listH + gap, listW, toolH)
-
-        local threadY = listY + listH + gap + toolH + gap
-        local replyY = threadY + threadH + gap
-        box(self.thread, listX, threadY, threadW, threadH)
-        box(self.reply, listX, replyY, threadW, replyH)
-        KnoxReportsView.makeMultiline(self.reply, 8)
-        box(self.sendBtn, listX + threadW - sendW, replyY + replyH + gap, sendW, sendH)
-        self.notice:setX(listX)
-        self.notice:setY(replyY + replyH + gap + 4)
-    else
-        local listH = usableH - toolH - gap
-        box(self.list, listX, listY, listW, listH)
-        box(self.newBtn, listX, listY + listH + gap, listW, toolH)
-
-        local threadX = listX + listW + gap
-        local threadH = usableH - composerH - gap
-        local replyY = pad + threadH + gap
-        box(self.thread, threadX, pad, threadW, threadH)
-        box(self.reply, threadX, replyY, threadW, replyH)
-        KnoxReportsView.makeMultiline(self.reply, 8)
-        box(self.sendBtn, threadX + threadW - sendW, replyY + replyH + gap, sendW, sendH)
-        self.notice:setX(threadX)
-        self.notice:setY(replyY + replyH + gap + 4)
-    end
-
-    box(self.backBtn, pad, pad, 80, toolH)
-    self:syncListRows()
-    pcall(function() self.thread:paginate() end)
-end
+--------------------------------------------------------------------------
+-- Sizing primitives
+--------------------------------------------------------------------------
 
 function KnoxReportsView.lineHeight()
-    local height = 16
-    pcall(function()
-        local tm = getTextManager()
-        local font = tm:getFontFromEnum(UIFont.Small)
-        if font and font.getLineHeight then
-            height = font:getLineHeight()
-        else
-            height = tm:getFontHeight(UIFont.Small)
-        end
-    end)
-    if height < 16 then
-        height = 16
-    end
-    return height
-end
-
-function KnoxReportsView.fontHeight()
-    return KnoxReportsView.lineHeight()
+    return KR_Desk.lineHeight()
 end
 
 function KnoxReportsView.rowHeight()
-    return KnoxReportsView.lineHeight() + 16
+    -- Two lines per ticket: subject, then status and who it is about.
+    return KR_Desk.lineHeight() * 2 + 14
 end
 
+function KnoxReportsView.captionHeight()
+    return KR_Desk.lineHeight() + M.tight
+end
+
+--- Preferred reply height, before the layout takes any of it back.
 function KnoxReportsView.replyHeight()
-    local height = KnoxReportsView.lineHeight() * 6 + 28
-    if height < 120 then
-        height = 120
+    local height = KR_Desk.lineHeight() * 4 + 20
+    if height < 76 then
+        height = 76
     end
-    if height > 200 then
-        height = 200
+    if height > 150 then
+        height = 150
     end
     return height
 end
@@ -447,6 +197,390 @@ function KnoxReportsView.makeMultiline(el, maxLines)
     end)
 end
 
+--------------------------------------------------------------------------
+-- Widgets
+--------------------------------------------------------------------------
+
+function KnoxReportsView:createChildren()
+    self.newBtn = ISButton:new(0, 0, 120, M.row, "+ NEW REPORT", self, KnoxReportsView.onNew)
+    KR_Desk.styleButton(self.newBtn, "primary")
+    self.newBtn:initialise()
+    self:addChild(self.newBtn)
+
+    self.backBtn = ISButton:new(0, 0, 80, M.row, "< BACK", self, KnoxReportsView.onBack)
+    KR_Desk.styleButton(self.backBtn, "ghost")
+    self.backBtn:initialise()
+    self:addChild(self.backBtn)
+
+    self.notice = ISLabel:new(0, 0, KR_Desk.lineHeight(), "", C.hazard.r, C.hazard.g, C.hazard.b, 1, UIFont.Small, true)
+    self.notice:initialise()
+    self:addChild(self.notice)
+
+    self.list = ISScrollingListBox:new(0, 0, 200, 200)
+    self.list:initialise()
+    self.list:instantiate()
+    self.list.itemheight = KnoxReportsView.rowHeight()
+    self.list.selected = 0
+    self.list.font = UIFont.Small
+    self.list.drawBorder = false
+    self.list.backgroundColor = C.void
+    self.list.borderColor = C.fence
+    self.list.textColor = C.bone
+    self.list.selectedTextColor = C.hazard
+    self.list.selectionColor = C.ember
+    self.list.doDrawItem = KnoxReportsView.drawTicket
+    self.list:setOnMouseDownFunction(self, KnoxReportsView.onPick)
+    self:addChild(self.list)
+
+    self.thread = ISRichTextPanel:new(0, 0, 200, 200)
+    self.thread:initialise()
+    self.thread.background = true
+    self.thread.backgroundColor = C.void
+    self.thread.borderColor = C.fence
+    self.thread.autosetheight = false
+    self.thread.clip = true
+    self.thread.marginLeft = 14
+    self.thread.marginRight = 18
+    self.thread.marginTop = 10
+    self.thread.marginBottom = 10
+    self:addChild(self.thread)
+
+    self.reply = ISTextEntryBox:new("", 0, 0, 200, KnoxReportsView.replyHeight())
+    self.reply:initialise()
+    self.reply:instantiate()
+    self.reply.backgroundColor = C.void
+    self.reply.borderColor = C.fence
+    self.reply.font = UIFont.Small
+    self:addChild(self.reply)
+    KnoxReportsView.makeMultiline(self.reply, 8)
+
+    self.sendBtn = ISButton:new(0, 0, 84, M.row, "SEND", self, KnoxReportsView.onSend)
+    KR_Desk.styleButton(self.sendBtn, "primary")
+    self.sendBtn:initialise()
+    self:addChild(self.sendBtn)
+
+    self.kindReport = ISButton:new(0, 0, 100, M.row, "REPORT", self, KnoxReportsView.onKindReport)
+    self.kindSupport = ISButton:new(0, 0, 100, M.row, "SUPPORT", self, KnoxReportsView.onKindSupport)
+    self.kindReport:initialise()
+    self.kindSupport:initialise()
+    self:addChild(self.kindReport)
+    self:addChild(self.kindSupport)
+
+    self.accusedLbl = ISLabel:new(0, 0, M.label, "WHO", C.dust.r, C.dust.g, C.dust.b, 1, UIFont.Small, true)
+    self.subjectLbl = ISLabel:new(0, 0, M.label, "SUBJECT", C.dust.r, C.dust.g, C.dust.b, 1, UIFont.Small, true)
+    self.bodyLbl = ISLabel:new(0, 0, M.label, "WHAT HAPPENED", C.dust.r, C.dust.g, C.dust.b, 1, UIFont.Small, true)
+    self.accusedLbl:initialise()
+    self.subjectLbl:initialise()
+    self.bodyLbl:initialise()
+    self:addChild(self.accusedLbl)
+    self:addChild(self.subjectLbl)
+    self:addChild(self.bodyLbl)
+
+    self.accused = ISTextEntryBox:new("", 0, 0, 200, M.field)
+    self.subject = ISTextEntryBox:new("", 0, 0, 200, M.field)
+    self.body = ISTextEntryBox:new("", 0, 0, 200, 80)
+    self.accused:initialise()
+    self.subject:initialise()
+    self.body:initialise()
+    self.body:instantiate()
+    for _, entry in ipairs({ self.accused, self.subject, self.body }) do
+        entry.backgroundColor = C.void
+        entry.borderColor = C.fence
+        entry.font = UIFont.Small
+    end
+    self:addChild(self.accused)
+    self:addChild(self.subject)
+    self:addChild(self.body)
+    KnoxReportsView.makeMultiline(self.body, 10)
+
+    self.fileBtn = ISButton:new(0, 0, 150, M.row, "FILE REPORT", self, KnoxReportsView.onFile)
+    KR_Desk.styleButton(self.fileBtn, "primary")
+    self.fileBtn:initialise()
+    self:addChild(self.fileBtn)
+
+    self:relayout()
+    self:applyMode()
+    self:populate()
+    self:showThread()
+end
+
+--------------------------------------------------------------------------
+-- Layout
+--------------------------------------------------------------------------
+
+--- Place the status label and the action button on one row without ever
+--- letting them touch: the button owns the right edge, the label gets the rest.
+function KnoxReportsView:footerRow(x, y, w, button, buttonW)
+    local gap = M.gap
+    local btnW = math.min(buttonW, math.max(52, w - 60))
+    box(button, x + w - btnW, y, btnW, M.row)
+
+    local noticeW = w - btnW - gap
+    self.notice:setX(x)
+    self.notice:setY(y + math.floor((M.row - KR_Desk.lineHeight()) / 2))
+    self._noticeW = math.max(20, noticeW)
+    self:paintNotice()
+end
+
+function KnoxReportsView:relayout()
+    local w = self:getWidth()
+    local h = self:getHeight()
+    if w < 40 or h < 40 then
+        return
+    end
+
+    if mode == "compose" then
+        self:layoutCompose(w, h)
+    else
+        self:layoutBrowse(w, h)
+    end
+
+    self:syncListRows()
+    KR_Desk.refit(self.list)
+    KR_Desk.refit(self.thread)
+end
+
+function KnoxReportsView:layoutCompose(w, h)
+    local pad, gap = M.pad, M.gap
+    local innerW = math.max(40, w - pad * 2)
+    local capH = KnoxReportsView.captionHeight()
+
+    -- Top-down for the header, because those rows are fixed and few.
+    local y = pad
+    box(self.backBtn, pad, y, 84, M.row)
+    y = y + M.row + gap
+
+    local kindW = math.min(120, math.floor((innerW - gap) / 2))
+    box(self.kindReport, pad, y, kindW, M.row)
+    box(self.kindSupport, pad + kindW + gap, y, kindW, M.row)
+    y = y + M.row + gap
+
+    if composeKind == "report" then
+        self.accusedLbl:setX(pad)
+        self.accusedLbl:setY(y)
+        y = y + capH
+        box(self.accused, pad, y, innerW, M.field)
+        y = y + M.field + gap
+    end
+
+    self.subjectLbl:setX(pad)
+    self.subjectLbl:setY(y)
+    y = y + capH
+    box(self.subject, pad, y, innerW, M.field)
+    y = y + M.field + gap
+
+    self.bodyLbl:setX(pad)
+    self.bodyLbl:setY(y)
+    y = y + capH
+
+    -- Bottom-up from here: the action row is pinned, the body takes the rest.
+    local footerY = h - pad - M.row
+    local bodyH = footerY - gap - y
+    if bodyH < 48 then
+        bodyH = 48
+    end
+    box(self.body, pad, y, innerW, bodyH)
+    KnoxReportsView.makeMultiline(self.body, 10)
+
+    self:footerRow(pad, math.max(y + bodyH + gap, footerY), innerW, self.fileBtn, 150)
+end
+
+function KnoxReportsView:layoutBrowse(w, h)
+    local pad, gap = M.pad, M.gap
+    local innerW = math.max(40, w - pad * 2)
+    local capH = KnoxReportsView.captionHeight()
+
+    local listW = math.floor(innerW * 0.34)
+    if listW < 190 then
+        listW = 190
+    end
+    if listW > 300 then
+        listW = 300
+    end
+    local threadW = innerW - listW - gap
+    local stacked = threadW < STACK_AT
+
+    local top = pad + capH
+    local bottom = h - pad
+
+    if not stacked then
+        -- Left column: caption, list, new-report button pinned to the bottom.
+        local listBtnY = bottom - M.row
+        local listH = math.max(MIN_LIST, listBtnY - gap - top)
+        box(self.list, pad, top, listW, listH)
+        box(self.newBtn, pad, listBtnY, listW, M.row)
+
+        -- Right column: caption, thread, reply, action row.
+        local threadX = pad + listW + gap
+        self:stackThread(threadX, top, threadW, bottom)
+        return
+    end
+
+    -- Stacked: one column, list on top with a fixed share, thread below.
+    listW = innerW
+    threadW = innerW
+
+    local footerY = bottom - M.row
+    local replyH = KnoxReportsView.replyHeight()
+
+    -- Give the list about a third of the free run, but never so much that the
+    -- thread drops under its floor.
+    local free = footerY - gap - top
+    local listH = math.floor((free - M.row - capH - replyH - gap * 3) * 0.34)
+    if listH < MIN_LIST then
+        listH = MIN_LIST
+    end
+
+    local listBtnY = top + listH + gap
+    local threadCapY = listBtnY + M.row + gap
+    local threadTop = threadCapY + capH
+    local threadBottom = footerY
+
+    -- If the thread cannot fit under that split, take the difference back off
+    -- the list before touching the reply box.
+    local replyY = threadBottom - gap - replyH
+    local threadH = replyY - gap - threadTop
+    if threadH < MIN_THREAD then
+        local deficit = MIN_THREAD - threadH
+        listH = math.max(MIN_LIST, listH - deficit)
+        listBtnY = top + listH + gap
+        threadCapY = listBtnY + M.row + gap
+        threadTop = threadCapY + capH
+        threadH = replyY - gap - threadTop
+    end
+    -- Still short: the window is genuinely tiny, so shrink the reply box.
+    if threadH < MIN_THREAD then
+        replyH = math.max(MIN_REPLY, replyH - (MIN_THREAD - threadH))
+        replyY = threadBottom - gap - replyH
+        threadH = math.max(24, replyY - gap - threadTop)
+    end
+
+    box(self.list, pad, top, listW, listH)
+    box(self.newBtn, pad, listBtnY, listW, M.row)
+    self._threadCapY = threadCapY
+    box(self.thread, pad, threadTop, threadW, threadH)
+    box(self.reply, pad, replyY, threadW, replyH)
+    KnoxReportsView.makeMultiline(self.reply, 8)
+    self:footerRow(pad, footerY, threadW, self.sendBtn, 84)
+end
+
+--- Thread + reply + action row inside one column running to `bottom`.
+function KnoxReportsView:stackThread(x, top, w, bottom)
+    local gap = M.gap
+    local footerY = bottom - M.row
+    local replyH = KnoxReportsView.replyHeight()
+    local replyY = footerY - gap - replyH
+    local threadH = replyY - gap - top
+
+    if threadH < MIN_THREAD then
+        replyH = math.max(MIN_REPLY, replyH - (MIN_THREAD - threadH))
+        replyY = footerY - gap - replyH
+        threadH = math.max(24, replyY - gap - top)
+    end
+
+    self._threadCapY = top - KnoxReportsView.captionHeight()
+    box(self.thread, x, top, w, threadH)
+    box(self.reply, x, replyY, w, replyH)
+    KnoxReportsView.makeMultiline(self.reply, 8)
+    self:footerRow(x, footerY, w, self.sendBtn, 84)
+end
+
+--------------------------------------------------------------------------
+-- Painting
+--------------------------------------------------------------------------
+
+function KnoxReportsView:prerender()
+    ISPanel.prerender(self)
+
+    if mode == "compose" then
+        return
+    end
+
+    -- Column captions, drawn rather than held as ISLabels so they cost nothing
+    -- to move and cannot drift out of step with the widgets they head.
+    local capY = math.max(0, self._threadCapY or M.pad)
+    if self.list and self.list:getIsVisible() then
+        self:drawText("TICKETS", self.list:getX(), M.pad, C.dust.r, C.dust.g, C.dust.b, 1, UIFont.Small)
+    end
+    if self.thread and self.thread:getIsVisible() then
+        self:drawText("CONVERSATION", self.thread:getX(), capY, C.dust.r, C.dust.g, C.dust.b, 1, UIFont.Small)
+    end
+end
+
+--- Foreground pass. The empty-state sits *inside* the list's own rect, and the
+--- list paints an opaque background of its own, so drawing this in prerender
+--- put it underneath. render() runs after children.
+function KnoxReportsView:render()
+    if mode == "compose" or not self.list or not self.list:getIsVisible() then
+        return
+    end
+    if #(inbox.reports or {}) > 0 then
+        return
+    end
+
+    local x = self.list:getX() + 12
+    local y = self.list:getY() + 14
+    self:drawText("No tickets yet.", x, y, C.smoke.r, C.smoke.g, C.smoke.b, 1, UIFont.Small)
+    self:drawText("Use NEW REPORT below.", x, y + KR_Desk.lineHeight() + 3,
+        C.dust.r, C.dust.g, C.dust.b, 1, UIFont.Small)
+end
+
+--- One ticket row: subject on the first line, status pill and target below.
+function KnoxReportsView:drawTicket(y, item, alt)
+    local font = UIFont.Small
+    local lh = KR_Desk.lineHeight()
+    local rowH = lh * 2 + 14
+    item.height = rowH
+
+    local report = item.item
+    local w = self:getWidth()
+    local selected = self.selected == item.index
+
+    if selected then
+        self:drawRect(0, y, w, rowH, 1, C.ember.r, C.ember.g, C.ember.b)
+    elseif self.mouseoverselected == item.index then
+        self:drawRect(0, y, w, rowH, 1, C.raised.r, C.raised.g, C.raised.b)
+    end
+
+    local unread = type(report) == "table" and report.unread
+    if unread then
+        self:drawRect(0, y, 3, rowH, 1, C.hazard.r, C.hazard.g, C.hazard.b)
+    end
+    self:drawRect(0, y + rowH - 1, w, 1, 0.6, C.fence.r, C.fence.g, C.fence.b)
+
+    local rightPad = 10
+    pcall(function()
+        if self.vscroll and self.vscroll:getIsVisible() then
+            rightPad = rightPad + (self.vscroll:getWidth() or 13)
+        end
+    end)
+
+    local textX = 11
+    local titleTint = selected and C.hazard or C.bone
+    local title = KR_Desk.clip(tostring(item.text or ""), w - textX - rightPad)
+    self:drawText(title, textX, y + 6, titleTint.r, titleTint.g, titleTint.b, 1, font)
+
+    local status = type(report) == "table" and string.lower(tostring(report.status or "open")) or "open"
+    local tint = statusRgb(status)
+    local label = string.upper(status)
+    local pillW = KR_Desk.measure(label, 40) + 10
+    local pillY = y + 6 + lh + 2
+    self:drawRect(textX, pillY, pillW, lh + 1, 0.22, tint.r, tint.g, tint.b)
+    self:drawText(label, textX + 5, pillY, tint.r, tint.g, tint.b, 1, font)
+
+    local accused = type(report) == "table" and report.accused or nil
+    if accused and accused ~= "" then
+        local metaX = textX + pillW + 8
+        local room = w - metaX - rightPad
+        if room > 24 then
+            self:drawText(KR_Desk.clip("about " .. tostring(accused), room), metaX, pillY,
+                C.dust.r, C.dust.g, C.dust.b, 1, font)
+        end
+    end
+
+    return y + rowH
+end
+
 function KnoxReportsView:syncListRows()
     if not self.list then
         return
@@ -462,59 +596,22 @@ function KnoxReportsView:syncListRows()
     end
 end
 
-function KnoxReportsView:drawTicket(y, item, alt)
-    local font = UIFont.Small
-    local lh = KnoxReportsView.lineHeight()
-    local padY = 8
-    local rowH = lh + padY * 2
-    item.height = rowH
-
-    local report = item.item
-    if self.selected == item.index then
-        self:drawRect(0, y, self:getWidth(), rowH, 1, 0.23, 0.16, 0.02)
+function KnoxReportsView:paintNotice()
+    if not self.notice then
+        return
     end
-    self:drawRectBorder(0, y, self:getWidth(), rowH, 0.7, 0.11, 0.14, 0.11)
-
-    if type(report) == "table" and report.unread then
-        self:drawRect(0, y, 3, rowH, 1, 0.95, 0.64, 0.05)
-    end
-
-    local status = type(report) == "table" and string.upper(tostring(report.status or "open")) or ""
-    local statusW = 48
-    pcall(function()
-        statusW = getTextManager():MeasureStringX(font, status)
-    end)
-    if statusW < 24 then
-        statusW = 24
-    end
-
-    local rightPad = 12
-    if self.vscroll and self.vscroll.getIsVisible and self.vscroll:getIsVisible() then
-        rightPad = rightPad + (self.vscroll:getWidth() or 13)
-    end
-    local statusX = self:getWidth() - rightPad - statusW
-    if statusX < 40 then
-        statusX = 40
-    end
-
-    local title = tostring(item.text or "")
-    local maxW = statusX - 16
-    if maxW < 20 then
-        maxW = 20
-    end
-    pcall(function()
-        while getTextManager():MeasureStringX(font, title) > maxW and #title > 4 do
-            title = string.sub(title, 1, #title - 4) .. "..."
-        end
-    end)
-
-    local textY = y + padY
-    self:drawText(title, 10, textY, 0.91, 0.90, 0.87, 1, font)
-    local rgb = statusRgb(type(report) == "table" and tostring(report.status or "open") or "")
-    self:drawText(status, statusX, textY, rgb.r, rgb.g, rgb.b, 1, font)
-
-    return y + rowH
+    local room = self._noticeW or 200
+    self.notice:setName(KR_Desk.clip(self.noticeText or "", room))
 end
+
+function KnoxReportsView:setNotice(text)
+    self.noticeText = tostring(text or "")
+    self:paintNotice()
+end
+
+--------------------------------------------------------------------------
+-- Behaviour
+--------------------------------------------------------------------------
 
 function KnoxReportsView:onPick(item)
     if type(item) ~= "table" or not item.id then
@@ -546,24 +643,26 @@ end
 
 function KnoxReportsView:onKindReport()
     composeKind = "report"
-    self:paintKind()
     self:applyMode()
 end
 
 function KnoxReportsView:onKindSupport()
     composeKind = "support"
-    self:paintKind()
     self:applyMode()
 end
 
 function KnoxReportsView:paintKind()
-    styleButton(self.kindReport, composeKind == "report" and C.hazard or C.fence, composeKind == "report" and C.hazard or C.bone)
-    styleButton(self.kindSupport, composeKind == "support" and C.hazard or C.fence, composeKind == "support" and C.hazard or C.bone)
+    KR_Desk.styleButton(self.kindReport, composeKind == "report" and "primary" or "ghost")
+    KR_Desk.styleButton(self.kindSupport, composeKind == "support" and "primary" or "ghost")
 end
 
 function KnoxReportsView:onSend()
     local text = self.reply:getText()
-    if not selectedId or not text or text == "" then
+    if not selectedId then
+        self:setNotice("Pick a ticket first.")
+        return
+    end
+    if not text or text == "" then
         self:setNotice("Write a reply first.")
         return
     end
@@ -597,10 +696,6 @@ function KnoxReportsView:onFile()
     self:applyMode()
     self:setNotice("Report sent. It will appear in a moment.")
     askInbox()
-end
-
-function KnoxReportsView:setNotice(text)
-    self.notice:setName(tostring(text or ""))
 end
 
 function KnoxReportsView:applyMode()
@@ -644,6 +739,7 @@ function KnoxReportsView:populate()
         self.list.selected = 1
     end
     self:syncListRows()
+    KR_Desk.refit(self.list)
 end
 
 function KnoxReportsView:showThread()
@@ -651,13 +747,17 @@ function KnoxReportsView:showThread()
         return
     end
     self.thread:setText(threadText(findReport(selectedId)))
-    pcall(function() self.thread:paginate() end)
+    KR_Desk.refit(self.thread)
 end
 
 function KnoxReportsView:refresh()
     self:populate()
     self:showThread()
 end
+
+--------------------------------------------------------------------------
+-- Page contract
+--------------------------------------------------------------------------
 
 local page = {
     id = "reports",
@@ -676,14 +776,8 @@ function page.mount(self, host)
     host:clearChildren()
     askInbox()
 
-    local w = host:getWidth()
-    local h = host:getHeight()
-    if w < 40 then
-        w = 600
-    end
-    if h < 40 then
-        h = 400
-    end
+    local w = math.max(120, host:getWidth())
+    local h = math.max(120, host:getHeight())
 
     view = KnoxReportsView:new(0, 0, w, h)
     view:initialise()
@@ -708,10 +802,7 @@ function page.layout(self, host)
     if not view or not host then
         return
     end
-    view:setX(0)
-    view:setY(0)
-    view:setWidth(host:getWidth())
-    view:setHeight(host:getHeight())
+    box(view, 0, 0, host:getWidth(), host:getHeight())
     view:relayout()
 end
 
