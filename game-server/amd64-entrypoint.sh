@@ -71,6 +71,8 @@ if [ -f "$OVERRIDE_FILE" ]; then
     echo "[entrypoint] Branch override from $OVERRIDE_FILE: $GAME_VERSION"
 fi
 export GAME_VERSION="${GAME_VERSION:-public}"
+export PZ_SHARED_DIR="/home/steam/Zomboid"
+export BASE_GAME_DIR="${BASE_GAME_DIR:-/home/steam/ZomboidDedicatedServer}"
 echo "[entrypoint] Steam branch: $GAME_VERSION"
 
 # ---------------------------------------------------------------------------
@@ -82,7 +84,7 @@ echo "[entrypoint] Steam branch: $GAME_VERSION"
 # half-installed tree (start-server.sh present, ProjectZomboid64 missing).
 # Public must use no -beta flag; only non-public branches pass -beta.
 # ---------------------------------------------------------------------------
-BASE_GAME_DIR="/home/steam/ZomboidDedicatedServer"
+BASE_GAME_DIR="${BASE_GAME_DIR:-/home/steam/ZomboidDedicatedServer}"
 STEAM_INSTALL_FILE="/home/steam/install_server.scmd"
 
 write_steam_install_script() {
@@ -121,31 +123,36 @@ if [ -f /home/steam/run_server.sh ] && ! grep -q 'PZ_SKIP_BETA_REWRITE' /home/st
     fi
 fi
 
-# Pure bash binary guard (image python is incomplete — no ntpath — so no python here).
-cat > /home/steam/ensure_game_binary.sh << 'EOF'
+# The base image prints "### Project Zomboid Server updated." whether or not
+# SteamCMD worked. Inject our own check at the top of start_server(), which by
+# definition runs after the image's update step, so it reads the manifest
+# exactly as SteamCMD left it. Exit codes are documented in the script.
+cat > /home/steam/run_update_check.sh << 'EOF'
 #!/bin/bash
-# PZ_BINARY_GUARD
-BASE="${BASE_GAME_DIR:-/home/steam/ZomboidDedicatedServer}"
-if [[ ! -e "$BASE/ProjectZomboid64" && ! -e "$BASE/ProjectZomboid64.real" ]]; then
-    printf '\n### FATAL: ProjectZomboid64 binary missing after SteamCMD.\n'
-    printf '### SteamCMD likely failed (state 0x6 = content servers / corrupt install).\n'
-    printf '### On the host, wipe the game install volume (NOT Saves) and restart:\n'
-    printf '###   docker stop pz-game-server && rm -rf data/server/* && docker start pz-game-server\n'
+# PZ_UPDATE_GUARD
+bash /home/steam/steam-update-check.sh
+_rc=$?
+if [ "$_rc" -eq 1 ]; then
+    printf '\n### Restarting the container to run a clean reinstall.\n'
+    exit 1
+elif [ "$_rc" -ne 0 ]; then
+    printf '\n### Refusing to start on a stale build.\n'
+    printf '### Clients that already updated would hang at "Joining game...".\n'
     printf '### Container staying up for debugging: docker logs pz-game-server\n'
     sleep infinity
     exit 1
 fi
 EOF
-chmod +x /home/steam/ensure_game_binary.sh
+chmod +x /home/steam/run_update_check.sh
 
-if [ -f /home/steam/run_server.sh ] && ! grep -q 'PZ_BINARY_GUARD' /home/steam/run_server.sh 2>/dev/null; then
-    # Inject at the top of start_server() — GNU sed.
-    sed -i 's|^function start_server() {$|function start_server() {\n    # PZ_BINARY_GUARD\n    bash /home/steam/ensure_game_binary.sh|' \
+if [ -f /home/steam/run_server.sh ] && ! grep -q 'PZ_UPDATE_GUARD' /home/steam/run_server.sh 2>/dev/null; then
+    # Inject at the top of start_server() - GNU sed.
+    sed -i 's|^function start_server() {$|function start_server() {\n    # PZ_UPDATE_GUARD\n    bash /home/steam/run_update_check.sh \|\| exit $?|' \
         /home/steam/run_server.sh
-    if grep -q 'PZ_BINARY_GUARD' /home/steam/run_server.sh 2>/dev/null; then
-        echo "[entrypoint] Patched run_server.sh with ProjectZomboid64 binary guard"
+    if grep -q 'PZ_UPDATE_GUARD' /home/steam/run_server.sh 2>/dev/null; then
+        echo "[entrypoint] Patched run_server.sh with the Steam update guard"
     else
-        echo "[entrypoint] WARNING: binary guard patch failed"
+        echo "[entrypoint] WARNING: update guard patch failed - a failed update will boot stale"
     fi
 fi
 
