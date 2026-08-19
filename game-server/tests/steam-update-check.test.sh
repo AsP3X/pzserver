@@ -20,6 +20,21 @@ CHECK="${SCRIPT_DIR}/../steam-update-check.sh"
 pass=0
 fail=0
 
+# Every throwaway tree the suite makes lands under one root, so the trap can
+# sweep them in a single rm instead of leaving ~20 mktemp dirs behind per run.
+# mktemp honours TMPDIR, so the helpers below need no changes. The trap must
+# never mask a failure, so it neither runs exit nor touches $fail.
+TEST_TMP_ROOT="$(mktemp -d)"
+export TMPDIR="$TEST_TMP_ROOT"
+cleanup() {
+    rm -rf "$TEST_TMP_ROOT" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Shared dir used by the most recent assert_repair, so a test can read back
+# what the script actually wrote.
+LAST_SHARED=""
+
 # Throwaway install tree. $1 = StateFlags, $2 = buildid, $3 = TargetBuildID.
 # $1 = "nomanifest" omits the acf; $4 = "nobinary" omits ProjectZomboid64.
 make_install() {
@@ -60,15 +75,27 @@ ACF
     printf '%s' "$dir"
 }
 
+# Install tree whose manifest body is taken verbatim from stdin, for the shapes
+# make_install cannot express: corrupt, empty, or missing keys entirely.
+make_raw_install() {
+    local dir
+    dir="$(mktemp -d)"
+    mkdir -p "$dir/steamapps"
+    touch "$dir/ProjectZomboid64"
+    cat > "$dir/steamapps/appmanifest_380870.acf"
+    printf '%s' "$dir"
+}
+
 # Crude single-field reader. Enough for flat, one-line report JSON.
 json_field() {
     sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" "$1" | head -1
 }
 
 # assert_verdict <desc> <install-dir> <expected-verdict> <expected-rc>
+#               [<expected-booted: true|false>]
 assert_verdict() {
-    local desc="$1" install="$2" expected="$3" expected_rc="$4"
-    local shared out rc verdict
+    local desc="$1" install="$2" expected="$3" expected_rc="$4" want_booted="${5:-}"
+    local shared out rc verdict booted
 
     shared="$(mktemp -d)"
 
@@ -97,6 +124,16 @@ assert_verdict() {
         echo "${out}" | sed 's/^/    /'
         fail=$((fail + 1))
         return
+    fi
+
+    if [ -n "$want_booted" ]; then
+        booted="$(json_field "$shared/.update_status" booted)"
+        if [ "$booted" != "$want_booted" ]; then
+            echo "FAIL: ${desc} - booted ${booted}, expected ${want_booted}"
+            echo "${out}" | sed 's/^/    /'
+            fail=$((fail + 1))
+            return
+        fi
     fi
 
     echo "PASS: ${desc}"
@@ -146,6 +183,127 @@ STEAMCMD_LOG="$retired_log" assert_verdict "retired manifest is named, not guess
 STEAMCMD_LOG="$retired_log" assert_verdict "stale log cannot condemn a healthy install" \
     "$(make_install 4 24775771 24775771)" ok 0
 
+# ok used to be the else branch, so every manifest the parser could not read
+# fell through to "healthy" and booted - the exact silent stale boot this script
+# exists to prevent. These must not claim ok. They still boot, because an
+# unreadable manifest is not evidence the build is behind and halting on
+# ambiguity turns a non-issue into an outage, so booted must stay true.
+corrupt_install="$(make_raw_install <<'ACF'
+this is not an acf at all
+ACF
+)"
+assert_verdict "unparseable manifest is unverifiable, not ok" \
+    "$corrupt_install" unverifiable 0 true
+
+assert_verdict "empty manifest is unverifiable, not ok" \
+    "$(make_raw_install < /dev/null)" unverifiable 0 true
+
+# 128 = files corrupt, 32 = files missing, 1 = uninstalled. None of them set
+# bit 4, so none of them is a fully installed build.
+assert_verdict "files-corrupt StateFlags is unverifiable, not ok" \
+    "$(make_install 128 24775771 24775771)" unverifiable 0 true
+
+assert_verdict "files-missing StateFlags is unverifiable, not ok" \
+    "$(make_install 32 24775771 24775771)" unverifiable 0 true
+
+assert_verdict "uninstalled StateFlags is unverifiable, not ok" \
+    "$(make_install 1 24775771 24775771)" unverifiable 0 true
+
+assert_verdict "zero StateFlags is unverifiable, not ok" \
+    "$(make_install 0 24775771 24775771)" unverifiable 0 true
+
+# Fully installed, but nothing to compare - ok has to be positively asserted.
+assert_verdict "manifest with no build ids is unverifiable, not ok" \
+    "$(make_raw_install <<'ACF'
+"AppState"
+{
+	"StateFlags"		"4"
+}
+ACF
+)" unverifiable 0 true
+
+# assert_pinned <desc> <install-dir> <expected-manifest|"none">
+assert_pinned() {
+    local desc="$1" install="$2" expected="$3"
+    local shared got
+    shared="$(mktemp -d)"
+
+    BASE_GAME_DIR="$install" PZ_SHARED_DIR="$shared" GAME_VERSION=public \
+        STEAMCMD_LOG=/nonexistent bash "$CHECK" >/dev/null 2>&1
+
+    got="$(json_field "$shared/.update_status" pinned_manifest)"
+    if [ "$expected" = "none" ]; then
+        expected="null"
+    fi
+
+    if [ "$got" = "$expected" ]; then
+        echo "PASS: ${desc}"
+        pass=$((pass + 1))
+    else
+        echo "FAIL: ${desc} - pinned_manifest ${got}, expected ${expected}"
+        fail=$((fail + 1))
+    fi
+}
+
+assert_pinned "pinned manifest is read from the manifest" \
+    "$(make_install 4 24775771 24775771)" 4041863939978451180
+
+# Steam writes StagedDepots during an interrupted update - precisely the state
+# this script inspects - and it carries the same depot id. Answering with the
+# staged manifest would name a build that is not on disk.
+assert_pinned "staged depot does not shadow the installed manifest" \
+    "$(make_raw_install <<'ACF'
+"AppState"
+{
+	"StateFlags"		"4"
+	"buildid"		"24775771"
+	"TargetBuildID"		"24775771"
+	"StagedDepots"
+	{
+		"380871"
+		{
+			"manifest"		"1111111111111111111"
+		}
+	}
+	"InstalledDepots"
+	{
+		"1006"
+		{
+			"manifest"		"6403079453713498174"
+		}
+		"380871"
+		{
+			"manifest"		"4041863939978451180"
+		}
+	}
+}
+ACF
+)" 4041863939978451180
+
+# A partially installed depot has no manifest key. Reporting the next depot's
+# id would send an operator chasing a manifest this install never used.
+assert_pinned "a depot with no manifest key reports nothing, not the next depot" \
+    "$(make_raw_install <<'ACF'
+"AppState"
+{
+	"StateFlags"		"4"
+	"buildid"		"24775771"
+	"TargetBuildID"		"24775771"
+	"InstalledDepots"
+	{
+		"380871"
+		{
+			"size"		"6886825943"
+		}
+		"380873"
+		{
+			"manifest"		"4894029153115054997"
+		}
+	}
+}
+ACF
+)" none
+
 # assert_repair <desc> <install-dir> <stamp-contents|"none"> <expected-verdict>
 #               <expected-rc> <expect-force-flag: yes|no>
 assert_repair() {
@@ -153,6 +311,7 @@ assert_repair() {
     local shared out rc verdict flagged
 
     shared="$(mktemp -d)"
+    LAST_SHARED="$shared"
     if [ "$stamp" != "none" ]; then
         printf '%s' "$stamp" > "$shared/.update_repair_attempt"
     fi
@@ -180,6 +339,19 @@ assert_repair() {
 assert_repair "first retired manifest queues a reinstall" \
     "$(make_install 6 24775771 24801442)" none manifest_retired 1 yes
 
+# The stamp is the only thing bounding repair to one attempt, and it is only
+# useful if it records WHICH build was attempted. Every case below pre-seeds the
+# stamp, so without this the suite passes with the write replaced by printf "1"
+# - a boolean, which would read a genuinely new target build as a repeat.
+stamp_written="$(tr -d '[:space:]' < "${LAST_SHARED}/.update_repair_attempt" 2>/dev/null || true)"
+if [ "$stamp_written" = "24801442" ]; then
+    echo "PASS: the queued reinstall stamps the target build id"
+    pass=$((pass + 1))
+else
+    echo "FAIL: the queued reinstall stamps the target build id - stamp held '${stamp_written}', expected 24801442"
+    fail=$((fail + 1))
+fi
+
 # Second encounter for the same build: the clean reinstall already failed once,
 # so asking Docker to restart again would just burn 7GB in a loop.
 assert_repair "repeat for the same build halts instead of looping" \
@@ -188,6 +360,38 @@ assert_repair "repeat for the same build halts instead of looping" \
 # A newer build is a different problem and deserves its own attempt.
 assert_repair "a new target build earns a fresh attempt" \
     "$(make_install 6 24775771 24801442)" 24700000 manifest_retired 1 yes
+
+# StateFlags 6 alone earns update_required, which the retired-manifest log then
+# upgrades, so this arm is reachable with no TargetBuildID at all. The stamp
+# stored the literal "unknown" while the halt arm compared against
+# "$target_build" behind a -n guard, so the comparison never ran: every boot
+# re-queued the wipe and the container re-downloaded 7GB forever. Same shared
+# dir twice, so the second run reads the stamp the first run wrote.
+notarget_install="$(make_raw_install <<'ACF'
+"AppState"
+{
+	"StateFlags"		"6"
+	"buildid"		"24775771"
+}
+ACF
+)"
+notarget_shared="$(mktemp -d)"
+
+BASE_GAME_DIR="$notarget_install" PZ_SHARED_DIR="$notarget_shared" GAME_VERSION=public \
+    STEAMCMD_LOG="$retired_log" bash "$CHECK" >/dev/null 2>&1
+notarget_rc1=$?
+rm -f "$notarget_shared/.force_update"
+BASE_GAME_DIR="$notarget_install" PZ_SHARED_DIR="$notarget_shared" GAME_VERSION=public \
+    STEAMCMD_LOG="$retired_log" bash "$CHECK" >/dev/null 2>&1
+notarget_rc2=$?
+
+if [ "$notarget_rc1" -eq 1 ] && [ "$notarget_rc2" -eq 2 ]; then
+    echo "PASS: a missing target build id still bounds repair to one attempt"
+    pass=$((pass + 1))
+else
+    echo "FAIL: a missing target build id still bounds repair to one attempt - exits ${notarget_rc1} then ${notarget_rc2}, expected 1 then 2"
+    fail=$((fail + 1))
+fi
 
 # A healthy boot clears the stamp so the next genuine failure can repair.
 clear_shared="$(mktemp -d)"
@@ -203,19 +407,37 @@ else
 fi
 
 # The panel parses this file. It must be valid JSON in every branch, including
-# when a diagnosis contains quotes.
-json_shared="$(mktemp -d)"
-BASE_GAME_DIR="$(make_install 6 24775771 24801442)" PZ_SHARED_DIR="$json_shared" \
-    GAME_VERSION=public STEAMCMD_LOG="$retired_log" bash "$CHECK" >/dev/null 2>&1
-if command -v python3 >/dev/null 2>&1; then
-    if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$json_shared/.update_status" 2>/dev/null; then
-        echo "PASS: report is valid JSON"
+# when a diagnosis contains quotes and in the verdicts where fields come out
+# null because the manifest is absent or unreadable.
+#
+# assert_json <desc> <install-dir> <content-log>
+assert_json() {
+    local desc="$1" install="$2" log="$3"
+    local shared
+    shared="$(mktemp -d)"
+
+    BASE_GAME_DIR="$install" PZ_SHARED_DIR="$shared" GAME_VERSION=public \
+        STEAMCMD_LOG="$log" bash "$CHECK" >/dev/null 2>&1
+
+    if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$shared/.update_status" 2>/dev/null; then
+        echo "PASS: ${desc}"
         pass=$((pass + 1))
     else
-        echo "FAIL: report is not valid JSON"
-        cat "$json_shared/.update_status" | sed 's/^/    /'
+        echo "FAIL: ${desc}"
+        sed 's/^/    /' "$shared/.update_status" 2>/dev/null
         fail=$((fail + 1))
     fi
+}
+
+if command -v python3 >/dev/null 2>&1; then
+    assert_json "manifest_retired report is valid JSON" \
+        "$(make_install 6 24775771 24801442)" "$retired_log"
+    assert_json "unknown report is valid JSON" \
+        "$(make_install nomanifest 0 0)" /nonexistent
+    assert_json "missing report is valid JSON" \
+        "$(make_install 4 24775771 24775771 nobinary)" /nonexistent
+    assert_json "unverifiable report is valid JSON" \
+        "$corrupt_install" /nonexistent
 else
     echo "SKIP: report JSON validity needs python3"
 fi

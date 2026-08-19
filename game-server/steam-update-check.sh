@@ -34,7 +34,7 @@ FORCE_FLAG="${PZ_SHARED_DIR}/.force_update"
 
 # --- reading the manifest -------------------------------------------------
 
-# First value of a top-level "key" "value" pair.
+# First value of a "key" "value" pair, at any nesting depth.
 acf_get() {
     [ -f "$MANIFEST" ] || return 1
     sed -n "s/^[[:space:]]*\"$1\"[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$MANIFEST" | head -1
@@ -42,11 +42,26 @@ acf_get() {
 
 # The manifest id this install is pinned to for the content depot. It is
 # nested, so acf_get would return whichever depot came first instead.
+#
+# Scoped to InstalledDepots on purpose: an interrupted update leaves a
+# StagedDepots block carrying the same depot id, and answering with the staged
+# manifest would name a build that is not on disk. Braces are counted so the
+# search stops when the depot's own block closes - a partially installed depot
+# has no "manifest" key, and falling through would report the next depot's id.
 pinned_manifest() {
     [ -f "$MANIFEST" ] || return 1
     awk -v depot="\"${CONTENT_DEPOT}\"" '
-        $1 == depot { found = 1; next }
-        found && $1 == "\"manifest\"" { gsub(/"/, "", $2); print $2; exit }
+        $1 == "\"InstalledDepots\"" { installed = 1; depth = 0; next }
+        !installed { next }
+        $1 == "{" { depth++; next }
+        $1 == "}" {
+            depth--
+            if (in_depot && depth < depot_depth) { exit }
+            if (depth <= 0) { exit }
+            next
+        }
+        $1 == depot { in_depot = 1; depot_depth = depth + 1; next }
+        in_depot && $1 == "\"manifest\"" { gsub(/"/, "", $2); print $2; exit }
     ' "$MANIFEST"
 }
 
@@ -120,8 +135,16 @@ write_report() {
         printf '\n'
     } > "$tmp"
 
-    mv -f "$tmp" "$REPORT"
-    chmod 0666 "$REPORT" 2>/dev/null || true
+    # Mode first: after the mv the file is already visible to the panel.
+    chmod 0666 "$tmp" 2>/dev/null || true
+
+    if ! mv -f "$tmp" "$REPORT"; then
+        # Silence here is the dangerous case - the panel would go on serving
+        # the previous run's report, which may still say ok/booted while this
+        # run is about to halt.
+        echo "[update-check] ERROR: could not write ${REPORT}. The panel is still showing an older report, not this run's ${verdict} verdict." >&2
+        rm -f "$tmp" 2>/dev/null || true
+    fi
 }
 
 # --- verdict --------------------------------------------------------------
@@ -147,9 +170,25 @@ elif [ -n "$installed_build" ] && [ -n "$target_build" ] && [ "$installed_build"
 elif is_number "$state_flags" && [ $(( state_flags & 2 )) -ne 0 ]; then
     verdict="update_required"
     diagnosis="Steam has flagged the install as needing an update (StateFlags ${state_flags})."
-else
+elif is_number "$state_flags" && [ $(( state_flags & 4 )) -ne 0 ] \
+    && [ -n "$installed_build" ] && [ -n "$target_build" ] \
+    && [ "$installed_build" = "$target_build" ]; then
+    # ok has to be asserted, not fallen into. As an else branch it swallowed
+    # unparseable manifests and every not-installed StateFlags value and booted
+    # them as healthy, which is the stale boot this script exists to prevent.
     verdict="ok"
-    diagnosis="Installed build ${installed_build:-unknown} matches what Steam expects."
+    diagnosis="Installed build ${installed_build} matches what Steam expects."
+else
+    # The manifest is there but does not support a judgement either way. That
+    # is not evidence the build is behind, so halting would turn a non-issue
+    # into an outage - it boots, but it is not ok, so the panel still shows it.
+    verdict="unverifiable"
+    if ! is_number "$state_flags" || [ -z "$installed_build" ] || [ -z "$target_build" ]; then
+        unverifiable_reason="the manifest could not be parsed (StateFlags ${state_flags:-none}, buildid ${installed_build:-none}, TargetBuildID ${target_build:-none})"
+    else
+        unverifiable_reason="Steam does not mark the install as fully installed (StateFlags ${state_flags})"
+    fi
+    diagnosis="The install could not be verified: ${unverifiable_reason}. Booting anyway, because an unreadable manifest is not evidence the build is behind - but this install is not confirmed healthy."
 fi
 
 # Refinement only. A log file outlives the failure that wrote it, so it may
@@ -179,9 +218,19 @@ case "$verdict" in
         booted=true
         rc=0
         ;;
+    unverifiable)
+        # Boots, but the stamp is left alone: nothing here says the last
+        # failure is over.
+        booted=true
+        rc=0
+        ;;
     manifest_retired)
-        if [ -n "$target_build" ] && [ "$stamp_target" = "$target_build" ]; then
-            diagnosis="${diagnosis} A clean reinstall was already attempted for build ${target_build} and did not fix it, so this needs a human."
+        # Compared against the same fallback the write arm below stores. With
+        # a -n "$target_build" guard here, a manifest with no TargetBuildID
+        # stamped the literal "unknown" and then never reached this branch, so
+        # every boot re-queued the wipe: an endless 7GB download loop.
+        if [ "$stamp_target" = "${target_build:-unknown}" ]; then
+            diagnosis="${diagnosis} A clean reinstall was already attempted for build ${target_build:-unknown} and did not fix it, so this needs a human."
             rc=2
         else
             mkdir -p "$PZ_SHARED_DIR" 2>/dev/null || true
