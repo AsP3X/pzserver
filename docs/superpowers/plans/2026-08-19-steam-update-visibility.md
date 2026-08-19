@@ -51,8 +51,15 @@ Report at `$PZ_SHARED_DIR/.update_status`, all keys always present:
  "auto_repaired":true,"diagnosis":"..."}
 ```
 
-`verdict` is one of `ok`, `behind`, `update_required`, `manifest_retired`, `missing`, `unknown`. String fields are `null` when unknown; `state_flags` and the timestamps are numbers or `null`; `booted`/`auto_repaired` are booleans.
+`verdict` is one of `ok`, `behind`, `update_required`, `manifest_retired`, `missing`, `unverifiable`, `unknown`. String fields are `null` when unknown; `state_flags` and the timestamps are numbers or `null`; `booted`/`auto_repaired` are booleans.
 
+
+> **Correction, applied after Tasks 1-3 were implemented.** Review found two defects in the code these tasks prescribe, both reproduced:
+>
+> 1. **Critical.** The repair stamp wrote `${target_build:-unknown}` while the halt arm guarded on `[ -n "$target_build" ]`, so a manifest with no `TargetBuildID` could never match its own stamp. Since `update_required` needs only the `StateFlags` bit, that path was reachable — and with Task 4 wiring exit 1 to a container restart, it wiped and re-downloaded ~7.2GB on every boot, forever. Both sides must use the same fallback.
+> 2. **Important.** `ok` was an `else` fallthrough, so a truncated manifest, a zero-byte one, or `StateFlags` without bit 4 all booted as healthy — the exact silent-stale-boot being fixed. `ok` is now a positive assertion and the leftovers become `unverifiable`, which boots but is not healthy.
+>
+> A third defect (the `pinned_manifest` awk reading a `StagedDepots` block instead of `InstalledDepots`) and a test hole (the stamp's written value was never read back, which is what hid defect 1) were fixed alongside. The task text below is left as written; the corrections are in a follow-up commit.
 ---
 
 ### Task 1: Manifest parsing and the core verdicts
@@ -854,6 +861,17 @@ mod tests {
         assert!(report.verdict.is_healthy());
     }
 
+    /// Boots, but is not healthy. If this ever flips to healthy, a corrupt
+    /// manifest goes back to booting stale in silence.
+    #[test]
+    fn unverifiable_boots_but_is_not_healthy() {
+        let report = UpdateReport::parse(r#"{"verdict":"unverifiable","booted":true}"#);
+
+        assert_eq!(report.verdict, UpdateVerdict::Unverifiable);
+        assert!(report.booted);
+        assert!(!report.verdict.is_healthy());
+    }
+
     /// A newer script may grow a verdict this build has never heard of. That
     /// must not read as a failure, or a panel upgrade lag would take the
     /// server offline in the UI for no reason.
@@ -925,6 +943,10 @@ pub enum UpdateVerdict {
     ManifestRetired,
     /// No game binary at all.
     Missing,
+    /// The manifest is there but could not be read well enough to judge.
+    /// Boots, but must not read as healthy - losing the ability to detect a
+    /// stale build is itself the failure this change exists to surface.
+    Unverifiable,
     /// No report yet, or one this build does not understand.
     #[default]
     Unknown,
@@ -946,6 +968,7 @@ impl UpdateVerdict {
             "update_required" => Self::UpdateRequired,
             "manifest_retired" => Self::ManifestRetired,
             "missing" => Self::Missing,
+            "unverifiable" => Self::Unverifiable,
             _ => Self::Unknown,
         }
     }
@@ -1078,7 +1101,7 @@ pub use steam_update::{PublicUpdate, UpdateReport, UpdateVerdict};
 cd web/api && cargo test -p pz-bridge steam_update
 ```
 
-Expected: `test result: ok. 5 passed`.
+Expected: `test result: ok. 6 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -1295,6 +1318,7 @@ export type UpdateVerdict =
   | 'update_required'
   | 'manifest_retired'
   | 'missing'
+  | 'unverifiable'
   | 'unknown'
 
 /** Public-safe view. Never carries the diagnosis. */

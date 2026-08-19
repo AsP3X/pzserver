@@ -34,8 +34,13 @@ The log is secondary and only refines a diagnosis that already exists. When the 
 | `manifest_retired` | either of the above, plus the log signature | repair once, else halt |
 | `missing` | no binary — today's case, behaviour unchanged | no — halt |
 | `unknown` | no manifest yet (first boot) | yes |
+| `unverifiable` | manifest present but not readable enough to judge | yes, but not healthy |
 
 A failure where Steam was merely unreachable leaves `buildid == TargetBuildID`: no newer build is known, so nothing is stale. It logs at ERROR and boots. The "halt only when actually behind" rule falls out of the data rather than needing a special case.
+
+`ok` is a positive assertion, never a fallthrough. It requires the binary, bit 4, and two non-empty build ids that agree. Everything left over — a truncated manifest, one Steam never marked fully installed, one with no build ids — is `unverifiable`, which is the one verdict that boots while not being healthy.
+
+That split is deliberate. An unreadable manifest is not evidence the build is behind, so halting on it would turn ambiguity into an outage; but it does mean the ability to detect being behind has been lost, which is exactly the kind of silence this change exists to end. The report's `booted` field already carries that second axis, so the panel can warn without the server going down. Treating this case as `ok` is what made a corrupt manifest boot stale in silence.
 
 ## Where the check runs
 
@@ -56,6 +61,8 @@ Stamp: `/home/steam/Zomboid/.update_repair_attempt`, holding the `TargetBuildID`
 | absent, or holds a different target | wipe via existing `clean_incomplete_install`, re-run the retry loop, write stamp |
 | holds the current target | a clean reinstall already failed for this build — halt with the real diagnosis |
 | any `ok` boot | cleared |
+
+The stamp and the comparison must use the *same* fallback for a missing `TargetBuildID`. `update_required` needs only the `StateFlags` bit, so a manifest with no target build can still reach `manifest_retired`; if the write stores a placeholder that the comparison then refuses to match, the stamp is inert and every restart wipes and re-downloads ~7.2GB forever.
 
 Keying on the build id rather than a boolean means a new Steam build earns a fresh repair attempt instead of being locked out by a stale stamp. `clean_incomplete_install` touches `BASE_GAME_DIR` only; saves live in `/home/steam/Zomboid` and are untouched.
 
