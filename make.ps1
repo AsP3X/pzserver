@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Zomboid Manager - PowerShell equivalent of Makefile for Windows.
@@ -280,6 +280,48 @@ function Do-Test {
         docker exec -T pz-db psql -U zomboid -c "CREATE DATABASE zomboid_test OWNER zomboid" 2>$null
     }
     Invoke-Compose @("exec", "-e", "APP_ENV=testing", "-e", "APP_CONFIG_CACHE=/tmp/laravel-test-config.php", "-e", "DB_CONNECTION=pgsql", "-e", "DB_DATABASE=zomboid_test", "app", "php", "artisan", "test", "--compact")
+}
+
+# Host-side shell suites. No containers needed: they run the real scripts
+# against throwaway trees, so they work before the stack is even up.
+function Do-TestGameServer {
+    # Resolve Git Bash deliberately. A bare "bash" on PATH is usually WSL's
+    # shim in System32, which cannot see this working directory and fails with
+    # a disk-attach error before any test runs.
+    $bash = $null
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($git) {
+        $gitRoot = Split-Path (Split-Path $git.Source -Parent) -Parent
+        $candidate = Join-Path (Join-Path $gitRoot "bin") "bash.exe"
+        if (Test-Path $candidate) { $bash = $candidate }
+    }
+    if (-not $bash) {
+        foreach ($candidate in @("C:/Program Files/Git/bin/bash.exe", "C:/Program Files (x86)/Git/bin/bash.exe")) {
+            if (Test-Path $candidate) { $bash = $candidate; break }
+        }
+    }
+    if (-not $bash) {
+        Write-Host "Git Bash not found - install Git for Windows to run the shell suites" -ForegroundColor Red
+        return
+    }
+
+    $failed = $false
+    foreach ($suite in @("configure-server.test.sh", "steam-update-check.test.sh")) {
+        Write-Host "Running $suite" -ForegroundColor Cyan
+        & $bash "game-server/tests/$suite"
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
+    }
+
+    if (Get-Command luajit -ErrorAction SilentlyContinue) {
+        foreach ($suite in @("kr-vitals", "kr-enrol", "kr-report", "kr-console", "kr-desk")) {
+            & luajit "game-server/tests/$suite.test.lua"
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+        }
+    } else {
+        Write-Host "SKIP: Lua suites need luajit (PZ runs Lua 5.1)" -ForegroundColor Yellow
+    }
+
+    if ($failed) { exit 1 }
 }
 
 function Do-Exec {
@@ -577,6 +619,7 @@ function Do-Help {
     Write-Host "  App:" -ForegroundColor White
     Write-Host '    .\make.ps1 migrate          Run database migrations'
     Write-Host '    .\make.ps1 test             Run tests'
+    Write-Host '    .\make.ps1 test-game-server Run the host-side shell suites'
     Write-Host '    .\make.ps1 exec "CMD"       Run command in app container'
     Write-Host ""
     Write-Host "  Other:" -ForegroundColor White
@@ -602,6 +645,7 @@ switch ($Command) {
     "pull"           { Do-Pull }
     "migrate"        { Do-Migrate }
     "test"           { Do-Test }
+    "test-game-server" { Do-TestGameServer }
     "exec"           { Do-Exec }
     "arch"           { Do-Arch }
     "info"           { Do-Info }
