@@ -29,6 +29,8 @@ APP_ID=380870
 CONTENT_DEPOT=380871
 MANIFEST="${BASE_GAME_DIR}/steamapps/appmanifest_${APP_ID}.acf"
 REPORT="${PZ_SHARED_DIR}/.update_status"
+STAMP="${PZ_SHARED_DIR}/.update_repair_attempt"
+FORCE_FLAG="${PZ_SHARED_DIR}/.force_update"
 
 # --- reading the manifest -------------------------------------------------
 
@@ -161,19 +163,56 @@ if [ "$verdict" = "behind" ] || [ "$verdict" = "update_required" ]; then
     fi
 fi
 
+stamp_target=""
+if [ -f "$STAMP" ]; then
+    stamp_target="$(tr -d '[:space:]' < "$STAMP")"
+fi
+
 case "$verdict" in
-    ok|unknown)       booted=true; rc=0 ;;
-    manifest_retired) rc=1 ;;
-    *)                rc=2 ;;
+    ok)
+        # Whatever went wrong is over. Let the next failure repair again.
+        rm -f "$STAMP" 2>/dev/null || true
+        booted=true
+        rc=0
+        ;;
+    unknown)
+        booted=true
+        rc=0
+        ;;
+    manifest_retired)
+        if [ -n "$target_build" ] && [ "$stamp_target" = "$target_build" ]; then
+            diagnosis="${diagnosis} A clean reinstall was already attempted for build ${target_build} and did not fix it, so this needs a human."
+            rc=2
+        else
+            mkdir -p "$PZ_SHARED_DIR" 2>/dev/null || true
+            printf '%s' "${target_build:-unknown}" > "$STAMP"
+            # The entrypoint already knows how to act on this: wipe the install
+            # dir (saves live elsewhere) and re-run SteamCMD with retries.
+            date +%s > "$FORCE_FLAG"
+            chmod 0666 "$STAMP" "$FORCE_FLAG" 2>/dev/null || true
+            auto_repaired=true
+            diagnosis="${diagnosis} A clean reinstall has been queued and the container is restarting to run it."
+            rc=1
+        fi
+        ;;
+    *)
+        rc=2
+        ;;
 esac
 
 write_report
 
 if [ "$rc" -eq 0 ]; then
     echo "[update-check] ${verdict}: ${diagnosis}"
+elif [ "$rc" -eq 1 ]; then
+    echo "### The game install cannot be updated in place."
+    echo "### ${diagnosis}"
 else
     echo "### ERROR: the game server install is not usable."
     echo "### ${diagnosis}"
+    echo "### Installed build: ${installed_build:-unknown}  Steam expects: ${target_build:-unknown}"
+    echo "### To reinstall by hand, on the host:"
+    echo "###   docker stop pz-game-server && rm -rf data/server/* && docker start pz-game-server"
 fi
 
 exit "$rc"
