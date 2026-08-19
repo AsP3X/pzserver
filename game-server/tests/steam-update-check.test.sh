@@ -128,6 +128,24 @@ assert_verdict "missing binary halts" \
 assert_verdict "no manifest yet boots" \
     "$(make_install nomanifest 0 0)" unknown 0
 
+# A content log carrying the retired-manifest signature turns a generic
+# "behind" into the specific diagnosis. Only a clean reinstall fixes this one,
+# so saying "No connection" sends the operator down the wrong path.
+retired_log="$(mktemp)"
+cat > "$retired_log" <<'LOG'
+[2026-08-18 18:32:04] AppID 380870 state changed : Update Required,
+[2026-08-18 18:32:05] AppID 380870 update changed : Manifest not available,
+[2026-08-18 18:32:05] Failed to get manifest request code for depot 380871, manifest 4041863939978451180, result 'Access Denied'
+LOG
+
+STEAMCMD_LOG="$retired_log" assert_verdict "retired manifest is named, not guessed" \
+    "$(make_install 6 24775771 24801442)" manifest_retired 1
+
+# The same log must not change a healthy verdict. A stale log file from an old
+# failure sits around indefinitely, so it can only ever refine, never originate.
+STEAMCMD_LOG="$retired_log" assert_verdict "stale log cannot condemn a healthy install" \
+    "$(make_install 4 24775771 24775771)" ok 0
+
 echo
 echo "${pass} passed, ${fail} failed"
 [ "$fail" -eq 0 ]

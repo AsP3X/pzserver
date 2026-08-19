@@ -48,6 +48,32 @@ pinned_manifest() {
     ' "$MANIFEST"
 }
 
+# Newest content_log.txt we can find. SteamCMD's install location varies by
+# image, so try the resolved binary first and then the known fallbacks.
+newest_content_log() {
+    if [ -n "${STEAMCMD_LOG:-}" ]; then
+        [ -f "$STEAMCMD_LOG" ] && printf '%s' "$STEAMCMD_LOG"
+        return 0
+    fi
+
+    local candidates=() resolved newest="" candidate
+    resolved="$(command -v steamcmd.sh 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        candidates+=("$(dirname "$resolved")/logs/content_log.txt")
+    fi
+    candidates+=(/home/root/.local/steamcmd/logs/content_log.txt)
+    candidates+=(/home/steam/Steam/logs/content_log.txt)
+
+    for candidate in "${candidates[@]}"; do
+        [ -f "$candidate" ] || continue
+        if [ -z "$newest" ] || [ "$candidate" -nt "$newest" ]; then
+            newest="$candidate"
+        fi
+    done
+
+    printf '%s' "$newest"
+}
+
 game_binary_present() {
     [ -e "$BASE_GAME_DIR/ProjectZomboid64" ] || [ -e "$BASE_GAME_DIR/ProjectZomboid64.real" ]
 }
@@ -124,9 +150,21 @@ else
     diagnosis="Installed build ${installed_build:-unknown} matches what Steam expects."
 fi
 
+# Refinement only. A log file outlives the failure that wrote it, so it may
+# sharpen a verdict that is already bad but must never create one.
+if [ "$verdict" = "behind" ] || [ "$verdict" = "update_required" ]; then
+    content_log="$(newest_content_log)"
+    if [ -n "$content_log" ] \
+        && grep -qE "Failed to get manifest request code" "$content_log" 2>/dev/null; then
+        verdict="manifest_retired"
+        diagnosis="Steam retired the depot manifest this install is pinned to (depot ${CONTENT_DEPOT}, manifest ${pinned:-unknown}). Retrying, clearing the cache and upgrading SteamCMD all fail against this - only a clean reinstall of the game directory recovers it."
+    fi
+fi
+
 case "$verdict" in
-    ok|unknown) booted=true; rc=0 ;;
-    *)          rc=2 ;;
+    ok|unknown)       booted=true; rc=0 ;;
+    manifest_retired) rc=1 ;;
+    *)                rc=2 ;;
 esac
 
 write_report
