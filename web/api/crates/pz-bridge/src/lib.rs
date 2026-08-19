@@ -21,6 +21,7 @@ pub mod lua;
 pub mod player_file;
 pub mod respawn;
 pub mod steam;
+pub mod steam_update;
 pub mod vitals;
 pub mod whitelist;
 pub mod workshop;
@@ -34,6 +35,7 @@ pub use deposit::{
 };
 pub use docker::{ContainerState, ContainerStatus, DockerClient, DockerError, parse_docker_logs};
 pub use ini::ServerIni;
+pub use steam_update::{PublicUpdate, UpdateReport, UpdateVerdict};
 pub use inventory::{InventoryReader, InventorySnapshot};
 pub use links::{LinkChannel, LinkRequest, LinkResult, LinkResults};
 pub use tickets::{
