@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
-use pz_bridge::{InventoryReader, ServerIni};
+use pz_bridge::{InventoryReader, ServerIni, UpdateReport};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -148,6 +148,14 @@ pub async fn steam_branch(state: &AppState) -> String {
         .filter(|value| !value.is_empty())
         .or_else(|| state.config.steam_branch.clone())
         .unwrap_or_else(|| "public".to_owned())
+}
+
+/// What the last boot concluded about the install.
+///
+/// Written by the game server's own entrypoint check, not by us — so it is
+/// still readable when the game container is down or deliberately halted.
+pub async fn update_report(state: &AppState) -> UpdateReport {
+    UpdateReport::read(state.config.data_path.join(".update_status")).await
 }
 
 /// Reinstall the game from Steam and bring the server back up.

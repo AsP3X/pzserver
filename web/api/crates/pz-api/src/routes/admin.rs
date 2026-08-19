@@ -584,6 +584,8 @@ async fn set_player_password(
 struct UpdateStatus {
     branch: String,
     branches: Vec<String>,
+    /// Staff-only: carries the diagnosis, which can name paths.
+    report: pz_bridge::UpdateReport,
 }
 
 async fn update_status(
@@ -593,6 +595,7 @@ async fn update_status(
     Ok(Json(UpdateStatus {
         branch: admin::steam_branch(&state).await,
         branches: admin::STEAM_BRANCHES.iter().map(|s| (*s).to_owned()).collect(),
+        report: admin::update_report(&state).await,
     }))
 }
 
