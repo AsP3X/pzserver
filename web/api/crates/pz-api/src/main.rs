@@ -43,7 +43,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     bootstrap_admin(&db, &config).await;
 
     let state = AppState::new(db, config);
-    report_backup_directory(&state);
+    report_data_directories(&state);
     let tasks = services::tasks::spawn_all(state.clone());
 
     let listener = tokio::net::TcpListener::bind(state.config.bind).await?;
@@ -78,23 +78,38 @@ async fn bootstrap_admin(db: &sqlx::PgPool, config: &Config) {
     }
 }
 
-/// Say at boot whether world archives can actually be written.
+/// Say at boot whether the shared bind mounts can actually be written.
 ///
-/// This container cannot repair the directory itself — read-only rootfs, uid
-/// 10001, every capability dropped — so this log line and the failing
-/// `/api/health` are the whole remedy. The `backups-init` service in
-/// `docker-compose.web.yml` is what normally keeps the mode right.
-fn report_backup_directory(state: &AppState) {
-    let path = state.config.backup_path.display();
-
+/// This container can repair neither of them — read-only rootfs, uid 10001,
+/// every capability dropped — so these lines and the failing `/api/health` are
+/// the whole remedy. The `data-init` service in `docker-compose.web.yml` is
+/// what normally keeps the modes right.
+fn report_data_directories(state: &AppState) {
     match state.backups_error.as_deref() {
-        None => tracing::info!(%path, "backup directory is writable"),
+        None => tracing::info!(
+            path = %state.config.backup_path.display(),
+            "backup directory is writable"
+        ),
         Some(error) => tracing::error!(
-            %path,
+            path = %state.config.backup_path.display(),
             %error,
             "backup directory is NOT writable — scheduled backups and deletes \
              will fail. Fix the mode on the host (chmod 0777) and restart this \
              container."
+        ),
+    }
+
+    match state.lua_bridge_error.as_deref() {
+        None => tracing::info!(
+            path = %state.config.lua_bridge_path.display(),
+            "Lua bridge directory is writable"
+        ),
+        Some(error) => tracing::error!(
+            path = %state.config.lua_bridge_path.display(),
+            %error,
+            "Lua bridge directory is NOT writable — account links, deliveries, \
+             deposits, inventory exports and tickets will fail. Fix the mode on \
+             the host (chmod 0777) and restart this container."
         ),
     }
 }

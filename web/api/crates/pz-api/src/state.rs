@@ -7,6 +7,7 @@ use sqlx::PgPool;
 
 use crate::config::Config;
 use crate::services::backups::{self, JobLock};
+use crate::services::datadirs;
 use crate::services::rate_limit::AttemptLimiter;
 use crate::services::status::StatusService;
 
@@ -28,6 +29,10 @@ pub struct AppState {
     /// reads this, so a bad bind-mount mode surfaces in `docker ps` instead of
     /// as backups that quietly stopped happening.
     pub backups_error: Option<Arc<str>>,
+    /// Why the Lua bridge directory is unusable, if it is. The same story as
+    /// `backups_error`: uid 10001 writes the account-link, delivery, deposit,
+    /// export and ticket files there and cannot repair the mount itself.
+    pub lua_bridge_error: Option<Arc<str>>,
 }
 
 impl AppState {
@@ -63,7 +68,10 @@ impl AppState {
         // Probed once, at start-up. The mode on a bind mount does not change
         // under us, and re-probing per request would put a filesystem write
         // behind an unauthenticated endpoint.
-        let backups_error = backups::probe_writable(&config.backup_path)
+        let backups_error = datadirs::probe_writable(&config.backup_path)
+            .err()
+            .map(Arc::from);
+        let lua_bridge_error = datadirs::probe_writable(&config.lua_bridge_path)
             .err()
             .map(Arc::from);
 
@@ -76,6 +84,7 @@ impl AppState {
             bridge,
             backup_job: backups::new_job_lock(),
             backups_error,
+            lua_bridge_error,
         }
     }
 }

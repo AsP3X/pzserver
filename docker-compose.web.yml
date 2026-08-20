@@ -35,49 +35,66 @@ services:
       - pzserver-internal
 
   # ---------------------------------------------------------------------------
-  # One-shot: make the archive directory writable before the API starts.
+  # One-shot: make the shared bind mounts writable before the API starts.
   #
-  # `data/backups` is a host bind mount, and web-api cannot fix its own access
-  # to it — that container runs read-only as uid 10001 with every capability
-  # dropped. Two things used to guarantee the mode and both are gone: the
-  # Laravel entrypoint's `chmod 777` (parked along with the `app` service in
-  # c318e99) and `pz_ensure_data_dirs`, which only the shell deploy path calls.
-  # In August 2026 the directory drifted to 775 root:www-data and every
-  # scheduled backup failed for two days, deletes included.
+  # Both directories are host bind mounts shared with the game container, and
+  # web-api can fix its access to neither — it runs read-only as uid 10001 with
+  # every capability dropped. Everything that used to guarantee these modes is
+  # gone: the Laravel entrypoint's chmod and the zomboid:heal-lua-bridge
+  # schedule were both parked along with the `app` service in c318e99, and
+  # pz_ensure_data_dirs only runs on the shell deploy path. `mkdir -p` under the
+  # usual umask leaves a directory 755, so a Linux `make up` hands the API two
+  # mounts it cannot write.
   #
-  # This runs on every `up`, so it repairs drift rather than only seeding a new
+  # data/backups drifted exactly this way in August 2026 and every scheduled
+  # backup failed for two days, deletes included. data/zomboid/Lua carries the
+  # same exposure: uid 10001 writes the account-link, delivery, deposit, export
+  # and ticket files there.
+  #
+  # Only the directory mode is set, never the files inside. Neither writer needs
+  # that: the game container runs as root, which ignores file modes entirely,
+  # and web-api only ever replaces a bridge file by renaming a temporary over
+  # it, which the directory permits rather than the file. (The recursive 0666 in
+  # the parked entrypoint was for the PHP stack, which wrote as www-data through
+  # plain file opens.) Keep these unsticky for the same reason — 1777 would
+  # block the cross-uid rename.
+  #
+  # Runs on every `up`, so it repairs drift rather than only seeding a new
   # install, and `service_completed_successfully` keeps it ahead of web-api's
-  # own start-up writability probe.
+  # own start-up writability probes.
   # ---------------------------------------------------------------------------
-  backups-init:
+  data-init:
     image: busybox:1.37
-    container_name: pz-backups-init
-    # Root on purpose: the directory it has to chmod is usually root-owned.
+    container_name: pz-data-init
+    # Root on purpose: the directories it has to chmod are usually root-owned.
     user: "0:0"
     # One-shot. Without this the exited container is restarted forever.
     restart: "no"
-    # Exits 0 even when it cannot fix the mode, deliberately. Blocking web-api
-    # from starting would take the whole site down over a backup directory;
-    # web-api's own probe is what raises the alarm, by failing its healthcheck
+    # Exits 0 even when it cannot fix a mode, deliberately. Blocking web-api
+    # from starting would take the whole site down over a data directory;
+    # web-api's own probes are what raise the alarm, by failing its healthcheck
     # while carrying on serving.
     command:
       - sh
       - -c
       - |
-        chmod 0777 /backups 2>/dev/null || true
-        mode=$$(stat -c '%a' /backups 2>/dev/null || echo '?')
-        case "$$mode" in
-          777|1777)
-            echo "[backups-init] /backups is $$mode - uid 10001 can write there"
-            ;;
-          *)
-            echo "[backups-init] WARNING: /backups is $$mode, not 777 - uid 10001"
-            echo "[backups-init] may not be able to write there. web-api will"
-            echo "[backups-init] report unhealthy if it cannot."
-            ;;
-        esac
+        for dir in /backups /lua-bridge; do
+          chmod 0777 "$$dir" 2>/dev/null || true
+          mode=$$(stat -c '%a' "$$dir" 2>/dev/null || echo '?')
+          case "$$mode" in
+            777|1777)
+              echo "[data-init] $$dir is $$mode - uid 10001 can write there"
+              ;;
+            *)
+              echo "[data-init] WARNING: $$dir is $$mode, not 777 - uid 10001"
+              echo "[data-init] may not be able to write there. web-api will"
+              echo "[data-init] report unhealthy if it cannot."
+              ;;
+          esac
+        done
     volumes:
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
+      - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
     # Nothing to talk to; staying off both networks keeps it out of the way.
     network_mode: none
 
@@ -96,8 +113,8 @@ services:
       web-db:
         condition: service_healthy
       # Ordering only: it exits 0 either way. This just guarantees the
-      # chmod has happened before the API probes the directory.
-      backups-init:
+      # chmods have happened before the API probes those directories.
+      data-init:
         condition: service_completed_successfully
     volumes:
       # The mod's JSON exports, plus the account-link channel. Writable, because
@@ -105,9 +122,10 @@ services:
       # account_link_results.json back for the mod to read. Everything else here
       # is still observe-only.
       #
-      # The game container writes this directory as its own uid, so entries need
-      # to stay world-writable — the PHP stack's zomboid:heal-lua-bridge is what
-      # keeps them that way.
+      # The directory has to stay writable by uid 10001; data-init above is what
+      # keeps it that way. The file modes inside do not matter — the game writes
+      # as root, and everything written from here lands by renaming a temporary
+      # over the target, which the directory permits rather than the file.
       - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
       # server.ini, for map name and player cap.
       # Writable: staff edit server.ini from the new admin panel.

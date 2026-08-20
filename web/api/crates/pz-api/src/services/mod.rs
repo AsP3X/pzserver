@@ -6,6 +6,7 @@ pub mod auth;
 pub mod automations;
 pub mod backups;
 pub mod character;
+pub mod datadirs;
 pub mod economy;
 pub mod i18n;
 pub mod news;

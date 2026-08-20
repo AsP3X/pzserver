@@ -25,6 +25,7 @@ struct DetailedHealth {
     version: &'static str,
     database: Dependency,
     backups: Dependency,
+    lua_bridge: Dependency,
     game_server: GameServerHealth,
 }
 
@@ -46,14 +47,14 @@ struct GameServerHealth {
 /// Public liveness probe: says nothing about the internals beyond whether this
 /// container can do the job it was started for.
 ///
-/// This is the URL the image's HEALTHCHECK curls, so the 503 is the point. An
-/// archive directory this process cannot write is not something it can recover
+/// This is the URL the image's HEALTHCHECK curls, so the 503 is the point. A
+/// shared bind mount this process cannot write is not something it can recover
 /// from on its own, and serving on quietly is how two days of failed backups
 /// went unnoticed in August 2026. The site stays up either way: Docker marks
 /// the container unhealthy without stopping it, and no proxy in front of this
 /// routes on health.
 async fn health(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
-    if state.backups_error.is_some() {
+    if state.backups_error.is_some() || state.lua_bridge_error.is_some() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(Health { status: "degraded" }),
@@ -79,25 +80,27 @@ async fn detailed(State(state): State<AppState>) -> Json<DetailedHealth> {
         },
     };
 
-    // Public-safe, like `update` below: whether it works, never the path or the
-    // OS error behind it. The diagnosis goes to the container log at boot.
+    // Public-safe, like `update` below: whether they work, never the path or
+    // the OS error behind it. The diagnosis goes to the container log at boot.
     let backups = Dependency {
         reachable: state.backups_error.is_none(),
+        error: None,
+    };
+    let lua_bridge = Dependency {
+        reachable: state.lua_bridge_error.is_none(),
         error: None,
     };
 
     let server_status = state.status.current().await;
     let update_healthy = server_status.update.healthy;
+    let healthy = database.reachable && backups.reachable && lua_bridge.reachable && update_healthy;
 
     Json(DetailedHealth {
-        status: if database.reachable && backups.reachable && update_healthy {
-            "ok"
-        } else {
-            "degraded"
-        },
+        status: if healthy { "ok" } else { "degraded" },
         version: env!("CARGO_PKG_VERSION"),
         database,
         backups,
+        lua_bridge,
         game_server: GameServerHealth {
             state: server_status.state,
             player_count: server_status.player_count,
