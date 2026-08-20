@@ -1,18 +1,21 @@
 /**
- * Official isometric DZI tiles from map.projectzomboid.com.
+ * Official isometric DZI tiles, now served by the community pzmap.
  *
  * Same pyramid the public map serves: pzmap2dzi paints Knox County once,
  * Deep Zoom slices it into 2048px JPEGs, the browser only fetches the
  * window you can see. Overlays stay in game coordinates on top.
  *
- * Numbers match the old panel's `proxy_dzi` so a pin at (x, y) lands on
- * the same roof as it does on map.projectzomboid.com.
+ * The Indie Stone took the map off their servers on 7 August 2026 and
+ * map.projectzomboid.com now 308s to the community successor. The render is
+ * the same one — same `42.20.0` build, same `base/layer0_files/{z}/{x}_{y}`
+ * shape — so the geometry below still holds; only the host and the dropped
+ * `/maps` path segment changed. `IsoTileCache` watches for that assumption
+ * breaking rather than trusting it: see `unreachable`.
  */
 
-export const ISO_TILE_HOST = 'https://map.projectzomboid.com'
-/** Current default on map.projectzomboid.com (Build 42.20). */
-export const ISO_TILE_URL =
-  'https://map.projectzomboid.com/maps/42.20.0/base/layer0_files/{z}/{x}_{y}.jpg'
+export const ISO_TILE_HOST = 'https://tiles.pzmap.org'
+/** Vanilla ground layer for the build the server runs (B42.20). */
+export const ISO_TILE_URL = `${ISO_TILE_HOST}/42.20.0/base/layer0_files/{z}/{x}_{y}.jpg`
 
 export const ISO_DZI = {
   width: 2_318_656,
@@ -27,6 +30,9 @@ export const ISO_DZI = {
 
 /** CSS pixels per DZI pixel when focusing a survivor — about a street. */
 export const DEFAULT_ISO_SCALE = 0.35
+
+/** How long a tile may hang before it counts as a failure. */
+const TILE_TIMEOUT_MS = 10_000
 
 /** Whole-county floor / close-up ceiling. */
 export const MIN_ISO_SCALE = 2 ** (ISO_DZI.minLevel - ISO_DZI.maxLevel)
@@ -222,8 +228,33 @@ export class IsoTileCache {
   private readonly listeners = new Set<() => void>()
   private readonly limit: number
 
+  /**
+   * Session totals, deliberately not reset by eviction: they are a verdict on
+   * the source, not on the tiles currently held.
+   */
+  private requested = 0
+  private loaded = 0
+  private failed = 0
+
   constructor(limit = 80) {
     this.limit = limit
+  }
+
+  /**
+   * The tile source is not answering.
+   *
+   * A tile that 404s or is blocked fires `onerror` and nothing else, so
+   * without this the canvas simply stays the empty-tile colour and the player
+   * is left staring at a black rectangle wondering what broke.
+   *
+   * The test is "every tile we asked for came back a failure", not a fixed
+   * count: zoomed out to the whole county the pyramid is one tile wide, so the
+   * window asks for two and no threshold above that could ever trip. Requiring
+   * nothing to have loaded all session keeps a single flaky tile from
+   * condemning a source that is plainly working.
+   */
+  get unreachable(): boolean {
+    return this.loaded === 0 && this.failed > 0 && this.failed >= this.requested
   }
 
   subscribe(listener: () => void): () => void {
@@ -274,17 +305,43 @@ export class IsoTileCache {
     image.referrerPolicy = 'no-referrer'
     this.entries.set(key, { status: 'loading', image })
     this.touch(key)
+    this.requested += 1
 
-    image.onload = () => {
-      const current = this.entries.get(key)
-      if (current?.status === 'loading') {
-        this.entries.set(key, { status: 'ready', image })
-        this.notify()
+    let settled = false
+    /**
+     * One outcome per request, whichever arrives first.
+     *
+     * A host that hangs rather than refusing is the nastiest case: no
+     * `onerror`, so without the timer the verdict never lands and the player
+     * watches an empty canvas for as long as the browser is willing to wait.
+     */
+    const settle = (ok: boolean) => {
+      if (settled) {
+        return
       }
+      settled = true
+      window.clearTimeout(timer)
+
+      if (ok) {
+        this.loaded += 1
+      } else {
+        this.failed += 1
+      }
+
+      // Only write back if this is still the entry we started: eviction may
+      // have dropped it and a later request may already own the key.
+      if (this.entries.get(key)?.status === 'loading') {
+        this.entries.set(key, ok ? { status: 'ready', image } : { status: 'missing' })
+      }
+
+      // Notify on failure as well as success, or nothing ever re-reads
+      // `unreachable` and the fallback never fires.
+      this.notify()
     }
-    image.onerror = () => {
-      this.entries.set(key, { status: 'missing' })
-    }
+
+    const timer = window.setTimeout(() => settle(false), TILE_TIMEOUT_MS)
+    image.onload = () => settle(true)
+    image.onerror = () => settle(false)
     image.src = tileUrl(tile.z, tile.x, tile.y)
   }
 

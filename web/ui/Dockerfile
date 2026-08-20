@@ -21,6 +21,9 @@ FROM nginxinc/nginx-unprivileged:1-alpine AS runtime
 
 COPY --from=builder /build/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Not under conf.d/: that whole directory is auto-included into `http`, where
+# these would be shadowed all over again. nginx.conf includes it explicitly.
+COPY security-headers.conf /etc/nginx/security-headers.conf
 
 EXPOSE 8080
 

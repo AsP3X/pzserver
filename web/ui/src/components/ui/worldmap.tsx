@@ -77,8 +77,22 @@ const DRAG_SLOP = 5
 const MODE_KEY = 'knox.map.basemap'
 const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
 
+/**
+ * Whether to offer the isometric basemap at all.
+ *
+ * Its tiles come from a host we do not run, which has already moved once: The
+ * Indie Stone took the map off their servers on 7 August 2026 and it now
+ * lives at tiles.pzmap.org. Turn this off to withdraw the mode entirely if
+ * that source goes away for good — the vector basemap needs nothing external
+ * and is what everyone falls back to meanwhile.
+ */
+const ISO_BASEMAP: boolean = true
+
 function readMode(): MapBasemap {
   if (typeof window === 'undefined') {
+    return 'vector'
+  }
+  if (!ISO_BASEMAP) {
     return 'vector'
   }
   return window.localStorage.getItem(MODE_KEY) === 'iso' ? 'iso' : 'vector'
@@ -148,6 +162,7 @@ export function WorldmapView({
     y: number
   } | null>(null)
   const [isoTick, setIsoTick] = useState(0)
+  const [isoFellBack, setIsoFellBack] = useState(false)
   const [paintHover, setPaintHover] = useState<{ x: number; y: number } | null>(null)
   const [draftRect, setDraftRect] = useState<MapRect | null>(null)
   const rectStart = useRef<{ x: number; y: number } | null>(null)
@@ -181,6 +196,25 @@ export function WorldmapView({
   }, [])
 
   useEffect(() => isoTiles.subscribe(() => setIsoTick((tick) => tick + 1)), [])
+
+  /**
+   * Leave iso the moment its tiles stop arriving.
+   *
+   * The source is a third-party host and has moved before. Sitting on a black
+   * canvas is the worst of the available outcomes, and a stored preference
+   * outlives the deploy that would otherwise fix it — so drop the preference
+   * as well, and say what happened rather than silently swapping the picture.
+   */
+  const isoUnreachable = mode === 'iso' && isoTiles.unreachable
+  useEffect(() => {
+    if (!isoUnreachable) {
+      return
+    }
+    modeRef.current = 'vector'
+    setMode('vector')
+    setIsoFellBack(true)
+    window.localStorage.removeItem(MODE_KEY)
+  }, [isoUnreachable])
 
   const bounds = map?.bounds ?? FALLBACK_BOUNDS
   const clamp = useCallback(
@@ -481,6 +515,7 @@ export function WorldmapView({
     if (next === mode) {
       return
     }
+    setIsoFellBack(false)
     modeRef.current = next
     window.localStorage.setItem(MODE_KEY, next)
     setMode(next)
@@ -502,7 +537,7 @@ export function WorldmapView({
     }
   }
 
-  const waitingForVector = mode === 'vector' && map === null && !failed
+  const waitingForVector = mode === 'vector' && map === null
 
   return (
     <div className={cn('relative overflow-hidden border border-fence bg-ash', className)}>
@@ -705,22 +740,25 @@ export function WorldmapView({
         </div>
       ) : null}
 
-      <div
-        className="absolute bottom-3 left-3 flex border border-fence-bright bg-void/85"
-        role="group"
-        aria-label={t('map.modes')}
-      >
-        <ModeButton
-          active={mode === 'iso'}
-          label={t('map.mode_iso')}
-          onClick={() => selectMode('iso')}
-        />
-        <ModeButton
-          active={mode === 'vector'}
-          label={t('map.mode_vector')}
-          onClick={() => selectMode('vector')}
-        />
-      </div>
+      {ISO_BASEMAP ? (
+        <div
+          className="absolute bottom-3 left-3 flex border border-fence-bright bg-void/85"
+          role="group"
+          aria-label={t('map.modes')}
+        >
+          <ModeButton
+            active={mode === 'iso'}
+            disabled={isoTiles.unreachable}
+            label={t('map.mode_iso')}
+            onClick={() => selectMode('iso')}
+          />
+          <ModeButton
+            active={mode === 'vector'}
+            label={t('map.mode_vector')}
+            onClick={() => selectMode('vector')}
+          />
+        </div>
+      ) : null}
 
       <div className="absolute top-3 right-3 flex flex-col gap-1">
         <Control label={t('map.zoom_in')} onClick={() => zoomAt(1.5)} icon={Plus} />
@@ -728,19 +766,24 @@ export function WorldmapView({
         <Control label={t('map.recentre')} onClick={reset} icon={Maximize2} />
       </div>
 
-      <p className="pointer-events-none absolute right-3 bottom-3 max-w-[min(24rem,70%)] text-right font-mono text-[0.625rem] leading-snug text-dust">
-        {mode === 'iso' ? t('map.attribution_iso') : t('map.attribution')}
-      </p>
+      <div className="pointer-events-none absolute right-3 bottom-3 max-w-[min(24rem,70%)] text-right font-mono text-[0.625rem] leading-snug">
+        {isoFellBack ? <p className="text-hazard">{t('map.iso_unavailable')}</p> : null}
+        <p className="text-dust">
+          {mode === 'iso' ? t('map.attribution_iso') : t('map.attribution')}
+        </p>
+      </div>
     </div>
   )
 }
 
 function ModeButton({
   active,
+  disabled = false,
   label,
   onClick,
 }: {
   active: boolean
+  disabled?: boolean
   label: string
   onClick: () => void
 }) {
@@ -748,10 +791,12 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-pressed={active}
       className={cn(
         'flex items-center gap-1.5 px-2.5 py-1.5 font-mono text-[0.6875rem] tracking-widest uppercase',
         active ? 'bg-hazard-soft text-hazard' : 'text-dust hover:text-bone',
+        disabled ? 'cursor-not-allowed opacity-40 hover:text-dust' : '',
       )}
     >
       <BoxSelect aria-hidden="true" className="size-3" />
