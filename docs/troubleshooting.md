@@ -69,6 +69,71 @@ curl -fsS --max-time 10 https://api.steampowered.com/ISteamWebAPIUtil/GetServerI
 
 The long **Checking for available updates / Verifying installation** phase is SteamCMD on every container start (AMD64 image). The fatal line is **Failed to connect to Steam servers** after the Java server has already begun.
 
+### What a 2026-08-20 investigation established
+
+The failure is **intermittent and self-resolving**, not a broken configuration. Across
+`data/zomboid/Logs/logs_*`, roughly one boot in four is affected. Failures arrive in
+streaks — the worst was eleven consecutive on 2026-08-14, about an hour — and then
+recover on their own with no intervention. Failed boots leave only a `DebugLog`
+(~9KB); healthy ones also write `admin`/`chat`/`connections` logs and reach 300KB+.
+
+The startup sequence is identical whether it succeeds or fails, including a ~90 second
+gap between `SteamUtils initialised successfully` and the login attempt. Then:
+
+```text
+06:19:30.832  Waiting for response from Steam servers.
+06:19:50.160  Failed to connect to Steam servers.      <- fixed ~19.3s timeout
+```
+
+**Ruled out, so nobody re-investigates:**
+
+| Suspected | Evidence against |
+|---|---|
+| Ports or DNS blocked | Steam CM servers reachable over TCP *from inside the container*, tested during a live failure |
+| Configuration | Identical between success and failure; `server.ini` exposes no Steam port settings |
+| Bind IP / interface ordering | One container instance produced both outcomes with the same `ip.txt` |
+| A stale Steam session from the previous run | Two successes one minute apart (08-14 20:14, 20:15); a failure six hours after the last success (08-15) |
+| Container networking | The same probe from the host behaves identically |
+
+SteamCMD's own *client* login succeeds about 90 seconds before the game server's
+*game-server* login fails, in the same boot — so general Steam reachability is fine.
+What remains is transient unavailability of Steam's game-server login, which cannot be
+observed from this side. Restarting is the remedy, and waiting works equally well.
+
+### Two known hazards found during that investigation (not fixed)
+
+**1. `BIND_IP` can land on the network with no outbound route.** The base image picks
+the first address `hostname -I` reports:
+
+```bash
+BIND_IP=($(hostname -I)); BIND_IP="${BIND_IP[0]}"
+```
+
+The game container joins both `proxy-network` and `pzserver-internal`, and the latter is
+declared `internal: true`. Binding to it cannot reach Steam at all:
+
+```text
+bound 172.19.0.2  -> Steam CM  OK          (proxy-network)
+bound 172.18.0.5  -> Steam CM  FAIL        (pzserver-internal, no egress)
+```
+
+Docker does not guarantee interface ordering for a container on several networks, so
+each **recreate** is effectively a coin flip. If a server can never reach Steam across
+many restarts, check which address it chose:
+
+```bash
+cat data/zomboid/ip.txt
+```
+
+A `172.18.x.x` value there means every Steam attempt will fail until the container is
+recreated onto the routable interface. Restarting alone will not change it.
+
+**2. Each failed attempt costs about six minutes.** The entrypoint writes
+`app_update 380870 validate`, so every boot re-verifies all 7.2GB before the game
+starts. That is what turns a brief Steam blip into an hour of downtime. The boot-time
+manifest check (`game-server/steam-update-check.sh`) now detects a bad install directly,
+so validating on every routine boot buys less than it used to.
+
 ## Can't connect in-game
 
 1. Check your public IP: `make info`
