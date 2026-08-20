@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { LogOut, Menu, PanelLeftClose, PanelLeftOpen, Skull, X } from 'lucide-react'
 
@@ -7,7 +7,7 @@ import { LocaleSwitch } from '@/components/layout/locale-switch'
 import { cn } from '@/lib/cn'
 import { useCurrentUser, useLogout } from '@/lib/auth'
 import { useTranslation } from '@/i18n/use-translation'
-import type { NavGroup } from '@/lib/navigation'
+import { activeNavItem, type NavGroup } from '@/lib/navigation'
 
 interface AppShellProps {
   /** Which surface this is — shown beside the wordmark. */
@@ -119,6 +119,8 @@ export function AppShell({ surface, groups, children }: AppShellProps) {
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  // One winner for the whole sidebar, rather than each link deciding alone.
+  const activeTo = useMemo(() => activeNavItem(pathname, groups), [groups, pathname])
 
   const expanded = !collapsed || peek
   // Only a hover-opened rail floats; a pinned one owns its space.
@@ -423,22 +425,20 @@ export function AppShell({ surface, groups, children }: AppShellProps) {
                       ) : (
                         <Link
                           to={item.to}
-                          // The section roots would otherwise light up for every
-                          // page beneath them.
-                          activeOptions={{ exact: item.to === '/me' || item.to === '/admin' }}
+                          // Not the router's own active matching: it decides per
+                          // link, which lights up an entry and its ancestor both.
+                          // `cn` merges, so the active border and colour replace
+                          // the inactive ones instead of fighting over CSS order.
+                          aria-current={item.to === activeTo ? 'page' : undefined}
                           onMouseEnter={(event) => showTip(t(item.label), event.currentTarget)}
                           onFocus={(event) => showTip(t(item.label), event.currentTarget)}
                           onBlur={hideTip}
-                          // Only the differences go in active/inactive props: the
-                          // router concatenates them onto className rather than
-                          // merging, so repeating a utility here would leave two
-                          // conflicting classes fighting over CSS order.
-                          className="flex w-72 items-center gap-2.5 border-l-2 py-1.5 pr-3 pl-[1.625rem] text-sm transition-colors"
-                          inactiveProps={{
-                            className:
-                              'border-transparent text-smoke hover:bg-ash-raised hover:text-bone',
-                          }}
-                          activeProps={{ className: 'border-hazard bg-ash-raised text-bone' }}
+                          className={cn(
+                            'flex w-72 items-center gap-2.5 border-l-2 py-1.5 pr-3 pl-[1.625rem] text-sm transition-colors',
+                            item.to === activeTo
+                              ? 'border-hazard bg-ash-raised text-bone'
+                              : 'border-transparent text-smoke hover:bg-ash-raised hover:text-bone',
+                          )}
                         >
                           <item.icon
                             aria-hidden="true"

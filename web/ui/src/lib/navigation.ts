@@ -180,6 +180,41 @@ export const ADMIN_NAV: NavGroup[] = [
   },
 ]
 
+/**
+ * Which nav entry owns a path, or null if none does.
+ *
+ * A link is a candidate when the path is at or beneath it, and the longest
+ * candidate wins. Matching each link on its own instead lights up every
+ * ancestor: `/admin/players` is a prefix of `/admin/players/map`, so standing
+ * on the player map highlighted both it and Players.
+ *
+ * Longest-match covers the section roots for free — `/admin` stops claiming
+ * every page beneath it — so no entry needs marking as exact, and a future
+ * nested pair cannot reintroduce the bug by being added to the arrays above.
+ *
+ * The boundary check matters: a bare `startsWith` would let `/admin/shop` claim
+ * a sibling like `/admin/shop-promotions`.
+ */
+export function activeNavItem(pathname: string, groups: NavGroup[]): string | null {
+  let best: string | null = null
+
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (item.planned) {
+        continue
+      }
+      if (pathname !== item.to && !pathname.startsWith(`${item.to}/`)) {
+        continue
+      }
+      if (best === null || item.to.length > best.length) {
+        best = item.to
+      }
+    }
+  }
+
+  return best
+}
+
 /** Roles allowed into `/admin`. */
 export const ADMIN_ROLES = ['admin', 'super_admin', 'moderator'] as const
 
