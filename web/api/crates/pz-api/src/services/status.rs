@@ -14,7 +14,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use pz_bridge::{ContainerState, ContainerStatus, DockerClient, LuaBridge, ServerIni};
+use pz_bridge::{
+    ContainerState, ContainerStatus, DockerClient, LuaBridge, PublicUpdate, ServerIni,
+    UpdateReport,
+};
 use pz_rcon::RconConnection;
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -53,11 +56,13 @@ pub struct ServerStatus {
     pub map: Option<String>,
     pub uptime_seconds: Option<u64>,
     pub data_source: DataSource,
+    /// What the last boot concluded about the game install. Public-safe.
+    pub update: PublicUpdate,
     pub checked_at: DateTime<Utc>,
 }
 
 impl ServerStatus {
-    fn offline(container: ContainerState) -> Self {
+    fn offline(container: ContainerState, update: PublicUpdate) -> Self {
         Self {
             state: GameState::Offline,
             online: false,
@@ -68,6 +73,7 @@ impl ServerStatus {
             map: None,
             uptime_seconds: None,
             data_source: DataSource::None,
+            update,
             checked_at: Utc::now(),
         }
     }
@@ -117,6 +123,12 @@ impl StatusService {
     }
 
     async fn resolve(&self) -> ServerStatus {
+        // Read first: a container that never started is precisely the case
+        // where the operator needs to know the install is the reason.
+        let update = UpdateReport::read(self.config.data_path.join(".update_status"))
+            .await
+            .public();
+
         let container = match self.docker.status().await {
             Ok(status) => status,
             Err(error) => {
@@ -128,7 +140,7 @@ impl StatusService {
         };
 
         if !container.running {
-            return ServerStatus::offline(container.state);
+            return ServerStatus::offline(container.state, update);
         }
 
         let (players, data_source) = self.read_players().await;
@@ -161,6 +173,7 @@ impl StatusService {
             map: ini.get_non_empty("Map").map(str::to_owned),
             uptime_seconds: container.uptime().map(|uptime| uptime.as_secs()),
             data_source,
+            update,
             checked_at: Utc::now(),
         }
     }
@@ -231,7 +244,7 @@ mod tests {
 
     #[test]
     fn an_offline_status_reports_no_players() {
-        let status = ServerStatus::offline(ContainerState::Exited);
+        let status = ServerStatus::offline(ContainerState::Exited, PublicUpdate::default());
 
         assert_eq!(status.state, GameState::Offline);
         assert!(!status.online);
@@ -241,8 +254,11 @@ mod tests {
 
     #[test]
     fn status_serialises_with_snake_case_states() {
-        let json = serde_json::to_string(&ServerStatus::offline(ContainerState::NotFound))
-            .expect("serialise");
+        let json = serde_json::to_string(&ServerStatus::offline(
+            ContainerState::NotFound,
+            PublicUpdate::default(),
+        ))
+        .expect("serialise");
 
         assert!(json.contains(r#""state":"offline""#));
         assert!(json.contains(r#""container":"not_found""#));

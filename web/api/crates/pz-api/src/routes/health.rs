@@ -37,6 +37,8 @@ struct Dependency {
 struct GameServerHealth {
     state: crate::services::status::GameState,
     player_count: usize,
+    /// Public-safe. No diagnosis: this endpoint has no auth layer.
+    update: pz_bridge::PublicUpdate,
 }
 
 /// Public liveness probe: says nothing about the internals.
@@ -61,14 +63,20 @@ async fn detailed(State(state): State<AppState>) -> Json<DetailedHealth> {
     };
 
     let server_status = state.status.current().await;
+    let update_healthy = server_status.update.healthy;
 
     Json(DetailedHealth {
-        status: if database.reachable { "ok" } else { "degraded" },
+        status: if database.reachable && update_healthy {
+            "ok"
+        } else {
+            "degraded"
+        },
         version: env!("CARGO_PKG_VERSION"),
         database,
         game_server: GameServerHealth {
             state: server_status.state,
             player_count: server_status.player_count,
+            update: server_status.update,
         },
     })
 }
