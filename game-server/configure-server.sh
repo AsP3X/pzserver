@@ -366,70 +366,17 @@ else
     fi
 fi
 
-# Surface PZ Build 42 mod manifests so the server can discover them.
-# PZ B42 dedicated server scans `<workshop_id>/mods/<id>/mod.info` (root-level),
-# but many B42-only mods only ship `42/mod.info`. Without root-level mod.info,
-# PZ silently skips the mod. Walk every Workshop mod directory and lift the
-# B42 manifest + poster up one level when it's missing.
-if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
-    while IFS= read -r mod_dir; do
-        if [ -f "$mod_dir/mod.info" ]; then continue; fi
-        if [ ! -f "$mod_dir/42/mod.info" ]; then continue; fi
-        cp "$mod_dir/42/mod.info" "$mod_dir/mod.info"
-        for asset in poster.png icon.png preview.png; do
-            if [ -f "$mod_dir/42/$asset" ] && [ ! -f "$mod_dir/$asset" ]; then
-                cp "$mod_dir/42/$asset" "$mod_dir/$asset"
-            fi
-        done
-        echo "[configure-server] Surfaced B42 manifest for mod: $(basename "$mod_dir")"
-    done < <(find "$WORKSHOP_CACHE_ROOT" -maxdepth 3 -mindepth 3 -type d -path "*/mods/*")
-fi
-
-# Mirror Workshop-downloaded mods into Zomboid/mods/ so PZ's mod scanner
-# discovers them. The dedicated server's Workshop discovery path expects
-# proper Steam UGC subscriptions — anonymous SteamCMD downloads don't get
-# subscribed, so PZ silently wipes them from `Mods=`/`WorkshopItems=` in
-# the INI on startup. The `Zomboid/mods/` path is always scanned, so a
-# symlink there gives PZ a reliable, always-trusted local copy.
+# Where the Workshop mirror lands, and the fallback home for a mod that was
+# never a Workshop item. Defined here because the Knox Relay seed below picks
+# its target from it.
 ZOMBOID_MODS_DIR="${PZ_CONFIG_DIR}/mods"
 mkdir -p "$ZOMBOID_MODS_DIR"
-if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
-    while IFS= read -r mod_dir; do
-        mod_name="$(basename "$mod_dir")"
-        target="$ZOMBOID_MODS_DIR/$mod_name"
-        # Replace stale symlinks/dirs that may point to a removed mod.
-        if [ -L "$target" ] || [ -e "$target" ]; then
-            rm -rf "$target"
-        fi
-        if ln -s "$mod_dir" "$target" 2>/dev/null; then
-            echo "[configure-server] Linked $mod_name from Workshop cache into Zomboid/mods/"
-        else
-            # Fallback for filesystems where symlinks aren't allowed in the mount.
-            cp -r "$mod_dir" "$target"
-            echo "[configure-server] Copied $mod_name from Workshop cache into Zomboid/mods/"
-        fi
-    done < <(find "$WORKSHOP_CACHE_ROOT" -maxdepth 3 -mindepth 3 -type d -path "*/mods/*")
-fi
-
-# Retire the standalone PZServerPulse mod, whose character dashboard now ships
-# inside Knox Relay. Older boots seeded it into Zomboid/mods/, and PZ loads
-# whatever it finds there once `Mods=` still names it, so leaving it in place
-# would run two mods writing the same data.
-PZSP_DST="${ZOMBOID_MODS_DIR}/PZServerPulse"
-if [ -L "$PZSP_DST" ] || [ -e "$PZSP_DST" ]; then
-    rm -rf "$PZSP_DST" \
-        && echo "[configure-server] Removed the retired PZServerPulse mod (now part of KnoxRelay)"
-fi
-if grep -m1 "^Mods=" "$INI_FILE" 2>/dev/null | grep -q "PZServerPulse"; then
-    echo "[configure-server] WARNING: Mods= still lists PZServerPulse, which no longer exists —" \
-         "drop it from PZ_MOD_IDS (PZ_MOD_IDS=KnoxRelay); the live dashboard is part of KnoxRelay now"
-fi
 
 # Seed the image's own Knox Relay when it is newer than what is installed.
 #
 # The Dockerfiles stage the repo's copy at /opt/knox-relay, outside the
 # bind-mounted Zomboid/, because anything COPYed straight into Zomboid/mods/ is
-# hidden the moment that volume mounts. The Workshop mirror above then links
+# hidden the moment that volume mounts. The Workshop mirror below then links
 # whatever SteamCMD last downloaded over Zomboid/mods/KnoxRelay, so a Workshop
 # item lagging the image silently downgrades the bridge. That is not a cosmetic
 # mismatch: the app gates whole pages on the mod_version the bridge reports, so
@@ -437,6 +384,14 @@ fi
 #
 # Only a strictly newer staged copy wins, so publishing a newer Workshop build
 # still takes precedence and this never pins the server to the image.
+#
+# This runs before the manifest surfacing and the Zomboid/mods/ mirror below,
+# not after them. Those two steps read the cache, and the mirror only tracks a
+# later write to it when it is a real symlink — its `cp -r` fallback, used
+# wherever the mount forbids symlinks, is a snapshot. Seeding afterwards left
+# that snapshot holding the version the seed had just replaced, which is the
+# stale bridge Lua this whole block exists to prevent. Seed first and every
+# step below copies the winner.
 KR_STAGED_DIR="${KR_STAGED_DIR:-/opt/knox-relay}"
 
 # Where the seed has to land.
@@ -449,7 +404,7 @@ KR_STAGED_DIR="${KR_STAGED_DIR:-/opt/knox-relay}"
 # "Seeded Knox Relay 1.11" and the server went on running 1.10.
 #
 # So the cache copy is the target when there is one, and the symlink planted
-# above follows it. Zomboid/mods is the target only when this is not a Workshop
+# below follows it. Zomboid/mods is the target only when this is not a Workshop
 # mod at all. On AMD64 a later SteamCMD sync overwrites the cache again, which
 # is correct: Steam wins whenever it can actually run.
 KR_CACHE_DIR="${WORKSHOP_CACHE_ROOT}/${PZ_BRIDGE_WORKSHOP_ID:-3777446787}/mods/KnoxRelay"
@@ -490,6 +445,63 @@ if [ -d "$KR_STAGED_DIR" ]; then
         echo "[configure-server] Keeping installed Knox Relay ${live_version}" \
              "(image stages ${staged_version:-nothing})"
     fi
+fi
+
+# Surface PZ Build 42 mod manifests so the server can discover them.
+# PZ B42 dedicated server scans `<workshop_id>/mods/<id>/mod.info` (root-level),
+# but many B42-only mods only ship `42/mod.info`. Without root-level mod.info,
+# PZ silently skips the mod. Walk every Workshop mod directory and lift the
+# B42 manifest + poster up one level when it's missing.
+if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
+    while IFS= read -r mod_dir; do
+        if [ -f "$mod_dir/mod.info" ]; then continue; fi
+        if [ ! -f "$mod_dir/42/mod.info" ]; then continue; fi
+        cp "$mod_dir/42/mod.info" "$mod_dir/mod.info"
+        for asset in poster.png icon.png preview.png; do
+            if [ -f "$mod_dir/42/$asset" ] && [ ! -f "$mod_dir/$asset" ]; then
+                cp "$mod_dir/42/$asset" "$mod_dir/$asset"
+            fi
+        done
+        echo "[configure-server] Surfaced B42 manifest for mod: $(basename "$mod_dir")"
+    done < <(find "$WORKSHOP_CACHE_ROOT" -maxdepth 3 -mindepth 3 -type d -path "*/mods/*")
+fi
+
+# Mirror Workshop-downloaded mods into Zomboid/mods/ so PZ's mod scanner
+# discovers them. The dedicated server's Workshop discovery path expects
+# proper Steam UGC subscriptions — anonymous SteamCMD downloads don't get
+# subscribed, so PZ silently wipes them from `Mods=`/`WorkshopItems=` in
+# the INI on startup. The `Zomboid/mods/` path is always scanned, so a
+# symlink there gives PZ a reliable, always-trusted local copy.
+if [ -d "$WORKSHOP_CACHE_ROOT" ]; then
+    while IFS= read -r mod_dir; do
+        mod_name="$(basename "$mod_dir")"
+        target="$ZOMBOID_MODS_DIR/$mod_name"
+        # Replace stale symlinks/dirs that may point to a removed mod.
+        if [ -L "$target" ] || [ -e "$target" ]; then
+            rm -rf "$target"
+        fi
+        if ln -s "$mod_dir" "$target" 2>/dev/null; then
+            echo "[configure-server] Linked $mod_name from Workshop cache into Zomboid/mods/"
+        else
+            # Fallback for filesystems where symlinks aren't allowed in the mount.
+            cp -r "$mod_dir" "$target"
+            echo "[configure-server] Copied $mod_name from Workshop cache into Zomboid/mods/"
+        fi
+    done < <(find "$WORKSHOP_CACHE_ROOT" -maxdepth 3 -mindepth 3 -type d -path "*/mods/*")
+fi
+
+# Retire the standalone PZServerPulse mod, whose character dashboard now ships
+# inside Knox Relay. Older boots seeded it into Zomboid/mods/, and PZ loads
+# whatever it finds there once `Mods=` still names it, so leaving it in place
+# would run two mods writing the same data.
+PZSP_DST="${ZOMBOID_MODS_DIR}/PZServerPulse"
+if [ -L "$PZSP_DST" ] || [ -e "$PZSP_DST" ]; then
+    rm -rf "$PZSP_DST" \
+        && echo "[configure-server] Removed the retired PZServerPulse mod (now part of KnoxRelay)"
+fi
+if grep -m1 "^Mods=" "$INI_FILE" 2>/dev/null | grep -q "PZServerPulse"; then
+    echo "[configure-server] WARNING: Mods= still lists PZServerPulse, which no longer exists —" \
+         "drop it from PZ_MOD_IDS (PZ_MOD_IDS=KnoxRelay); the live dashboard is part of KnoxRelay now"
 fi
 
 # Disable Lua checksum.
