@@ -78,6 +78,15 @@ newest_content_log() {
     if [ -n "$resolved" ]; then
         candidates+=("$(dirname "$resolved")/logs/content_log.txt")
     fi
+    # SteamCMD logs to $HOME/Steam/logs, NOT to the directory it was installed
+    # in. On the amd64 image it runs as root from /home/root/.local/steamcmd,
+    # so the binary is one place and content_log.txt is in another entirely -
+    # searching only alongside the binary finds nothing, which would silently
+    # disable the retired-manifest diagnosis and its one auto-repair.
+    if [ -n "${HOME:-}" ]; then
+        candidates+=("${HOME}/Steam/logs/content_log.txt")
+    fi
+    candidates+=(/root/Steam/logs/content_log.txt)
     candidates+=(/home/root/.local/steamcmd/logs/content_log.txt)
     candidates+=(/home/steam/Steam/logs/content_log.txt)
 

@@ -442,6 +442,33 @@ else
     echo "SKIP: report JSON validity needs python3"
 fi
 
+# The log has to be FOUND, not just accepted when handed over. SteamCMD writes
+# content_log.txt to $HOME/Steam/logs, not next to the binary it was launched
+# from - on the amd64 image those are two different trees. Searching only
+# beside the binary silently disables the retired-manifest diagnosis and the
+# single auto-repair that goes with it, and every test above passes anyway
+# because they all pass STEAMCMD_LOG explicitly.
+discover_home="$(mktemp -d)"
+mkdir -p "$discover_home/Steam/logs"
+cat > "$discover_home/Steam/logs/content_log.txt" <<'LOG'
+[2026-08-18 18:32:05] Failed to get manifest request code for depot 380871, manifest 4041863939978451180, result 'Access Denied'
+LOG
+
+discover_shared="$(mktemp -d)"
+discover_out="$(BASE_GAME_DIR="$(make_install 6 24775771 24801442)"     PZ_SHARED_DIR="$discover_shared" GAME_VERSION=public     HOME="$discover_home" env -u STEAMCMD_LOG bash "$CHECK" 2>&1)"
+discover_rc=$?
+discover_verdict="$(json_field "$discover_shared/.update_status" verdict)"
+
+if [ "$discover_verdict" = "manifest_retired" ] && [ "$discover_rc" -eq 1 ]; then
+    echo "PASS: content_log.txt is found under HOME, not just beside the binary"
+    pass=$((pass + 1))
+else
+    echo "FAIL: content_log.txt is found under HOME, not just beside the binary"
+    echo "    verdict ${discover_verdict} (want manifest_retired), exit ${discover_rc} (want 1)"
+    echo "${discover_out}" | sed 's/^/    /'
+    fail=$((fail + 1))
+fi
+
 echo
 echo "${pass} passed, ${fail} failed"
 [ "$fail" -eq 0 ]

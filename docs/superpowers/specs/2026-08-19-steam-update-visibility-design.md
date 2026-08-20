@@ -22,7 +22,7 @@ The manifest is primary. `${BASE_GAME_DIR}/steamapps/appmanifest_380870.acf` is 
 
 `StateFlags` is tested with `(( flags & 2 ))`, never `== 6`, so an unrelated bit cannot mask the failure.
 
-The log is secondary and only refines a diagnosis that already exists. When the manifest says something is wrong, the newest `logs/content_log.txt` found across the candidate SteamCMD homes is scanned for `Failed to get manifest request code` / `Access Denied`. Candidates are the directory of whichever `steamcmd.sh` resolves on `PATH`, the entrypoint's existing fallback `/home/root/.local/steamcmd`, and `/home/steam/Steam`; newest mtime wins. A missing log is not a failure — the verdict simply stays generic. It never originates a verdict.
+The log is secondary and only refines a diagnosis that already exists. When the manifest says something is wrong, the newest `logs/content_log.txt` found across the candidate SteamCMD homes is scanned for `Failed to get manifest request code` / `Access Denied`. Candidates are `$HOME/Steam/logs` and `/root/Steam/logs` first, then the directory of whichever `steamcmd.sh` resolves on `PATH`, the entrypoint's existing fallback `/home/root/.local/steamcmd`, and `/home/steam/Steam`; newest mtime wins. `$HOME` leads because SteamCMD writes its logs there rather than beside the binary it was launched from: on the amd64 image the binary is `/home/root/.local/steamcmd/steamcmd.sh` while the log is `/root/Steam/logs/content_log.txt`, so searching only alongside the binary finds nothing and silently disables both the retired-manifest diagnosis and its auto-repair. A missing log is not a failure — the verdict simply stays generic. It never originates a verdict.
 
 ## Verdicts
 
