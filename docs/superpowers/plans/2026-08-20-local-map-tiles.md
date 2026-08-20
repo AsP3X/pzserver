@@ -36,6 +36,29 @@ Reference values from the live pyramid, confirmed by fetching it:
 </Image>
 ```
 
+## What Task 1 established (it has run — these are measurements, not predictions)
+
+- **`omit_levels` does not corrupt the geometry.** It leaves `x0`, `y0` and `sqr`
+  in full-resolution space and divides only `w`/`h`, recording the reduction as
+  `skip`. `579616 x 4 = 2318464`, exactly an unrestricted render. The client's
+  tile indices line up unchanged, because `tileSpan()` already scales by the
+  level difference: `ceil(2318656/8192) = 284` columns at level 20 is exactly
+  what the reduced pyramid has. **The levels 8-20 design is sound.**
+- **`map_info.json` is the file that matters**, not `layer0.dzi`. It carries
+  `x0`, `y0`, `sqr` and `cell_rects`; the `.dzi` carries only dimensions.
+- **The gate is cheap.** `map_info.json` is written about ten seconds into a
+  render, before any tiles are painted. Start the render, wait for the file,
+  verify, kill it. `render_cell_range` does *not* make this cheaper — the
+  pyramid still walks every level, which is why a "single cell" run was still
+  going at 51 minutes.
+- **Output layout:** `/out/html/map_data/base/{layer0.dzi,map_info.json,layer0_files/{z}/{x}_{y}.jpg}`.
+- **Residual vs the public pyramid:** our height is 3264px short, a fraction of
+  one cell, because our game files differ slightly from whatever that was
+  rendered from. `cell_rects` match exactly. Costs at most one tile row at the
+  bottom edge.
+- **Windows:** hand-run `docker run` needs `MSYS_NO_PATHCONV=1` or the bind
+  mount silently does not happen.
+
 ## Deviation from the spec
 
 The spec says "One read-only connection, opened once and shared." `rusqlite::Connection` is `!Sync`, so it cannot literally be shared across async handlers. This plan uses a `Mutex<Connection>` read inside `tokio::task::spawn_blocking`. Same intent, correct mechanics.
@@ -227,9 +250,15 @@ Create `web/tools/map-tiles/Dockerfile`:
 # stack: compose keeps it behind a profile and it is run on demand.
 FROM python:3.12-slim
 
-# Pillow needs these to decode the game's textures.
+# Pillow needs libjpeg/zlib to decode the game's textures. build-essential and
+# linux-libc-dev are for pynput's evdev backend, which compiles a C extension
+# against linux/input.h — pzmap2dzi never touches keyboard/mouse input in
+# headless deploy/unpack/render use, but pip installs the whole requirements
+# file regardless. lupa (Lua bindings) also builds its bundled Lua from source
+# and needs the same toolchain.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git libjpeg62-turbo zlib1g \
+    && apt-get install -y --no-install-recommends \
+        git libjpeg62-turbo zlib1g build-essential linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ARG PZMAP2DZI_REF=main
@@ -239,7 +268,11 @@ RUN git clone --depth 1 --branch "${PZMAP2DZI_REF}" \
 
 WORKDIR /opt/pzmap2dzi
 
-COPY conf.yaml /conf/conf.yaml
+# Overwrites the shipped config, deliberately. parse_map() resolves map_conf and
+# map_conf_default relative to the config file's own directory, so conf.yaml has
+# to sit beside vanilla.txt, default_b42.txt and mod/ — putting it anywhere else
+# makes the render fail looking for map descriptions that are not there.
+COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
 COPY verify.py pack.py run.sh /tools/
 RUN chmod +x /tools/run.sh
 
@@ -291,21 +324,28 @@ Add temporarily to `conf.yaml` under `render_conf`:
 `dzi_cell_range` stays `auto`, so the DZI bounds still describe the whole map —
 which is exactly what is being verified — while only one cell is painted.
 
+**`MSYS_NO_PATHCONV=1` is required on Windows.** Without it, Git Bash rewrites
+the container-side `/pz` into a Windows path and the bind mount silently does
+not happen: `/pz` does not exist inside the container, and the render dies with
+`FileNotFoundError` on the map directory as though the game files were missing.
+They are not. This affects only these hand-run commands — the compose service
+in Task 3 reads its paths from YAML and is unaffected.
+
 ```bash
-docker run --rm \
+MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$(pwd)/data/server:/pz:ro" \
   -v "$(pwd)/data/map-tiles:/out" \
   --entrypoint bash pzserver-map-tiles:local -c \
-  'python main.py -c /conf/conf.yaml deploy \
-   && python main.py -c /conf/conf.yaml unpack \
-   && python main.py -c /conf/conf.yaml render base \
+  'python main.py -c conf/conf.yaml deploy \
+   && python main.py -c conf/conf.yaml unpack \
+   && python main.py -c conf/conf.yaml render base \
    && find /out -name "layer0.dzi" -print'
 ```
 
 Then verify whatever path that `find` printed:
 
 ```bash
-docker run --rm -v "$(pwd)/data/map-tiles:/out" \
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/data/map-tiles:/out" \
   --entrypoint python pzserver-map-tiles:local \
   /tools/verify.py /out/<path from find>/layer0.dzi
 ```
@@ -540,9 +580,9 @@ Replace `web/tools/map-tiles/run.sh`:
 # done, and the packer skips tiles already stored.
 set -euo pipefail
 
-CONF=/conf/conf.yaml
+CONF=conf/conf.yaml
 OUT=/out
-TREE="$OUT/map_data/default/base"
+TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segment
 
 cd /opt/pzmap2dzi
 
@@ -556,7 +596,7 @@ echo "==> render base (hours; ctrl-c is safe, re-run resumes)"
 python main.py -c "$CONF" render base
 
 echo "==> verify geometry"
-python /tools/verify.py "$TREE/layer0.dzi"
+python /tools/verify.py "$TREE/map_info.json"
 
 echo "==> pack"
 python /tools/pack.py "$TREE/layer0_files" "$OUT/tiles.sqlite" \
