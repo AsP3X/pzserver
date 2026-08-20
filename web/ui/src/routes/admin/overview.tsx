@@ -10,7 +10,7 @@ import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Sparkline } from '@/components/ui/sparkline'
 import { StatTile } from '@/components/ui/stat-tile'
 import { StatusPill } from '@/components/ui/status-pill'
-import { api, ApiError } from '@/lib/api'
+import { api, ApiError, type UpdateReport } from '@/lib/api'
 import { formatNumber, formatUptime } from '@/lib/format'
 import {
   adminUpdateStatusQuery,
@@ -148,8 +148,60 @@ export function AdminOverviewPage() {
 
 type PendingAction = 'stop' | 'restart' | 'save' | null
 
-function ServerControls() {
+/**
+ * Why the server is not serving, when the container itself looks fine.
+ *
+ * A halted install leaves the container up with the game deliberately held
+ * down, which the status service can only report as `starting` — outwardly
+ * identical to a slow world load. This banner is the only thing that tells
+ * those two apart.
+ */
+function UpdateHealthBanner({ report }: { report?: UpdateReport }) {
   const { t } = useTranslation()
+
+  if (!report || report.verdict === 'ok' || report.verdict === 'unknown') {
+    return null
+  }
+
+  // `unverifiable` is the one bad verdict that still boots. It means we lost
+  // the ability to tell whether the build is stale, not that it is — so it
+  // warns in hazard yellow rather than alarming in blood red.
+  const halted = !report.booted
+  const title =
+    report.verdict === 'unverifiable'
+      ? t('admin.update.health_unverifiable_title')
+      : halted
+        ? t('admin.update.health_halted_title')
+        : t('admin.update.health_stale_title')
+
+  return (
+    <div
+      role="alert"
+      className={
+        halted
+          ? 'border border-blood/40 bg-blood-soft px-3 py-2 text-sm text-blood'
+          : 'border border-hazard/40 bg-hazard-soft px-3 py-2 text-sm text-hazard'
+      }
+    >
+      <p className="font-semibold">{title}</p>
+      {report.installed_build || report.target_build ? (
+        <p className="mt-1 font-mono text-xs">
+          {t('admin.update.health_builds', {
+            installed: report.installed_build ?? '?',
+            target: report.target_build ?? '?',
+          })}
+        </p>
+      ) : null}
+      {report.diagnosis ? <p className="mt-1 text-bone">{report.diagnosis}</p> : null}
+      {report.auto_repaired ? (
+        <p className="mt-1 text-bone">{t('admin.update.health_repairing')}</p>
+      ) : null}
+    </div>
+  )
+}
+
+function ServerControls() {
+  const { t, intlLocale } = useTranslation()
   const queryClient = useQueryClient()
   const { data: status } = useQuery(serverStatusQuery)
   const [pending, setPending] = useState<PendingAction>(null)
@@ -231,6 +283,7 @@ function ServerControls() {
       <PanelHeader label={t('admin.controls')} />
       <div className="flex flex-col gap-4 p-5">
         <p className="text-sm text-smoke">{t('admin.controls_hint')}</p>
+        <UpdateHealthBanner report={updateStatus.data?.report} />
         {error ? <FormError>{error}</FormError> : null}
         {notice ? (
           <p role="status" className="border border-moss/40 bg-moss-soft px-3 py-2 text-sm text-moss">
@@ -368,6 +421,21 @@ function ServerControls() {
                 ))}
               </select>
             </label>
+            {updateStatus.data?.report.installed_build ? (
+              <p className="text-sm text-dust">
+                {t('admin.update.installed_build')}:{' '}
+                <span className="font-mono text-bone">
+                  {updateStatus.data.report.installed_build}
+                </span>
+                {updateStatus.data.report.last_updated
+                  ? `, ${t('admin.update.health_last_checked', {
+                      when: new Date(
+                        updateStatus.data.report.last_updated * 1000,
+                      ).toLocaleString(intlLocale),
+                    })}`
+                  : ''}
+              </p>
+            ) : null}
             <p className="text-sm text-dust">{t('admin.update.warning')}</p>
           </div>
         }

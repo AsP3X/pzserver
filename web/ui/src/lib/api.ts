@@ -27,6 +27,46 @@ export type ContainerState =
 
 export type DataSource = 'lua_bridge' | 'rcon' | 'none'
 
+/**
+ * What the game server's last boot concluded about its own install.
+ *
+ * `unknown` means no report yet — a normal first boot, and healthy.
+ * `unverifiable` is the odd one: it boots, but is *not* healthy. The manifest
+ * was there and unreadable, so the ability to notice a stale build was lost.
+ */
+export type UpdateVerdict =
+  | 'ok'
+  | 'behind'
+  | 'update_required'
+  | 'manifest_retired'
+  | 'missing'
+  | 'unverifiable'
+  | 'unknown'
+
+/** Public-safe view. Never carries the diagnosis. */
+export interface PublicUpdate {
+  verdict: UpdateVerdict
+  healthy: boolean
+  installed_build: string | null
+  target_build: string | null
+}
+
+/** Staff-only. `diagnosis` can name filesystem paths. */
+export interface UpdateReport {
+  verdict: UpdateVerdict
+  installed_build: string | null
+  target_build: string | null
+  state_flags: number | null
+  branch: string | null
+  pinned_manifest: string | null
+  last_updated: number | null
+  checked_at: number | null
+  /** False with a bad verdict means the game is deliberately held down. */
+  booted: boolean
+  auto_repaired: boolean
+  diagnosis: string | null
+}
+
 export interface ServerStatus {
   state: GameState
   online: boolean
@@ -37,6 +77,7 @@ export interface ServerStatus {
   map: string | null
   uptime_seconds: number | null
   data_source: DataSource
+  update: PublicUpdate
   checked_at: string
   connect: { host: string; port: number } | null
 }
@@ -809,10 +850,11 @@ export interface PlayerProfile {
   hours_rank: number | null
 }
 
-/** Steam branch the next game-server boot will install. */
+/** Steam branch the next game-server boot will install, plus install health. */
 export interface UpdateStatus {
   branch: string
   branches: string[]
+  report: UpdateReport
 }
 
 export interface WhitelistSync {

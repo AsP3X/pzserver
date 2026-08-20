@@ -37,6 +37,14 @@ export function StatusBand() {
           title={t('status.title')}
           description={t('status.subtitle')}
         />
+        {status && !status.update.healthy ? (
+          <p
+            role="status"
+            className="mt-4 border border-hazard/40 bg-hazard-soft px-3 py-2 text-sm text-hazard"
+          >
+            {t('status.update_behind')}
+          </p>
+        ) : null}
 
         <Panel bracketed>
           <PanelHeader
