@@ -215,6 +215,33 @@ pub async fn record_error(state: &AppState, error: String) {
     state.backup_job.lock().await.last_error = Some(error);
 }
 
+/// Prove the archive directory can be both written to and unlinked from.
+///
+/// `data/backups` is a host bind mount, and nothing in this process can repair
+/// a bad mode on it: the container runs read-only as uid 10001 with every
+/// capability dropped. So the only useful response is to say so loudly and let
+/// the operator fix the host — the `backups-init` service is what normally
+/// keeps the mode right.
+///
+/// Both halves matter. Writing an archive needs permission on the directory;
+/// so does removing one, which is why a bad mode broke deletes as well as
+/// scheduled backups when this drifted to 775 in August 2026.
+pub fn probe_writable(dir: &Path) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Err(format!("{} is not a directory", dir.display()));
+    }
+
+    let probe = dir.join(format!(".writable-{}", Uuid::new_v4()));
+
+    std::fs::write(&probe, b"knox")
+        .map_err(|error| format!("cannot create files in {}: {error}", dir.display()))?;
+
+    std::fs::remove_file(&probe)
+        .map_err(|error| format!("cannot remove files from {}: {error}", dir.display()))?;
+
+    Ok(())
+}
+
 pub async fn start_create(state: AppState, notes: Option<String>) -> ApiResult<()> {
     claim_job(&state, "create", "Saving the world…").await?;
     tokio::spawn(async move {
@@ -282,14 +309,63 @@ pub async fn delete(db: &PgPool, id: Uuid) -> ApiResult<String> {
     Ok(backup.filename)
 }
 
-pub async fn delete_many(db: &PgPool, ids: &[Uuid]) -> ApiResult<u64> {
-    let mut deleted = 0;
-    for id in ids {
-        if delete(db, *id).await.is_ok() {
-            deleted += 1;
+/// What a bulk delete actually managed.
+///
+/// Two counts rather than one total, because the bare total is what let this
+/// fail quietly: a batch in which every archive refused to unlink came back as
+/// `Ok(0)` and was reported to the admin as a finished delete.
+pub struct BulkDeleteOutcome {
+    pub deleted: u64,
+    pub failed: u64,
+}
+
+impl BulkDeleteOutcome {
+    /// Nothing went at all. The caller should surface the underlying error
+    /// rather than a count.
+    pub fn total_failure(&self) -> bool {
+        self.deleted == 0 && self.failed > 0
+    }
+
+    /// Wording for the admin. A batch that left archives behind says so.
+    pub fn message(&self) -> String {
+        if self.failed == 0 {
+            format!("Deleted {} backup(s)", self.deleted)
+        } else {
+            format!(
+                "Deleted {} of {} \u{2014} {} could not be removed.",
+                self.deleted,
+                self.deleted + self.failed,
+                self.failed
+            )
         }
     }
-    Ok(deleted)
+}
+
+pub async fn delete_many(db: &PgPool, ids: &[Uuid]) -> ApiResult<BulkDeleteOutcome> {
+    let mut outcome = BulkDeleteOutcome { deleted: 0, failed: 0 };
+    let mut first_error = None;
+
+    for id in ids {
+        match delete(db, *id).await {
+            Ok(_) => outcome.deleted += 1,
+            Err(error) => {
+                outcome.failed += 1;
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    // One stubborn archive should not sink the rest of the batch, but a batch
+    // that removed nothing is a failure and has to reach the admin as one.
+    if outcome.total_failure() {
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+    }
+
+    Ok(outcome)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1013,4 +1089,105 @@ fn human_size(bytes: i64) -> String {
         unit += 1;
     }
     format!("{size:.1} {}", units[unit])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_batch_that_removed_nothing_is_not_a_success() {
+        let outcome = BulkDeleteOutcome { deleted: 0, failed: 4 };
+
+        assert!(outcome.total_failure());
+    }
+
+    #[test]
+    fn a_batch_that_removed_everything_is_a_success() {
+        let outcome = BulkDeleteOutcome { deleted: 4, failed: 0 };
+
+        assert!(!outcome.total_failure());
+        assert_eq!(outcome.message(), "Deleted 4 backup(s)");
+    }
+
+    #[test]
+    fn a_partly_removed_batch_says_how_many_were_left_behind() {
+        let outcome = BulkDeleteOutcome { deleted: 3, failed: 2 };
+
+        assert!(!outcome.total_failure());
+        assert_eq!(outcome.message(), "Deleted 3 of 5 — 2 could not be removed.");
+    }
+
+    /// A scratch directory under the system temp dir, unique per test run.
+    fn scratch_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pz-api-{label}-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create the scratch directory");
+        dir
+    }
+
+    #[test]
+    fn a_writable_directory_passes_the_probe() {
+        let dir = scratch_dir("writable");
+
+        let result = probe_writable(&dir);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn the_probe_leaves_nothing_behind() {
+        let dir = scratch_dir("clean");
+
+        probe_writable(&dir).expect("a fresh scratch directory is writable");
+
+        let left = std::fs::read_dir(&dir)
+            .expect("read the scratch directory")
+            .count();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(left, 0, "the probe file must not survive the probe");
+    }
+
+    #[test]
+    fn a_missing_directory_fails_the_probe() {
+        let missing = std::env::temp_dir().join(format!("pz-api-missing-{}", Uuid::new_v4()));
+
+        assert!(probe_writable(&missing).is_err());
+    }
+
+    /// Root ignores the mode bits, so the read-only case can only be asserted
+    /// when the test user is not root — which is how `make web-test` runs it.
+    #[cfg(unix)]
+    fn running_as_root() -> bool {
+        use std::os::unix::fs::MetadataExt;
+
+        let probe = std::env::temp_dir().join(format!("pz-api-uid-{}", Uuid::new_v4()));
+        if std::fs::write(&probe, b"").is_err() {
+            return false;
+        }
+        let uid = probe.metadata().map(|meta| meta.uid()).unwrap_or(1);
+        let _ = std::fs::remove_file(&probe);
+
+        uid == 0
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_directory_fails_the_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_dir("read-only");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555))
+            .expect("make the scratch directory read-only");
+
+        let result = probe_writable(&dir);
+
+        // Restore the mode first, or the cleanup cannot remove the directory.
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        if !running_as_root() {
+            assert!(result.is_err(), "a 0555 directory must fail the probe");
+        }
+    }
 }

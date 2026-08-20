@@ -35,6 +35,53 @@ services:
       - pzserver-internal
 
   # ---------------------------------------------------------------------------
+  # One-shot: make the archive directory writable before the API starts.
+  #
+  # `data/backups` is a host bind mount, and web-api cannot fix its own access
+  # to it — that container runs read-only as uid 10001 with every capability
+  # dropped. Two things used to guarantee the mode and both are gone: the
+  # Laravel entrypoint's `chmod 777` (parked along with the `app` service in
+  # c318e99) and `pz_ensure_data_dirs`, which only the shell deploy path calls.
+  # In August 2026 the directory drifted to 775 root:www-data and every
+  # scheduled backup failed for two days, deletes included.
+  #
+  # This runs on every `up`, so it repairs drift rather than only seeding a new
+  # install, and `service_completed_successfully` keeps it ahead of web-api's
+  # own start-up writability probe.
+  # ---------------------------------------------------------------------------
+  backups-init:
+    image: busybox:1.37
+    container_name: pz-backups-init
+    # Root on purpose: the directory it has to chmod is usually root-owned.
+    user: "0:0"
+    # One-shot. Without this the exited container is restarted forever.
+    restart: "no"
+    # Exits 0 even when it cannot fix the mode, deliberately. Blocking web-api
+    # from starting would take the whole site down over a backup directory;
+    # web-api's own probe is what raises the alarm, by failing its healthcheck
+    # while carrying on serving.
+    command:
+      - sh
+      - -c
+      - |
+        chmod 0777 /backups 2>/dev/null || true
+        mode=$$(stat -c '%a' /backups 2>/dev/null || echo '?')
+        case "$$mode" in
+          777|1777)
+            echo "[backups-init] /backups is $$mode - uid 10001 can write there"
+            ;;
+          *)
+            echo "[backups-init] WARNING: /backups is $$mode, not 777 - uid 10001"
+            echo "[backups-init] may not be able to write there. web-api will"
+            echo "[backups-init] report unhealthy if it cannot."
+            ;;
+        esac
+    volumes:
+      - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
+    # Nothing to talk to; staying off both networks keeps it out of the way.
+    network_mode: none
+
+  # ---------------------------------------------------------------------------
   # Rust API — control plane. Applies its own migrations on boot.
   # ---------------------------------------------------------------------------
   web-api:
@@ -48,6 +95,10 @@ services:
     depends_on:
       web-db:
         condition: service_healthy
+      # Ordering only: it exits 0 either way. This just guarantees the
+      # chmod has happened before the API probes the directory.
+      backups-init:
+        condition: service_completed_successfully
     volumes:
       # The mod's JSON exports, plus the account-link channel. Writable, because
       # answering a /account register claim means writing

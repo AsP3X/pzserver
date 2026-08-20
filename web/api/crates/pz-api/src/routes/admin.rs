@@ -865,8 +865,8 @@ async fn delete_backups(
     if body.ids.is_empty() {
         return Err(ApiError::Validation("Select at least one backup.".to_owned()));
     }
-    let count = backups::delete_many(&state.db, &body.ids).await?;
-    Ok(Json(serde_json::json!({ "message": format!("Deleted {count} backup(s)") })))
+    let outcome = backups::delete_many(&state.db, &body.ids).await?;
+    Ok(Json(serde_json::json!({ "message": outcome.message() })))
 }
 
 #[derive(Deserialize)]

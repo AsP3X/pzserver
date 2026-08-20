@@ -43,6 +43,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     bootstrap_admin(&db, &config).await;
 
     let state = AppState::new(db, config);
+    report_backup_directory(&state);
     let tasks = services::tasks::spawn_all(state.clone());
 
     let listener = tokio::net::TcpListener::bind(state.config.bind).await?;
@@ -74,6 +75,27 @@ async fn bootstrap_admin(db: &sqlx::PgPool, config: &Config) {
         Ok(true) => tracing::info!(username = %admin.username, "created the first administrator"),
         Ok(false) => tracing::debug!("an administrator already exists"),
         Err(error) => tracing::error!(%error, "could not create the first administrator"),
+    }
+}
+
+/// Say at boot whether world archives can actually be written.
+///
+/// This container cannot repair the directory itself — read-only rootfs, uid
+/// 10001, every capability dropped — so this log line and the failing
+/// `/api/health` are the whole remedy. The `backups-init` service in
+/// `docker-compose.web.yml` is what normally keeps the mode right.
+fn report_backup_directory(state: &AppState) {
+    let path = state.config.backup_path.display();
+
+    match state.backups_error.as_deref() {
+        None => tracing::info!(%path, "backup directory is writable"),
+        Some(error) => tracing::error!(
+            %path,
+            %error,
+            "backup directory is NOT writable — scheduled backups and deletes \
+             will fail. Fix the mode on the host (chmod 0777) and restart this \
+             container."
+        ),
     }
 }
 

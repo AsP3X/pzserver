@@ -23,6 +23,11 @@ pub struct AppState {
     pub docker: DockerClient,
     pub bridge: LuaBridge,
     pub backup_job: JobLock,
+    /// Why the archive directory is unusable, if it is. `None` means the
+    /// start-up probe wrote a file there and removed it again. `/api/health`
+    /// reads this, so a bad bind-mount mode surfaces in `docker ps` instead of
+    /// as backups that quietly stopped happening.
+    pub backups_error: Option<Arc<str>>,
 }
 
 impl AppState {
@@ -55,6 +60,13 @@ impl AppState {
             config.login_window,
         ));
 
+        // Probed once, at start-up. The mode on a bind mount does not change
+        // under us, and re-probing per request would put a filesystem write
+        // behind an unauthenticated endpoint.
+        let backups_error = backups::probe_writable(&config.backup_path)
+            .err()
+            .map(Arc::from);
+
         Self {
             db,
             config,
@@ -63,6 +75,7 @@ impl AppState {
             docker,
             bridge,
             backup_job: backups::new_job_lock(),
+            backups_error,
         }
     }
 }

@@ -127,6 +127,7 @@ PZ_STACK_CONTAINERS=(
   pz-web-db
   pz-web-api
   pz-web-ui
+  pz-backups-init
 )
 
 # Remove leftover containers by name (survives compose project / profile mismatches).

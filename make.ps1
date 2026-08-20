@@ -99,7 +99,7 @@ function Ensure-Networks {
 $script:StackContainers = @(
     "pz-app", "pz-queue", "pz-game-server", "pz-db",
     "pz-redis", "pz-docker-proxy", "pz-caddy",
-    "pz-web-db", "pz-web-api", "pz-web-ui"
+    "pz-web-db", "pz-web-api", "pz-web-ui", "pz-backups-init"
 )
 
 function Remove-StackContainers {
