@@ -359,7 +359,13 @@ export function AppShell({ surface, groups, children }: AppShellProps) {
             </Button>
           </div>
 
-          <div id="surface-nav-items" className="flex-1 overflow-x-hidden overflow-y-auto py-5">
+          {/* The rail still scrolls when the nav outgrows it, but the bar is
+              hidden: it lands on top of the labels while the rail is collapsed
+              and reads as a seam down the middle of the chrome. */}
+          <div
+            id="surface-nav-items"
+            className="flex-1 overflow-x-hidden overflow-y-auto py-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {groups.map((group, index) => (
               <div key={group.label} className="mb-6 last:mb-0">
                 {/* Collapsed, the heading is unreadable, so the grouping is
