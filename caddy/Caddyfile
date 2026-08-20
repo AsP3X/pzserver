@@ -1,5 +1,5 @@
 {
-	# Managed by setup — re-run deploy/init to customize
+	# Managed by setup.sh — edit freely or re-run make init
 }
 
 localhost {

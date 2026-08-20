@@ -79,9 +79,9 @@ const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
 
 function readMode(): MapBasemap {
   if (typeof window === 'undefined') {
-    return 'iso'
+    return 'vector'
   }
-  return window.localStorage.getItem(MODE_KEY) === 'vector' ? 'vector' : 'iso'
+  return window.localStorage.getItem(MODE_KEY) === 'iso' ? 'iso' : 'vector'
 }
 
 function boundsMap(bounds: Worldmap['bounds']): Worldmap {
