@@ -144,11 +144,11 @@ so validating on every routine boot buys less than it used to.
 
 ## Admin panel not loading
 
-1. Check local access: http://localhost:8000
+1. Check local access: http://localhost:8100
 2. For remote access, make sure you ran: `make admin-expose`
 3. Check cloud firewall for ports 80/443
 4. Check logs: `make logs`
-5. If nothing is listening on the port at all, see [port never binds](#admin-panel-port-never-binds-docker-port-pz-app-is-empty) below
+5. If nothing is listening on the port at all, see [port never binds](#admin-panel-port-never-binds-docker-port-pz-web-ui-is-empty) below
 
 ## Panel returns 502 after recreating `web-api` on its own
 
@@ -168,16 +168,16 @@ docker restart pz-web-ui
 
 Recreating both together avoids it in the first place.
 
-## Admin panel port never binds (`docker port pz-app` is empty)
+## Admin panel port never binds (`docker port pz-web-ui` is empty)
 
-Symptom: `pz-app` is up, but `http://localhost:8000` refuses the connection and the
+Symptom: `pz-web-ui` is up, but `http://localhost:8100` refuses the connection and the
 container shows no ports:
 
 ```bash
-docker port pz-app
+docker port pz-web-ui
 ```
 
-If that prints nothing — and `docker ps` shows an empty PORTS column for `pz-app` —
+If that prints nothing — and `docker ps` shows an empty PORTS column for `pz-web-ui` —
 the port was never published on the host. This is not a firewall issue; nothing is
 listening.
 
@@ -227,6 +227,10 @@ make init
 ```
 
 ## Player map has no basemap / only a grid
+
+> **Currently unavailable.** The player map was a Laravel feature of the `app`
+> container, parked in `c318e99`, and the Rust API has no map routes. The steps
+> below apply only to a stack still running the PHP panel.
 
 1. By default the map uses **proxy tiles** (map.projectzomboid.com). If those fail (offline host, blocked CDN, CORS), the basemap may be empty.
 2. Optional: generate **local** tiles from the panel (**Admin → Player map → Generate local tiles**) or:

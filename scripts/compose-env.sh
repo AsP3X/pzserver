@@ -257,13 +257,39 @@ pz_info() {
       echo "  Public Admin:  disabled (localhost only)"
       ;;
   esac
+  # Host firewall state, when the wizard has written one. Reported from here
+  # rather than only from the Makefile, so `make info` and `./deploy.sh --status`
+  # cannot drift apart the way the panel port did.
+  if [[ -f "${PZ_REPO_ROOT}/.firewall.conf" ]]; then
+    # shellcheck disable=SC1090,SC1091
+    . "${PZ_REPO_ROOT}/.firewall.conf" 2>/dev/null || true
+    local FW_HTTPS="${ADMIN_HTTPS_PORT:-443}"
+    local FW_HTTP="${ADMIN_HTTP_PORT:-80}"
+    local FW_HOST="${ADMIN_PUBLIC_HOST:-}"
+    if [[ -n "$FW_HOST" && "$FW_HOST" != "localhost" ]]; then
+      if [[ "$FW_HTTPS" == "443" ]]; then
+        echo "  Public host:   https://${FW_HOST}  (requires 'make admin-expose')"
+      else
+        echo "  Public host:   https://${FW_HOST}:${FW_HTTPS}  (requires 'make admin-expose')"
+      fi
+    fi
+    echo "  Caddy Ports:   ${FW_HTTP} (HTTP) / ${FW_HTTPS} (HTTPS)"
+    echo "  Firewall:      ${FIREWALL_BACKEND:-unknown}"
+  else
+    echo "  Firewall:      not configured"
+  fi
   if [[ -n "$PUBLIC_IP" ]]; then
     echo "  Public IP:     ${PUBLIC_IP}"
+  else
+    echo "  Public IP:     unavailable"
   fi
   echo "  Game Ports:    ${PZ_GAME_PORT}/udp, ${PZ_DIRECT_PORT}/udp"
   echo "  Data dir:      ${PZ_REPO_ROOT}/data/"
   echo ""
   echo "  Containers:"
   pz_compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || pz_compose ps
+  echo ""
+  echo "  Open game ports to remote players:  make expose"
+  echo "  Open public admin access:           make admin-expose"
   echo ""
 }

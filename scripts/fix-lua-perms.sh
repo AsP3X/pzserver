@@ -4,9 +4,10 @@
 #   [KnoxRelay] ERROR: cannot open file writer for <player>
 #   [KnoxRelay] ERROR: cannot write export_requests.json
 #
-# Root cause: Laravel (www-data) and the game (steam/root) share this directory.
-# Sticky bit (1777) + 0644 files owned by www-data make getFileWriter() fail.
-# Use plain 0777 dirs and 0666 files so either UID can open/replace them.
+# Root cause: the API (uid 10001) and the game (steam/root) share this directory.
+# A sticky bit (1777) plus 0644 files owned by the other UID make the game's
+# getFileWriter() fail. Use plain 0777 dirs and 0666 files so either UID can
+# open/replace them.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -55,15 +56,12 @@ if docker ps --format '{{.Names}}' | grep -qx pz-game-server; then
   ' || true
 fi
 
-if docker ps --format '{{.Names}}' | grep -qx pz-app; then
-  echo "Applying inside pz-app..."
-  docker exec pz-app sh -c '
-    mkdir -p /lua-bridge/inventory
-    find /lua-bridge -type d -exec chmod 777 {} + 2>/dev/null || true
-    find /lua-bridge -type f -exec chmod 666 {} + 2>/dev/null || true
-    ls -la /lua-bridge
-  ' || true
-fi
+# A third pass used to run inside pz-app against /lua-bridge. That container was
+# parked in c318e99, and the pass was redundant regardless: /lua-bridge and
+# /home/steam/Zomboid/Lua are the same host directory this script has already
+# chmodded twice. web-api mounts it too, but read-only with every capability
+# dropped, so it could not have applied the modes anyway — data-init does that at
+# start-up (5fdba44).
 
 echo "Done. Errors should stop within ~1 minute of in-game time (no restart required)."
 echo "If WRITE_FAIL appeared above, the bind mount may be read-only or blocked by SELinux."

@@ -13,11 +13,12 @@ Self-heal:
 
 ```bash
 ./scripts/fix-lua-perms.sh
-# or
-docker exec pz-app php artisan zomboid:heal-lua-bridge
 ```
 
-Scheduled: `zomboid:heal-lua-bridge` every 5 minutes.
+The `zomboid:heal-lua-bridge` command and its 5-minute schedule went away with
+the `app` container in `c318e99`. The `data-init` service now makes the
+directory writable once at start-up, and `web-api` fails its `/api/health` probe
+if it is not — see `5fdba44`.
 
 ## Admin UI
 

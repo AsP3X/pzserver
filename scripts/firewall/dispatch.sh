@@ -76,7 +76,7 @@ if [[ "$ACTION" == admin-* ]]; then
     if [ "$CADDY_ENABLED" != "true" ]; then
         echo -e "${RED}Error: Caddy is not configured.${NC}" >&2
         echo "Public admin access requires Caddy. Run 'make init' to set it up." >&2
-        echo "The admin panel is still available locally at http://localhost:8000" >&2
+        echo "The admin panel is still available locally at http://localhost:8100" >&2
         exit 1
     fi
 fi

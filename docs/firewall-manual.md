@@ -20,7 +20,7 @@ When you run `make expose`, `make hide`, `make admin-expose`, or `make admin-hid
 
 ### 1. Local-Only (Default)
 
-After `make up`, the admin panel is available at `http://localhost:8000`. No firewall changes needed.
+After `make up`, the admin panel is available at `http://localhost:8100`. No firewall changes needed.
 
 ### 2. Game Ports Open (LAN / Internet)
 

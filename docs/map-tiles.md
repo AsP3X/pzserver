@@ -1,5 +1,10 @@
 # Map tiles (3D isometric basemap)
 
+> **Currently unavailable.** This was a Laravel feature of the `app` container,
+> parked in `c318e99`. The Rust API that replaced it has no map routes, so the
+> `artisan` commands here have nothing to run in. Kept as the reference for what
+> the feature did and how the tile pyramids are laid out.
+
 The admin **Player map** (`/admin/players/map`) plots player markers on a basemap. The same basemap config is reused for safe zones, moderation, and the player portal map widget.
 
 ## Default: vector basemap (no tile generation)

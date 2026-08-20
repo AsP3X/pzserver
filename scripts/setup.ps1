@@ -212,9 +212,14 @@ if ((Test-Path ".env") -or (Test-Path "app\.env")) {
 # ══════════════════════════════════════════════════════════════════════
 Write-Banner
 
+# APP_PORT belonged to the Laravel panel, parked in c318e99. It is still written
+# to .env so the templates keep their shape, but nothing listens on it: the admin
+# UI is web-ui, published on WEB_UI_PORT by docker-compose.web.yml.
+$WEB_UI_PORT = if ($env:WEB_UI_PORT) { $env:WEB_UI_PORT } else { "8100" }
+
 if ($UseDefaults) {
     Write-Section "Non-interactive defaults"
-    Write-Host "  Production, B42 Stable (public), local panel :8000" -ForegroundColor DarkGray
+    Write-Host "  Production, B42 Stable (public), local panel :$WEB_UI_PORT" -ForegroundColor DarkGray
     Write-Host "  Auto-generated passwords will be printed at the end." -ForegroundColor DarkGray
 
     $APP_ENV = "production"; $APP_DEBUG = "false"; $LOG_LEVEL = "warning"
@@ -239,7 +244,7 @@ if ($UseDefaults) {
     if ($WEB_PROXY_MODE -notin @("local", "caddy", "npm")) { $WEB_PROXY_MODE = "local" }
     $ADMIN_PUBLIC_ENABLED = ($WEB_PROXY_MODE -ne "local")
     $SITE_HOST = "localhost"
-    $APP_URL = "http://127.0.0.1:8000"
+    $APP_URL = "http://127.0.0.1:$WEB_UI_PORT"
     $CADDY_SITE = "localhost"
     $CADDY_TLS = "`ttls internal"
     $GENERATE_SELF_SIGNED = $false
@@ -344,10 +349,10 @@ $GENERATE_SELF_SIGNED = $false
 
 Write-Host ""
 Write-Host "  How should the web admin panel be exposed?"
-Write-Host "    1) Local only - http://127.0.0.1:8000  (no host ports 80/443)"
+Write-Host "    1) Local only - http://127.0.0.1:$WEB_UI_PORT  (no host ports 80/443)"
 Write-Host "    2) Caddy on this host - publish ports 80/443"
 Write-Host "    3) Nginx Proxy Manager / external proxy on proxy-network"
-Write-Host "       (no 80/443 bind; NPM forwards to http://pz-app:8000)" -ForegroundColor DarkGray
+Write-Host "       (no 80/443 bind; NPM forwards to http://pz-web-ui:8080)" -ForegroundColor DarkGray
 do {
     $webModeChoice = Read-Host "  [1]"
     if ([string]::IsNullOrEmpty($webModeChoice)) { $webModeChoice = "1" }
@@ -356,19 +361,19 @@ do {
 if ($webModeChoice -eq "1") {
     $WEB_PROXY_MODE = "local"
     $SITE_HOST = "localhost"
-    $APP_URL = "http://127.0.0.1:8000"
+    $APP_URL = "http://127.0.0.1:$WEB_UI_PORT"
     $CADDY_SITE = "localhost"
     $CADDY_TLS = "`ttls internal"
-    Write-Host "  Panel: http://127.0.0.1:8000 only" -ForegroundColor Green
+    Write-Host "  Panel: http://127.0.0.1:$WEB_UI_PORT only" -ForegroundColor Green
 } elseif ($webModeChoice -eq "3") {
     $WEB_PROXY_MODE = "npm"
     $ADMIN_PUBLIC_ENABLED = $true
     $SITE_HOST = "localhost"
-    $APP_URL = "http://127.0.0.1:8000"
+    $APP_URL = "http://127.0.0.1:$WEB_UI_PORT"
     $CADDY_SITE = "localhost"
     $CADDY_TLS = "`ttls internal"
     Write-Host "  Nginx Proxy Manager mode" -ForegroundColor Green
-    Write-Host "  In NPM: Proxy Host -> http://pz-app:8000 on network proxy-network" -ForegroundColor DarkGray
+    Write-Host "  In NPM: Proxy Host -> http://pz-web-ui:8080 on network proxy-network" -ForegroundColor DarkGray
     $npmUrl = Read-Host "  Public URL for the panel (optional, e.g. https://pz.example.com) [skip]"
     if (-not [string]::IsNullOrWhiteSpace($npmUrl)) {
         if ($npmUrl -match '^https?://') {
@@ -634,7 +639,7 @@ Write-Host "  Branch:       $PZ_STEAM_BRANCH" -ForegroundColor Green
 if ($ADMIN_PUBLIC_ENABLED) {
     Write-Host "  Panel:        $APP_URL (HTTPS via Caddy, ports $CADDY_HTTP_PORT/$CADDY_HTTPS_PORT)" -ForegroundColor Green
 } else {
-    Write-Host "  Panel:        http://localhost:$APP_PORT (local only)" -ForegroundColor Green
+    Write-Host "  Panel:        http://localhost:$WEB_UI_PORT (local only)" -ForegroundColor Green
 }
 Write-Host "  Architecture: $ARCH_LABEL" -ForegroundColor Green
 Write-Host "  Firewall:     Windows Firewall" -ForegroundColor Green
@@ -914,27 +919,22 @@ if ($REDIS_PASS) {
     }
 }
 
-Write-Host "Clearing application cache..."
-docker exec pz-app php artisan config:clear --no-interaction 2>$null | Out-Null
-docker exec pz-app php artisan route:clear --no-interaction 2>$null | Out-Null
-docker exec pz-app php artisan view:clear --no-interaction 2>$null | Out-Null
-
-# Admin user
-Write-Host "Syncing admin account..."
-for ($attempt = 1; $attempt -le 3; $attempt++) {
-    $result = docker exec pz-app php artisan zomboid:create-admin --no-interaction 2>&1
-    if ($result -match "created|updated|exists") { break }
-    Start-Sleep -Seconds 3
-}
+# The Laravel cache clears and zomboid:create-admin used to run here, against the
+# app container parked in c318e99. Neither has a successor to call: there is no
+# config cache to clear, and web-api creates the first administrator itself at
+# start-up from the ADMIN_USERNAME / ADMIN_EMAIL / ADMIN_PASSWORD written to .env
+# above, but only while the users table is empty. Re-running this wizard against
+# a database that already has accounts therefore will not reset the password --
+# change it from the panel, or wipe accounts, as before.
 
 # ══════════════════════════════════════════════════════════════════════
 # Health check
 # ══════════════════════════════════════════════════════════════════════
-Write-Host "Verifying app is running..."
+Write-Host "Verifying the panel is running..."
 $HEALTH_OK = $false
 for ($attempt = 1; $attempt -le 5; $attempt++) {
     try {
-        $response = Invoke-CompatibleWebRequest -Uri "http://localhost:$APP_PORT/" -TimeoutSec 5
+        $response = Invoke-CompatibleWebRequest -Uri "http://localhost:$WEB_UI_PORT/" -TimeoutSec 5
         if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
             $HEALTH_OK = $true
             break
@@ -953,14 +953,14 @@ if ($HEALTH_OK) {
     Write-Host "==============================================" -ForegroundColor Green
 } else {
     Write-Host "==============================================" -ForegroundColor Yellow
-    Write-Host "  Setup complete - but app not responding!" -ForegroundColor Yellow
+    Write-Host "  Setup complete - but the panel is not responding!" -ForegroundColor Yellow
     Write-Host "==============================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  The app container may still be starting up." -ForegroundColor Yellow
-    Write-Host "  Check: .\make.ps1 logs" -ForegroundColor Yellow
+    Write-Host "  The web containers may still be starting up." -ForegroundColor Yellow
+    Write-Host "  Check: .\make.ps1 logs web-ui web-api" -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "  Local Admin:   http://localhost:$APP_PORT"
+Write-Host "  Local Admin:   http://localhost:$WEB_UI_PORT"
 if ($ADMIN_PUBLIC_ENABLED) {
     Write-Host "  Public Admin:  $APP_URL  (requires '.\make.ps1 admin-expose')"
 }
@@ -1010,12 +1010,7 @@ if ($GS_RUNNING) {
 }
 Write-Host ""
 
-# Item icons
-docker exec pz-app test -f /lua-bridge/items_catalog.json 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Downloading item icons in background..." -ForegroundColor DarkGray
-    docker exec -d pz-app php artisan zomboid:download-item-icons --no-interaction 2>$null
-} else {
-    Write-Host "Item icons: skipped (catalog not yet exported by game server)" -ForegroundColor DarkGray
-    Write-Host "  Run later: .\make.ps1 exec `"php artisan zomboid:download-item-icons`"" -ForegroundColor DarkGray
-}
+# Item icons were downloaded here by zomboid:download-item-icons, a Laravel
+# command that went away with the app container in c318e99. The Rust API has no
+# equivalent, so there is nothing to run and nothing to tell the operator to run
+# later.

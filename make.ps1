@@ -5,7 +5,7 @@
 .DESCRIPTION
     Run: .\make.ps1 <command>
     Example: .\make.ps1 up
-             .\make.ps1 exec "php artisan migrate"
+             .\make.ps1 logs game-server
              .\make.ps1 init
 .NOTES
     Requires Docker CLI + Compose with a Linux container backend.
@@ -317,19 +317,20 @@ function Do-Pull {
     Invoke-Compose @("pull")
 }
 
+# migrate, test and exec drove the Laravel app container, parked in c318e99.
+# They fail loudly rather than silently targeting a service that is not there.
 function Do-Migrate {
-    Do-DbBackup
-    Invoke-Compose @("exec", "app", "php", "artisan", "migrate", "--force")
+    Write-Host "There is no migrate step any more." -ForegroundColor Yellow
+    Write-Host "  web-api runs its sqlx migrations itself at start-up, so bringing the"
+    Write-Host "  container up is what applies them:  .\make.ps1 restart web-api"
+    exit 1
 }
 
 function Do-Test {
-    Assert-DockerEnvironment
-    # Create test DB if missing
-    $check = docker exec -T pz-db psql -U zomboid -tc "SELECT 1 FROM pg_database WHERE datname='zomboid_test'" 2>$null
-    if ($check -notmatch "1") {
-        docker exec -T pz-db psql -U zomboid -c "CREATE DATABASE zomboid_test OWNER zomboid" 2>$null
-    }
-    Invoke-Compose @("exec", "-e", "APP_ENV=testing", "-e", "APP_CONFIG_CACHE=/tmp/laravel-test-config.php", "-e", "DB_CONNECTION=pgsql", "-e", "DB_DATABASE=zomboid_test", "app", "php", "artisan", "test", "--compact")
+    Write-Host "The Laravel suite went away with the app container in c318e99." -ForegroundColor Yellow
+    Write-Host "  cd web/api; cargo test --workspace   Rust API tests"
+    Write-Host "  .\make.ps1 test-game-server          host-side shell and Lua suites"
+    exit 1
 }
 
 # Host-side shell suites. No containers needed: they run the real scripts
@@ -375,17 +376,11 @@ function Do-TestGameServer {
 }
 
 function Do-Exec {
-    if (-not $script:CmdArgs -or $script:CmdArgs.Count -eq 0) {
-        Write-Host "Usage: .\make.ps1 exec php artisan ..." -ForegroundColor Yellow
-        return
-    }
-
-    if ($script:CmdArgs.Count -eq 1) {
-        Invoke-Compose @("exec", "app", "sh", "-lc", $script:CmdArgs[0])
-        return
-    }
-
-    Invoke-Compose (@("exec", "app") + $script:CmdArgs)
+    Write-Host "There is no app container to exec into - it was parked in c318e99." -ForegroundColor Yellow
+    Write-Host "  To run something in a service that does exist, name it:"
+    Write-Host "    docker compose exec web-api <cmd>"
+    Write-Host "    docker compose exec game-server <cmd>"
+    exit 1
 }
 
 function Do-Arch {
@@ -400,8 +395,20 @@ function Do-Info {
     Write-Host ([char]0x2551 + "          Zomboid Manager - Status            " + [char]0x2551) -ForegroundColor Cyan
     Write-Host ([char]0x255A + ([string][char]0x2550 * 46) + [char]0x255D) -ForegroundColor Cyan
     Write-Host ""
+    # Mirrors pz_info in scripts/compose-env.sh, which make and deploy.sh share.
+    # This copy exists only because PowerShell cannot source that bash; keep the
+    # two outputs in step when either changes.
+    $mode = Get-WebProxyMode
     Write-Host "  Local Admin:   http://localhost:$WEB_UI_PORT"
-    Write-Host "  Web mode:      $(Get-WebProxyMode)"
+    Write-Host "  Web mode:      $mode"
+    switch ($mode) {
+        "caddy" { Write-Host "  Public Admin:  Caddy on host ports 80/443" }
+        "npm" {
+            Write-Host "  Public Admin:  via Nginx Proxy Manager on proxy-network"
+            Write-Host "                 Forward to: http://pz-web-ui:8080"
+        }
+        default { Write-Host "  Public Admin:  disabled (localhost only)" }
+    }
 
     if (Test-Path ".firewall.conf") {
         $conf = Get-Content ".firewall.conf" | Where-Object { $_ -match "=" -and $_ -notmatch "^\s*#" }
@@ -414,17 +421,14 @@ function Do-Info {
         }
         $httpPort  = if ($fwVars["ADMIN_HTTP_PORT"])  { $fwVars["ADMIN_HTTP_PORT"] }  else { "80" }
         $httpsPort = if ($fwVars["ADMIN_HTTPS_PORT"]) { $fwVars["ADMIN_HTTPS_PORT"] } else { "443" }
-        $host_ = $fwVars["ADMIN_PUBLIC_HOST"]
-        if ($host_ -and $host_ -ne "localhost") {
-            $url = if ($httpsPort -eq "443") { "https://$host_" } else { "https://${host_}:$httpsPort" }
-            Write-Host "  Public Admin:  $url  (requires '.\make.ps1 admin-expose')"
-        } else {
-            Write-Host "  Public Admin:  not configured (run '.\make.ps1 init' to enable)"
+        $publicHost = $fwVars["ADMIN_PUBLIC_HOST"]
+        if ($publicHost -and $publicHost -ne "localhost") {
+            $url = if ($httpsPort -eq "443") { "https://$publicHost" } else { "https://${publicHost}:$httpsPort" }
+            Write-Host "  Public host:   $url  (requires '.\make.ps1 admin-expose')"
         }
         Write-Host "  Caddy Ports:   $httpPort (HTTP) / $httpsPort (HTTPS)"
         Write-Host "  Firewall:      $($fwVars['FIREWALL_BACKEND'])"
     } else {
-        Write-Host "  Public Admin:  not configured (run '.\make.ps1 init')"
         Write-Host "  Firewall:      not configured"
     }
 
@@ -433,10 +437,15 @@ function Do-Info {
     } else {
         Write-Host "  Public IP:     unavailable"
     }
-    Write-Host "  Game Ports:    $PZ_GAME_PORT/udp, $PZ_DIRECT_PORT/udp (closed by default)"
+    Write-Host "  Game Ports:    $PZ_GAME_PORT/udp, $PZ_DIRECT_PORT/udp"
+    Write-Host "  Data dir:      $((Get-Location).Path)\data\"
     Write-Host ""
-    Write-Host "  Run '.\make.ps1 expose' to allow remote players."
-    Write-Host "  Run '.\make.ps1 admin-expose' to open public admin access."
+    Write-Host "  Containers:"
+    $psArgs = $script:ComposeArgs + @("ps", "--format", "table {{.Name}}`t{{.Status}}`t{{.Ports}}")
+    & docker @psArgs
+    Write-Host ""
+    Write-Host "  Open game ports to remote players:  .\make.ps1 expose"
+    Write-Host "  Open public admin access:           .\make.ps1 admin-expose"
     Write-Host ""
 }
 
@@ -578,7 +587,7 @@ function Do-AdminExpose {
     netsh advfirewall firewall add rule name="PZ Admin HTTP $httpPort" dir=in action=allow protocol=TCP localport=$httpPort | Out-Null
     netsh advfirewall firewall add rule name="PZ Admin HTTPS $httpsPort" dir=in action=allow protocol=TCP localport=$httpsPort | Out-Null
     Write-Host "  Admin panel exposed on ports $httpPort (HTTP) / $httpsPort (HTTPS)" -ForegroundColor Green
-    Write-Host "  Local:  http://localhost:$APP_PORT"
+    Write-Host "  Local:  http://localhost:$WEB_UI_PORT"
 }
 
 function Do-AdminHide {
@@ -599,7 +608,7 @@ function Do-AdminHide {
     netsh advfirewall firewall delete rule name="PZ Admin HTTP $httpPort" 2>$null | Out-Null
     netsh advfirewall firewall delete rule name="PZ Admin HTTPS $httpsPort" 2>$null | Out-Null
     Write-Host "Admin panel restricted to local access." -ForegroundColor Green
-    Write-Host "  Local:  http://localhost:$APP_PORT"
+    Write-Host "  Local:  http://localhost:$WEB_UI_PORT"
 }
 
 function Do-UpdateVersion {

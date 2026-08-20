@@ -63,7 +63,7 @@ This creates Windows Firewall rules automatically.
 
 **4. Access the admin panel**
 
-- **Local:** http://localhost:8000
+- **Local:** http://localhost:8100
 - **Public:** `.\make.ps1 admin-expose`
 
 Optional: local player-map basemap tiles (packed as a single `tiles.sqlite` under `data/map-tiles/`) are documented in [map-tiles.md](map-tiles.md). Proxy tiles work without generation.

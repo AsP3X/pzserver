@@ -175,7 +175,11 @@ else
     echo -e "  ${YELLOW}Could not detect public IP (no internet or behind NAT).${NC}"
 fi
 
+# APP_PORT belonged to the Laravel panel, parked in c318e99. It is still written
+# to .env so the templates keep their shape, but nothing listens on it: the admin
+# UI is web-ui, published on WEB_UI_PORT by docker-compose.web.yml.
 APP_PORT=8000
+WEB_UI_PORT="${WEB_UI_PORT:-8100}"
 CADDY_HTTP_PORT=80
 CADDY_HTTPS_PORT=443
 ADMIN_PUBLIC_ENABLED=false
@@ -184,10 +188,10 @@ GENERATE_SELF_SIGNED=false
 
 echo ""
 echo "  How should the web admin panel be exposed?"
-echo "    1) Local only — http://127.0.0.1:8000  (no host ports 80/443)"
+echo "    1) Local only — http://127.0.0.1:${WEB_UI_PORT}  (no host ports 80/443)"
 echo "    2) Caddy on this host — publish ports 80/443 (standalone)"
 echo "    3) Nginx Proxy Manager / external proxy on proxy-network"
-echo -e "       ${DIM}(no 80/443 bind; NPM forwards to http://pz-app:8000)${NC}"
+echo -e "       ${DIM}(no 80/443 bind; NPM forwards to http://pz-web-ui:8080)${NC}"
 while true; do
     echo -ne "  ${DIM}[1]${NC}: "
     read -r web_mode_choice || true
@@ -200,21 +204,21 @@ case "$web_mode_choice" in
     1)
         WEB_PROXY_MODE=local
         SITE_HOST="localhost"
-        APP_URL="http://127.0.0.1:${APP_PORT}"
+        APP_URL="http://127.0.0.1:${WEB_UI_PORT}"
         CADDY_SITE="localhost"
         CADDY_TLS=$'\ttls internal'
         ADMIN_PUBLIC_ENABLED=false
-        echo -e "  ${GREEN}✓ Panel: http://127.0.0.1:${APP_PORT} only${NC}"
+        echo -e "  ${GREEN}✓ Panel: http://127.0.0.1:${WEB_UI_PORT} only${NC}"
         ;;
     3)
         WEB_PROXY_MODE=npm
         SITE_HOST="localhost"
-        APP_URL="http://127.0.0.1:${APP_PORT}"
+        APP_URL="http://127.0.0.1:${WEB_UI_PORT}"
         CADDY_SITE="localhost"
         CADDY_TLS=$'\ttls internal'
         ADMIN_PUBLIC_ENABLED=true
         echo -e "  ${GREEN}✓ Nginx Proxy Manager mode${NC}"
-        echo -e "  ${DIM}In NPM: Proxy Host → http://pz-app:8000 on network proxy-network${NC}"
+        echo -e "  ${DIM}In NPM: Proxy Host → http://pz-web-ui:8080 on network proxy-network${NC}"
         echo -ne "  Public URL for the panel (optional, e.g. https://pz.example.com) ${DIM}[skip]${NC}: "
         read -r npm_url || true
         if [ -n "$npm_url" ]; then
@@ -501,10 +505,10 @@ case "$WEB_PROXY_MODE" in
         echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (Caddy ports ${CADDY_HTTP_PORT}/${CADDY_HTTPS_PORT})"
         ;;
     npm)
-        echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (NPM → http://pz-app:8000)"
+        echo -e "  Panel:        ${GREEN}${APP_URL}${NC} (NPM → http://pz-web-ui:8080)"
         ;;
     *)
-        echo -e "  Panel:        ${GREEN}http://127.0.0.1:${APP_PORT}${NC} (local only)"
+        echo -e "  Panel:        ${GREEN}http://127.0.0.1:${WEB_UI_PORT}${NC} (local only)"
         ;;
 esac
 echo -e "  Architecture: ${GREEN}${ARCH_LABEL}${NC}"
@@ -775,28 +779,21 @@ if [ -n "$REDIS_PASS" ]; then
     docker exec pz-redis redis-cli -a "$REDIS_PASS" CONFIG SET requirepass "$REDIS_PASS" >/dev/null 2>&1 || true
 fi
 
-# Clear stale config/route cache (APP_URL or other settings may have changed)
-echo "Clearing application cache..."
-docker exec pz-app php artisan config:clear --no-interaction >/dev/null 2>&1 || true
-docker exec pz-app php artisan route:clear --no-interaction >/dev/null 2>&1 || true
-docker exec pz-app php artisan view:clear --no-interaction >/dev/null 2>&1 || true
-
-# Admin user: update or create via artisan (entrypoint may not have run yet)
-echo "Syncing admin account..."
-for attempt in 1 2 3; do
-    if docker exec pz-app php artisan zomboid:create-admin --no-interaction 2>&1 | grep -qE "created|updated|exists"; then
-        break
-    fi
-    sleep 3
-done
+# The Laravel cache clears and zomboid:create-admin used to run here, against the
+# app container parked in c318e99. Neither has a successor to call: there is no
+# config cache to clear, and web-api creates the first administrator itself at
+# start-up from the ADMIN_USERNAME / ADMIN_EMAIL / ADMIN_PASSWORD written to .env
+# above, but only while the users table is empty. Re-running this wizard against
+# a database that already has accounts therefore will not reset the password —
+# change it from the panel, or wipe accounts, as before.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Health check — verify the app is running (local check only)
 # ══════════════════════════════════════════════════════════════════════════════
-echo "Verifying app is running..."
+echo "Verifying the panel is running..."
 HEALTH_OK=false
 for attempt in 1 2 3 4 5; do
-    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}/" 2>/dev/null || echo "000")
+    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "http://localhost:${WEB_UI_PORT}/" 2>/dev/null || echo "000")
     if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
         HEALTH_OK=true
         break
@@ -814,14 +811,15 @@ if [ "$HEALTH_OK" = "true" ]; then
     echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${NC}"
 else
     echo -e "${YELLOW}${BOLD}══════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}${BOLD}  Setup complete — but app not responding!${NC}"
+    echo -e "${YELLOW}${BOLD}  Setup complete — but the panel is not responding!${NC}"
     echo -e "${YELLOW}${BOLD}══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  ${YELLOW}The app container may still be starting up.${NC}"
-    echo -e "  ${YELLOW}Check: docker logs -f pz-app${NC}"
+    echo -e "  ${YELLOW}The web containers may still be starting up.${NC}"
+    echo -e "  ${YELLOW}Check: docker logs -f pz-web-ui${NC}"
+    echo -e "  ${YELLOW}   and: docker logs -f pz-web-api${NC}"
 fi
 echo ""
-echo -e "  ${BOLD}Local Admin:${NC}   http://localhost:${APP_PORT}"
+echo -e "  ${BOLD}Local Admin:${NC}   http://localhost:${WEB_UI_PORT}"
 if [ "$ADMIN_PUBLIC_ENABLED" = "true" ]; then
     echo -e "  ${BOLD}Public Admin:${NC}  ${APP_URL}  ${DIM}(open firewall / Caddy ports if needed)${NC}"
 fi
@@ -873,14 +871,7 @@ else
 fi
 echo ""
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Item icons — download in background if catalog is available
-# ══════════════════════════════════════════════════════════════════════════════
-if docker exec pz-app test -f /lua-bridge/items_catalog.json 2>/dev/null; then
-    echo -e "${DIM}Downloading item icons in background...${NC}"
-    docker exec -d pz-app php artisan zomboid:download-item-icons --no-interaction \
-        >> /dev/null 2>&1 || true
-else
-    echo -e "${DIM}Item icons: skipped (catalog not yet exported by game server)${NC}"
-    echo -e "${DIM}  Run later: docker exec pz-app php artisan zomboid:download-item-icons${NC}"
-fi
+# Item icons were downloaded here by zomboid:download-item-icons, a Laravel
+# command that went away with the app container in c318e99. The Rust API has no
+# equivalent, so there is nothing to run and nothing to tell the operator to run
+# later.

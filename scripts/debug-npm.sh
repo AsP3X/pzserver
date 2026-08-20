@@ -12,7 +12,7 @@ echo "Domain: $DOMAIN"
 echo ""
 
 echo "=== Direct upstream (must be 200) ==="
-docker exec "$NPM" curl -sI "http://pz-app:8000/" | head -5 || true
+docker exec "$NPM" curl -sI "http://pz-web-ui:8080/" | head -5 || true
 echo ""
 
 echo "=== Via NPM port 80 with Host header ==="
@@ -20,7 +20,7 @@ docker exec "$NPM" curl -sI -H "Host: $DOMAIN" "http://127.0.0.1:80/" | head -10
 echo ""
 
 echo "=== Grep proxy_host configs ==="
-docker exec "$NPM" sh -c "grep -RIn --include='*.conf' -E '${DOMAIN}|pz-app|proxy_pass|server_name' /data/nginx/proxy_host/ 2>/dev/null | head -100" || true
+docker exec "$NPM" sh -c "grep -RIn --include='*.conf' -E '${DOMAIN}|pz-web-ui|proxy_pass|server_name' /data/nginx/proxy_host/ 2>/dev/null | head -100" || true
 echo ""
 
 echo "=== Full conf files for domain ==="
@@ -37,4 +37,4 @@ else
   done
 fi
 
-echo "=== If proxy_pass is not http://pz-app:8000; fix Proxy Host in NPM UI and Save ==="
+echo "=== If proxy_pass is not http://pz-web-ui:8080; fix Proxy Host in NPM UI and Save ==="

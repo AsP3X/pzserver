@@ -1,5 +1,10 @@
 # Vector basemap (default)
 
+> **Currently unavailable.** This was a Laravel feature of the `app` container,
+> parked in `c318e99`. The Rust API that replaced it has no map routes, so the
+> `artisan` commands here have nothing to run in. Kept as the reference for what
+> the feature did and how the baked artefacts are laid out.
+
 Admin and portal maps use a **vector basemap** by default: geometry baked from vanilla Project Zomboid `worldmap.xml`, drawn in the browser with Canvas. No `pzmap2dzi` run and no tile CDN are required for normal use.
 
 This matches the *schematic* in-game world map (water, roads, buildings, town labels) — not photorealistic isometric tiles.

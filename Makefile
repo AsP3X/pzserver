@@ -38,7 +38,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -69,44 +69,12 @@ db-reset:
 	@echo "Postgres data dir recreated. Run 'make up' to start with an empty DB."
 
 # ── Informational output ────────────────────────────────────────────
+# Delegates to pz_info in scripts/compose-env.sh, which ./deploy.sh --status also
+# calls. Keeping two hand-written copies is how `make info` ended up correct
+# about the panel port while its PowerShell twin still advertised the parked
+# Laravel one. make.ps1 keeps a separate copy only because it cannot source bash.
 info:
-	@PUBLIC_IP=$$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true); \
-	echo ""; \
-	echo "╔══════════════════════════════════════════════╗"; \
-	echo "║          Zomboid Manager — Status            ║"; \
-	echo "╚══════════════════════════════════════════════╝"; \
-	echo ""; \
-	echo "  Local Admin:   http://localhost:$(WEB_UI_PORT)"; \
-	if [ -f .firewall.conf ]; then \
-		. ./.firewall.conf; \
-		HTTPS_PORT="$${ADMIN_HTTPS_PORT:-443}"; \
-		HTTP_PORT="$${ADMIN_HTTP_PORT:-80}"; \
-		HOST="$${ADMIN_PUBLIC_HOST:-}"; \
-		if [ -n "$$HOST" ] && [ "$$HOST" != "localhost" ]; then \
-			if [ "$$HTTPS_PORT" = "443" ]; then \
-				echo "  Public Admin:  https://$$HOST  (requires 'make admin-expose')"; \
-			else \
-				echo "  Public Admin:  https://$$HOST:$$HTTPS_PORT  (requires 'make admin-expose')"; \
-			fi; \
-		else \
-			echo "  Public Admin:  not configured (run 'make init' to enable)"; \
-		fi; \
-		echo "  Caddy Ports:   $$HTTP_PORT (HTTP) / $$HTTPS_PORT (HTTPS)"; \
-		echo "  Firewall:      $$FIREWALL_BACKEND"; \
-	else \
-		echo "  Public Admin:  not configured (run 'make init')"; \
-		echo "  Firewall:      not configured"; \
-	fi; \
-	if [ -n "$$PUBLIC_IP" ]; then \
-		echo "  Public IP:     $$PUBLIC_IP"; \
-	else \
-		echo "  Public IP:     unavailable"; \
-	fi; \
-	echo "  Game Ports:    $(PZ_GAME_PORT)/udp, $(PZ_DIRECT_PORT)/udp (closed by default)"; \
-	echo ""; \
-	echo "  Run 'make expose' to allow remote players."; \
-	echo "  Run 'make admin-expose' to open public admin access."; \
-	echo ""
+	@bash -c '. scripts/compose-env.sh && pz_info'
 
 # ── Firewall helpers ────────────────────────────────────────────────
 # These targets dispatch to OS-specific scripts via .firewall.conf.
@@ -126,7 +94,7 @@ ensure-networks:
 	@docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network >/dev/null
 
 up: ensure-data-dirs ensure-networks
-	$(COMPOSE) up -d --build
+	$(COMPOSE) up -d --build --remove-orphans
 
 down:
 	$(COMPOSE) down
@@ -159,14 +127,26 @@ nuke:
 build:
 	$(COMPOSE) build
 
+# Rebuild the local fixed images on top of their upstream bases, then start.
+# Mirrors ./deploy.sh --rebuild and .\make.ps1 rebuild.
+rebuild: ensure-data-dirs ensure-networks
+	$(COMPOSE) build --pull web-api web-ui game-server
+	$(MAKE) up
+
+# Rebuild only the game-server overlay (upstream base + our entrypoints).
+rebuild-game:
+	$(COMPOSE) build --pull game-server
+	$(COMPOSE) up -d game-server
+
+# SVC limits these to named services, e.g. make logs SVC="game-server web-api"
 restart:
-	$(COMPOSE) restart
+	$(COMPOSE) restart $(SVC)
 
 stop:
 	$(COMPOSE) stop
 
 logs:
-	$(COMPOSE) logs -f
+	$(COMPOSE) logs -f --tail 200 $(SVC)
 
 ps:
 	$(COMPOSE) ps
@@ -186,7 +166,7 @@ hide:
 # ── Admin UI exposure ───────────────────────────────────────────────
 # Opens Caddy web ports in the firewall for public HTTPS access.
 # Ports are read from .firewall.conf (set during 'make init').
-# The app stays bound to 127.0.0.1:8000 — it is never exposed directly.
+# web-ui stays bound to 127.0.0.1:$(WEB_UI_PORT) — never exposed directly.
 # Requires Caddy to be configured (run 'make init' first).
 admin-expose:
 	@if [ ! -f .firewall.conf ]; then echo "Error: run 'make init' first."; exit 1; fi
@@ -195,7 +175,7 @@ admin-expose:
 	HTTPS="$${ADMIN_HTTPS_PORT:-443}"; \
 	CADDY_HTTP_PORT=$$HTTP CADDY_HTTPS_PORT=$$HTTPS $(FW_DISPATCH) admin-open; \
 	echo "Admin panel exposed via Caddy on ports $$HTTP/$$HTTPS"; \
-	echo "Local:  http://localhost:$(APP_PORT)"; \
+	echo "Local:  http://localhost:$(WEB_UI_PORT)"; \
 	HOST="$${ADMIN_PUBLIC_HOST:-}"; \
 	if [ -n "$$HOST" ] && [ "$$HOST" != "localhost" ]; then \
 		if [ "$$HTTPS" = "443" ]; then \
@@ -212,16 +192,23 @@ admin-hide:
 	HTTPS="$${ADMIN_HTTPS_PORT:-443}"; \
 	CADDY_HTTP_PORT=$$HTTP CADDY_HTTPS_PORT=$$HTTPS $(FW_DISPATCH) admin-close; \
 	echo "Admin panel restricted to local access."; \
-	echo "Local:  http://localhost:$(APP_PORT)"
+	echo "Local:  http://localhost:$(WEB_UI_PORT)"
 
 # ── App commands ─────────────────────────────────────────────────────
-migrate: db-backup
-	$(COMPOSE) exec app php artisan migrate --force
+# migrate, test and exec drove the Laravel app container, parked in c318e99.
+# They fail loudly rather than silently targeting a service that is not there.
+migrate:
+	@echo "There is no migrate step any more."
+	@echo "  web-api runs its sqlx migrations itself at start-up, so bringing the"
+	@echo "  container up is what applies them:  make restart SVC=web-api"
+	@exit 1
 
 test:
-	@$(COMPOSE) exec -T db psql -U zomboid -tc "SELECT 1 FROM pg_database WHERE datname='zomboid_test'" | grep -q 1 \
-		|| $(COMPOSE) exec -T db psql -U zomboid -c "CREATE DATABASE zomboid_test OWNER zomboid" 2>/dev/null || true
-	$(COMPOSE) exec -e APP_ENV=testing -e APP_CONFIG_CACHE=/tmp/laravel-test-config.php -e DB_CONNECTION=pgsql -e DB_DATABASE=zomboid_test app php artisan test --compact
+	@echo "The Laravel suite went away with the app container in c318e99."
+	@echo "  make web-test          Rust API tests (cargo test --workspace)"
+	@echo "  make web-check         clippy + fmt + tsc + eslint"
+	@echo "  make test-game-server  host-side shell and Lua suites"
+	@exit 1
 
 # Runs on the host (no containers needed) — exercises configure-server.sh
 # against a throwaway config tree to verify env-var precedence.
@@ -239,7 +226,11 @@ test-game-server:
 	fi
 
 exec:
-	$(COMPOSE) exec app $(CMD)
+	@echo "There is no app container to exec into — it was parked in c318e99."
+	@echo "  To run something in a service that does exist, name it:"
+	@echo "    docker compose exec web-api <cmd>"
+	@echo "    docker compose exec game-server <cmd>"
+	@exit 1
 
 arch:
 	@echo "Detected: $(ARCH) -> $(ARCH_FILE)"
@@ -451,7 +442,10 @@ help:
 	@echo "  App:"
 	@echo "    migrate        - Run database migrations"
 	@echo "    test           - Run tests in the app container"
-	@echo "    exec CMD=...   - Run a command in the app container"
+	@echo "    rebuild        - Rebuild images from upstream bases, then start"
+	@echo "    rebuild-game   - Rebuild game-server only"
+	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
+	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""
 	@echo "  Web stack extras (Rust API + Vite UI — already started by 'up'):"
 	@echo "    web-up         - Build and start only web-db, web-api and web-ui"

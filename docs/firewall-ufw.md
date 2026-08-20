@@ -12,7 +12,7 @@ This guide covers firewall management for Project Zomboid servers running on **U
 
 ### 1. Local-Only (Default)
 
-After `make up`, the admin panel is available at `http://localhost:8000`. No firewall changes are needed. The game server is running but not reachable from outside the machine (assuming ufw is enabled with a default-deny incoming policy).
+After `make up`, the admin panel is available at `http://localhost:8100`. No firewall changes are needed. The game server is running but not reachable from outside the machine (assuming ufw is enabled with a default-deny incoming policy).
 
 ### 2. Game Ports Open (LAN / Internet)
 
@@ -32,7 +32,7 @@ make admin-hide     # Removes the allow rules
 
 The ports opened depend on what you chose during `make init` (default: 80/tcp + 443/tcp). Your configured ports are saved in `.firewall.conf` — check with `make info`.
 
-This opens the Caddy reverse proxy ports so remote users can access the admin panel over HTTPS. The app container stays bound to `127.0.0.1:8000` — port 8000 is **never** exposed directly.
+This opens the Caddy reverse proxy ports so remote users can access the admin panel over HTTPS. The web-ui container stays bound to `127.0.0.1:8100` — port 8100 is **never** exposed directly.
 
 **Requires Caddy to be configured** — run `make init` and choose a domain or IP during setup.
 

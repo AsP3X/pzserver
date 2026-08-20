@@ -52,7 +52,7 @@ The wizard will:
 4. Build and start all containers
 5. Print the panel URL and passwords
 
-**Accept defaults** for B42 Stable with the panel at `http://localhost:8000`.
+**Accept defaults** for B42 Stable with the panel at `http://localhost:8100`.
 
 Non-interactive defaults (CI / scripted hosts):
 
@@ -65,11 +65,20 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 ### Re-deploy / restart later
 
 ```powershell
-.\deploy.ps1          # start if already configured
-.\deploy.ps1 -Status  # URLs + container status
-.\deploy.ps1 -Down    # stop everything
-.\deploy.ps1 -Init    # re-run setup wizard
+.\deploy.ps1                        # start if already configured
+.\deploy.ps1 -Status                # URLs + container status
+.\deploy.ps1 -Ps                    # container table only
+.\deploy.ps1 -Logs game-server      # follow logs (all services, or the named ones)
+.\deploy.ps1 -Restart web-api       # restart all services, or the named ones
+.\deploy.ps1 -Rebuild               # rebuild images from upstream bases, then start
+.\deploy.ps1 -RebuildGame           # rebuild game-server only
+.\deploy.ps1 -Down                  # stop everything
+.\deploy.ps1 -Init                  # re-run setup wizard
 ```
+
+`./deploy.sh` takes the same commands on Linux and macOS as `--status`,
+`--logs`, `--rebuild` and so on. Both print their full surface with `-Help` /
+`--help`.
 
 ### Docker networks
 
@@ -84,9 +93,9 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 
 | Mode | `.env` value | Host ports 80/443 | How to reach the panel |
 |------|--------------|-------------------|------------------------|
-| **Local** (default) | `local` | No | `http://127.0.0.1:8000` |
+| **Local** (default) | `local` | No | `http://127.0.0.1:8100` |
 | **Caddy** | `caddy` | Yes (Caddy) | Your domain / IP on 80/443 |
-| **Nginx Proxy Manager** | `npm` | No | NPM → `http://pz-app:8000` on `proxy-network` |
+| **Nginx Proxy Manager** | `npm` | No | NPM → `http://pz-web-ui:8080` on `proxy-network` |
 
 If NPM (or anything else) already owns port 80, use **`WEB_PROXY_MODE=npm`**.
 
@@ -96,8 +105,8 @@ WEB_PROXY_MODE=npm
 
 NPM Proxy Host example:
 
-- Forward hostname: `pz-app`
-- Forward port: `8000`
+- Forward hostname: `pz-web-ui`
+- Forward port: `8080`
 - Scheme: `http`
 - Docker network: `proxy-network`
 
@@ -132,6 +141,12 @@ These are generated on the host and are gitignored:
 ---
 
 ## Map basemap (admin player map)
+
+> **Currently unavailable.** The player map and both basemap generators were
+> Laravel features of the `app` container, parked in `c318e99`. The Rust API
+> that replaced it has no map routes, so the `artisan` commands below have
+> nothing to run in — they are kept as the reference for what the feature did.
+> Everything else in this README describes the stack as it runs today.
 
 The admin **Player map** shows live/offline player markers on a basemap. **Map view** toggle:
 
@@ -293,9 +308,11 @@ Persistent data lives in Docker volumes (`pz-data`, `pz-server-files`, `pz-postg
 |--------|---------|-------|
 | Start | `.\make.ps1 up` | `make up` |
 | Stop | `.\make.ps1 down` | `make down` |
-| Logs | `.\make.ps1 logs` | `make logs` |
+| Logs | `.\make.ps1 logs [svc...]` | `make logs SVC="..."` |
 | Status | `.\make.ps1 info` | `make info` |
-| Restart | `.\make.ps1 restart` | `make restart` |
+| Restart | `.\make.ps1 restart [svc...]` | `make restart SVC="..."` |
+| Rebuild images | `.\make.ps1 rebuild` | `make rebuild` |
+| Rebuild game server | `.\make.ps1 rebuild-game` | `make rebuild-game` |
 | Open game ports (host FW) | `.\make.ps1 expose` | `make expose` |
 | **Destroy all data** | `.\make.ps1 nuke` | `make nuke` |
 
@@ -312,7 +329,7 @@ Persistent data lives in Docker volumes (`pz-data`, `pz-server-files`, `pz-postg
 ## Security notes
 
 - Change all default passwords during setup (or let the wizard auto-generate)
-- Panel binds to **localhost:8000** unless you enable public Caddy access
+- Panel binds to **localhost:8100** unless you enable public Caddy access
 - RCON is **not** published to the host (only internal Docker network)
 - Expose UDP game ports only when you want remote players
 - License: **AGPL-3.0** (see `LICENSE`) — respect obligations if you redistribute or host as a service

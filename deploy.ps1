@@ -259,8 +259,9 @@ try {
 
     switch ($cmd) {
         "status" {
+            # info already ends with the container table, same as pz_info does
+            # for ./deploy.sh --status.
             Invoke-Make "info"
-            Invoke-Make "ps"
             exit 0
         }
         "ps" {

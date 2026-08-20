@@ -83,7 +83,7 @@ make hide
 
 **Local access** (always available):
 ```
-http://localhost:8000
+http://localhost:8100
 ```
 
 **Remote/public access** via HTTPS:
