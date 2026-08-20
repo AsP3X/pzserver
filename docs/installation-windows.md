@@ -41,17 +41,14 @@ cd zomboid-manager
 
 Same interactive wizard as Linux — configures everything, generates secrets, creates certs, and starts all Docker containers.
 
-If you want a simpler entrypoint, use:
+For a first-run-or-start command that does either as needed:
 
 ```powershell
-.\easy-init.ps1
+.\deploy.ps1
 ```
 
-For later restarts or a first-run-or-start command, use:
-
-```powershell
-.\easy-deploy.ps1
-```
+`.\deploy.ps1 -Help` lists the rest — `-Status`, `-Logs`, `-Restart`,
+`-Rebuild`, `-Down`.
 
 **3. Open game ports**
 
@@ -90,12 +87,15 @@ Optional: local player-map basemap tiles (packed as a single `tiles.sqlite` unde
 | `.\make.ps1 nuke` | Destroy ALL data (danger) |
 | `.\make.ps1 help` | Show all commands |
 
-Convenience wrappers:
+One-command deploy:
 
 | Script | Description |
 |--------|-------------|
-| `.\easy-init.ps1` | Shortcut for `.\make.ps1 init` |
-| `.\easy-deploy.ps1` | Shortcut for `.\make.ps1 deploy` |
+| `.\deploy.ps1` | Runs the wizard on a fresh checkout, otherwise starts the stack |
+| `.\deploy.ps1 -Status` | URLs, web mode, firewall state and the container table |
+| `.\deploy.ps1 -Logs [svc...]` | Follow logs for all services, or the named ones |
+| `.\deploy.ps1 -Rebuild` | Rebuild images from their upstream bases, then start |
+| `.\deploy.ps1 -Help` | The full command surface |
 
 ---
 

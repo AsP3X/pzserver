@@ -175,8 +175,8 @@ run_wizard() {
   local wizard_bash
   if [[ ! -t 0 ]]; then
     die "the setup wizard needs an interactive terminal.
-  Run ./deploy.sh --init from a terminal, or copy .env.example to .env and
-  app/.env.example to app/.env, fill in the secrets, then re-run ./deploy.sh."
+  Run ./deploy.sh --init from a terminal, or copy .env.example to .env,
+  fill in the secrets, then re-run ./deploy.sh."
   fi
   if ! wizard_bash="$(find_bash4)"; then
     die "the setup wizard needs bash 4 or newer (this shell is ${BASH_VERSION:-unknown}).
@@ -293,7 +293,7 @@ echo ""
 warn_about_sudo
 check_disk_space
 
-if [[ ! -f .env || ! -f app/.env ]]; then
+if [[ ! -f .env ]]; then
   CURRENT_STAGE="setup wizard"
   run_wizard
   exit 0

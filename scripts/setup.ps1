@@ -192,7 +192,7 @@ Assert-DockerEnvironment
 $UseDefaults = ($env:PZ_SETUP_ASSUME_YES -eq "1")
 
 # ── Guard: existing .env ────────────────────────────────────────────
-if ((Test-Path ".env") -or (Test-Path "app\.env")) {
+if (Test-Path ".env") {
     Write-Host ""
     Write-Host "Existing .env file(s) detected." -ForegroundColor Yellow
     if ($UseDefaults) {
@@ -212,9 +212,7 @@ if ((Test-Path ".env") -or (Test-Path "app\.env")) {
 # ══════════════════════════════════════════════════════════════════════
 Write-Banner
 
-# APP_PORT belonged to the Laravel panel, parked in c318e99. It is still written
-# to .env so the templates keep their shape, but nothing listens on it: the admin
-# UI is web-ui, published on WEB_UI_PORT by docker-compose.web.yml.
+# The admin UI is web-ui, published on WEB_UI_PORT by docker-compose.web.yml.
 $WEB_UI_PORT = if ($env:WEB_UI_PORT) { $env:WEB_UI_PORT } else { "8100" }
 
 if ($UseDefaults) {
@@ -224,7 +222,7 @@ if ($UseDefaults) {
 
     $APP_ENV = "production"; $APP_DEBUG = "false"; $LOG_LEVEL = "warning"
     $SESSION_ENCRYPT = "true"
-    $ROOT_TEMPLATE = ".env.production.example"; $APP_TEMPLATE = "app\.env.production.example"
+    $ROOT_TEMPLATE = ".env.production.example"
 
     $ADMIN_USERNAME = if ($env:ADMIN_USERNAME) { $env:ADMIN_USERNAME } else { "admin" }
     $ADMIN_PASSWORD = if ($env:ADMIN_PASSWORD) { $env:ADMIN_PASSWORD } else { New-Secret 16 }
@@ -237,7 +235,6 @@ if ($UseDefaults) {
     $PZ_STEAM_BRANCH = if ($env:PZ_STEAM_BRANCH) { $env:PZ_STEAM_BRANCH } else { "public" }
     $PZ_SERVER_PASSWORD = if ($env:PZ_SERVER_PASSWORD) { $env:PZ_SERVER_PASSWORD } else { "" }
 
-    $APP_PORT = "8000"
     $CADDY_HTTP_PORT = "80"
     $CADDY_HTTPS_PORT = "443"
     $WEB_PROXY_MODE = if ($env:WEB_PROXY_MODE) { $env:WEB_PROXY_MODE.ToLowerInvariant() } else { "local" }
@@ -274,11 +271,11 @@ do {
 if ($envChoice -eq "2") {
     $APP_ENV = "local"; $APP_DEBUG = "true"; $LOG_LEVEL = "debug"
     $SESSION_ENCRYPT = "false"
-    $ROOT_TEMPLATE = ".env.example"; $APP_TEMPLATE = "app\.env.example"
+    $ROOT_TEMPLATE = ".env.example"
 } else {
     $APP_ENV = "production"; $APP_DEBUG = "false"; $LOG_LEVEL = "warning"
     $SESSION_ENCRYPT = "true"
-    $ROOT_TEMPLATE = ".env.production.example"; $APP_TEMPLATE = "app\.env.production.example"
+    $ROOT_TEMPLATE = ".env.production.example"
 }
 
 # ── Web Admin Account ──────────────────────────────────────────────
@@ -340,7 +337,6 @@ if ($SERVER_IP) {
     Write-Host "  Could not detect public IP (no internet or behind NAT)." -ForegroundColor Yellow
 }
 
-$APP_PORT = "8000"
 $CADDY_HTTP_PORT = "80"
 $CADDY_HTTPS_PORT = "443"
 $ADMIN_PUBLIC_ENABLED = $false
@@ -780,7 +776,6 @@ $rootEnv = Set-EnvValue $rootEnv "APP_ENV" $APP_ENV
 $rootEnv = Set-EnvValue $rootEnv "APP_KEY" "base64:$APP_SECRET"
 $rootEnv = Set-EnvValue $rootEnv "APP_DEBUG" $APP_DEBUG
 $rootEnv = Set-EnvValue $rootEnv "APP_URL" $APP_URL
-$rootEnv = Set-EnvValue $rootEnv "APP_PORT" $APP_PORT
 if ($rootEnv -notmatch '(?m)^WEB_PROXY_MODE=') {
     $rootEnv = $rootEnv.TrimEnd() + "`nWEB_PROXY_MODE=$WEB_PROXY_MODE`n"
 } else {
@@ -796,30 +791,8 @@ $rootEnv = Set-EnvValue $rootEnv "ADMIN_EMAIL" $ADMIN_EMAIL
 $rootEnv = Set-EnvValue $rootEnv "ADMIN_PASSWORD" $ADMIN_PASSWORD
 Write-FileUtf8NoBom ".env" $rootEnv
 
-Write-Host "Creating app\.env from $APP_TEMPLATE..."
-
-$appEnv = Get-Content $APP_TEMPLATE -Raw
-$appEnv = Set-EnvValue $appEnv "PZ_SERVER_NAME" $PZ_SERVER_NAME
-$appEnv = Set-EnvValue $appEnv "PZ_RCON_PASSWORD" $RCON_PASS
-$appEnv = Set-EnvValue $appEnv "APP_ENV" $APP_ENV
-$appEnv = Set-EnvValue $appEnv "APP_KEY" "base64:$APP_SECRET"
-$appEnv = Set-EnvValue $appEnv "APP_DEBUG" $APP_DEBUG
-$appEnv = Set-EnvValue $appEnv "APP_URL" $APP_URL
-$appEnv = Set-EnvValue $appEnv "DB_PASSWORD" $DB_PASS
-$appEnv = Set-EnvValue $appEnv "REDIS_PASSWORD" $REDIS_PASS
-$appEnv = Set-EnvValue $appEnv "API_KEY" $API_SECRET
-$appEnv = Set-EnvValue $appEnv "PZ_ADMIN_PASSWORD" $PZ_ADMIN_PASS
-$appEnv = Set-EnvValue $appEnv "ADMIN_USERNAME" $ADMIN_USERNAME
-$appEnv = Set-EnvValue $appEnv "ADMIN_EMAIL" $ADMIN_EMAIL
-$appEnv = Set-EnvValue $appEnv "ADMIN_PASSWORD" $ADMIN_PASSWORD
-$appEnv = Set-EnvValue $appEnv "LOG_LEVEL" $LOG_LEVEL
-
-if ($APP_ENV -eq "production") {
-    $appEnv = Set-EnvValue $appEnv "SESSION_ENCRYPT" "true"
-    $appEnv = Set-EnvValue $appEnv "SESSION_SECURE_COOKIE" "true"
-}
-$appEnv = Set-EnvValue $appEnv "LOG_STACK" "daily"
-Write-FileUtf8NoBom "app\.env" $appEnv
+# app\.env was generated here for the Laravel panel. The app tree was removed
+# along with it; the root .env above is now the only env file the stack reads.
 
 # ══════════════════════════════════════════════════════════════════════
 # Host bind-mount dirs (all persistent data under ./data/ — no named volumes)
@@ -828,7 +801,6 @@ Write-Host "Ensuring host data directories (./data/*)..."
 foreach ($d in @(
     "data\zomboid", "data\zomboid\Lua", "data\server", "data\backups", "data\map-tiles",
     "data\postgres", "data\redis",
-    "data\app-vendor", "data\app-node-modules", "data\app-build",
     "data\caddy-data", "data\caddy-config"
 )) {
     if (-not (Test-Path $d)) {

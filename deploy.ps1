@@ -306,8 +306,7 @@ try {
 
     Test-DiskSpace
 
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".env")) -or
-        -not (Test-Path -LiteralPath (Join-Path $repoRoot "app\.env"))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".env"))) {
         $script:CurrentStage = "setup wizard"
         Invoke-Wizard
         exit 0

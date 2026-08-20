@@ -24,7 +24,7 @@ else
 fi
 
 # WEB_PROXY_MODE:
-#   local  — panel only on 127.0.0.1:APP_PORT (default; no :80/:443)
+#   local  — panel only on 127.0.0.1:WEB_UI_PORT (default; no :80/:443)
 #   caddy  — built-in Caddy publishes host HTTP/HTTPS ports
 #   npm    — Nginx Proxy Manager / external proxy on proxy-network (no :80/:443)
 pz_load_web_mode() {
@@ -82,9 +82,6 @@ pz_ensure_data_dirs() {
     "${PZ_REPO_ROOT}/data/map-tiles" \
     "${PZ_REPO_ROOT}/data/postgres" \
     "${PZ_REPO_ROOT}/data/redis" \
-    "${PZ_REPO_ROOT}/data/app-vendor" \
-    "${PZ_REPO_ROOT}/data/app-node-modules" \
-    "${PZ_REPO_ROOT}/data/app-build" \
     "${PZ_REPO_ROOT}/data/caddy-data" \
     "${PZ_REPO_ROOT}/data/caddy-config" \
     "${PZ_REPO_ROOT}/data/web-postgres"
@@ -93,7 +90,7 @@ pz_ensure_data_dirs() {
   # can contain hundreds of thousands of files and make deploy look "stuck".
   # Only ensure top-level dirs are traversable/writable; Lua bridge needs recurse.
   local d
-  for d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config web-postgres; do
+  for d in zomboid server backups map-tiles postgres redis caddy-data caddy-config web-postgres; do
     chmod a+rwx "${PZ_REPO_ROOT}/data/${d}" 2>/dev/null || true
   done
   if [[ -d "${PZ_REPO_ROOT}/data/zomboid/Lua" ]]; then
@@ -115,7 +112,9 @@ pz_ensure_networks() {
   fi
 }
 
-# Fixed container names used by this stack (must match docker-compose.yml)
+# Fixed container names used by this stack (must match docker-compose.yml).
+# pz-app and pz-queue no longer exist; they stay so an upgrade from an install
+# that predates c318e99 still has its old containers cleaned up.
 PZ_STACK_CONTAINERS=(
   pz-app
   pz-queue

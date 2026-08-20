@@ -20,7 +20,7 @@ Ports used:
 | Port | Protocol | Purpose |
 |------|----------|---------|
 | **16261–16262** | UDP | Game (forward these for remote players) |
-| **8000** | TCP | Admin panel (localhost by default) |
+| **8100** | TCP | Admin panel (localhost by default) |
 | **80 / 443** | TCP | Optional public HTTPS via Caddy |
 
 ---
@@ -84,8 +84,8 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 
 | Network | Type | Services |
 |---------|------|----------|
-| **`proxy-network`** | external (public edge) | `game-server`, (+ `caddy` or `app` depending on web mode) |
-| **`pzserver-internal`** | internal (private) | `app`, `queue`, `db`, `redis`, `docker-socket-proxy`, + `game-server` for RCON |
+| **`proxy-network`** | external (public edge) | `game-server`, `web-ui`, `web-api` (+ `caddy` in caddy mode) |
+| **`pzserver-internal`** | internal (private) | `web-api`, `web-db`, `db`, `redis`, `docker-socket-proxy`, + `game-server` for RCON |
 
 `proxy-network` is shared with your reverse-proxy stack when present. Deploy creates it if missing.
 
@@ -122,9 +122,6 @@ NPM Proxy Host example:
 | `./data/map-tiles/` | Admin player map basemap — **one** `tiles.sqlite` file after generation (see [Map tiles](#map-tiles-admin-player-map)) |
 | `./data/postgres/` | PostgreSQL database files |
 | `./data/redis/` | Redis AOF / data |
-| `./data/app-vendor/` | Composer `vendor/` (seeded from image if empty) |
-| `./data/app-node-modules/` | npm `node_modules/` (seeded if empty) |
-| `./data/app-build/` | Vite `public/build` (seeded if empty) |
 | `./data/caddy-data/` | Caddy certs/storage (if `WEB_PROXY_MODE=caddy`) |
 | `./data/caddy-config/` | Caddy config state |
 
@@ -134,7 +131,7 @@ Override any path in `.env` (e.g. put worlds on another disk).
 
 These are generated on the host and are gitignored:
 
-- `.env`, `app/.env`
+- `.env`
 - `.firewall.conf`, `ACCESS.local.txt`
 - `./data/**` (worlds, DB, binaries, backups)
 
@@ -273,7 +270,6 @@ Full details: **[docs/map-tiles.md](docs/map-tiles.md)**.
 Edit answers in the wizard, or after init edit:
 
 - **Root** `.env` — game ports, RAM, branch, max players, secrets  
-- **`app/.env`** — panel URL, DB, RCON password (kept in sync by setup)
 
 Key game variables:
 

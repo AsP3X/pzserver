@@ -31,7 +31,6 @@ endif
 
 PZ_GAME_PORT ?= 16261
 PZ_DIRECT_PORT ?= 16262
-APP_PORT ?= 8000
 WEB_UI_PORT ?= 8100
 CADDY_HTTP_PORT ?= 80
 CADDY_HTTPS_PORT ?= 443
@@ -86,7 +85,7 @@ info:
 # Host bind-mount dirs (all persistent data lives under ./data/)
 ensure-data-dirs:
 	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
-		data/postgres data/redis data/app-vendor data/app-node-modules data/app-build \
+		data/postgres data/redis \
 		data/caddy-data data/caddy-config data/web-postgres
 
 # Public edge network is external; create if the host does not already have it
@@ -115,13 +114,10 @@ nuke:
 	fi
 	@rm -rf data
 	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
-		data/postgres data/redis data/app-vendor data/app-node-modules data/app-build \
+		data/postgres data/redis \
 		data/caddy-data data/caddy-config
-	@rm -f .env app/.env .firewall.conf
+	@rm -f .env .firewall.conf
 	@rm -f caddy/Caddyfile caddy/certs/cert.pem caddy/certs/key.pem
-	@for dir in app/bootstrap/cache app/storage/logs app/storage/framework/cache app/storage/framework/sessions app/storage/framework/views; do \
-		chown -R $$(id -u):$$(id -g) $$dir 2>/dev/null || sudo chown -R $$(id -u):$$(id -g) $$dir 2>/dev/null || true; \
-	done
 	@echo "Nuke complete. ./data and config removed."
 
 build:

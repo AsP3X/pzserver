@@ -77,8 +77,7 @@ $ComposeArgs = Get-ComposeArgs
 # ── Port defaults (override via env vars) ───────────────────────────
 $PZ_GAME_PORT   = if ($env:PZ_GAME_PORT)   { $env:PZ_GAME_PORT }   else { "16261" }
 $PZ_DIRECT_PORT = if ($env:PZ_DIRECT_PORT) { $env:PZ_DIRECT_PORT } else { "16262" }
-$APP_PORT       = if ($env:APP_PORT)       { $env:APP_PORT }       else { "8000" }
-# The Laravel panel is parked; a live stack serves the admin UI from web-ui.
+# The admin UI is web-ui, published on this port by docker-compose.web.yml.
 $WEB_UI_PORT    = if ($env:WEB_UI_PORT)    { $env:WEB_UI_PORT }    else { "8100" }
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -91,9 +90,6 @@ function Ensure-DataDirs {
         "data\map-tiles",
         "data\postgres",
         "data\redis",
-        "data\app-vendor",
-        "data\app-node-modules",
-        "data\app-build",
         "data\caddy-data",
         "data\caddy-config",
         "data\web-postgres"
@@ -113,6 +109,8 @@ function Ensure-Networks {
     }
 }
 
+# pz-app and pz-queue no longer exist; they stay so an upgrade from an install
+# that predates c318e99 still has its old containers cleaned up.
 $script:StackContainers = @(
     "pz-app", "pz-queue", "pz-game-server", "pz-db",
     "pz-redis", "pz-docker-proxy", "pz-caddy",
@@ -255,7 +253,7 @@ function Do-Init {
 }
 
 function Do-Deploy {
-    if (-not (Test-Path ".env") -or -not (Test-Path "app\.env")) {
+    if (-not (Test-Path ".env")) {
         Write-Host "Environment files not found. Running first-time setup..." -ForegroundColor Yellow
         Do-Init
         return
@@ -537,7 +535,7 @@ function Do-Nuke {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data"
         Ensure-DataDirs
     }
-    Remove-Item -Force -ErrorAction SilentlyContinue .env, app\.env, .firewall.conf
+    Remove-Item -Force -ErrorAction SilentlyContinue .env, .firewall.conf
     Remove-Item -Force -ErrorAction SilentlyContinue caddy\Caddyfile, caddy\certs\cert.pem, caddy\certs\key.pem
     Write-Host "Nuke complete. ./data and config removed." -ForegroundColor Green
 }

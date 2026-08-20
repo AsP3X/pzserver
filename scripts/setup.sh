@@ -67,7 +67,7 @@ else
 fi
 
 # ── Guard: existing .env ─────────────────────────────────────────────────────
-if [ -f .env ] || [ -f app/.env ]; then
+if [ -f .env ]; then
     echo ""
     echo -e "${YELLOW}Existing .env file(s) detected.${NC}"
     echo -ne "  Overwrite and reconfigure? ${DIM}[y/N]${NC}: "
@@ -102,14 +102,12 @@ if [ "$env_choice" = "2" ]; then
     LOG_LEVEL="debug"
     SESSION_ENCRYPT="false"
     ROOT_TEMPLATE=".env.example"
-    APP_TEMPLATE="app/.env.example"
 else
     APP_ENV="production"
     APP_DEBUG="false"
     LOG_LEVEL="warning"
     SESSION_ENCRYPT="true"
     ROOT_TEMPLATE=".env.production.example"
-    APP_TEMPLATE="app/.env.production.example"
 fi
 
 # ── Web Admin Account ────────────────────────────────────────────────────────
@@ -175,10 +173,7 @@ else
     echo -e "  ${YELLOW}Could not detect public IP (no internet or behind NAT).${NC}"
 fi
 
-# APP_PORT belonged to the Laravel panel, parked in c318e99. It is still written
-# to .env so the templates keep their shape, but nothing listens on it: the admin
-# UI is web-ui, published on WEB_UI_PORT by docker-compose.web.yml.
-APP_PORT=8000
+# The admin UI is web-ui, published on WEB_UI_PORT by docker-compose.web.yml.
 WEB_UI_PORT="${WEB_UI_PORT:-8100}"
 CADDY_HTTP_PORT=80
 CADDY_HTTPS_PORT=443
@@ -638,7 +633,6 @@ sed \
     -e "s|^APP_KEY=.*|APP_KEY=base64:${APP_SECRET}|" \
     -e "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" \
     -e "s|^APP_URL=.*|APP_URL=${APP_URL}|" \
-    -e "s|^APP_PORT=.*|APP_PORT=${APP_PORT}|" \
     -e "s|^WEB_PROXY_MODE=.*|WEB_PROXY_MODE=${WEB_PROXY_MODE}|" \
     -e "s|^CADDY_HTTP_PORT=.*|CADDY_HTTP_PORT=${CADDY_HTTP_PORT}|" \
     -e "s|^CADDY_HTTPS_PORT=.*|CADDY_HTTPS_PORT=${CADDY_HTTPS_PORT}|" \
@@ -650,36 +644,8 @@ sed \
     -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
     "$ROOT_TEMPLATE" > .env
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Generate app/.env
-# ══════════════════════════════════════════════════════════════════════════════
-echo "Creating app/.env from ${APP_TEMPLATE}..."
-
-sed \
-    -e "s|^PZ_SERVER_NAME=.*|PZ_SERVER_NAME=\"${PZ_SERVER_NAME}\"|" \
-    -e "s|^PZ_RCON_PASSWORD=.*|PZ_RCON_PASSWORD=${RCON_PASS}|" \
-    -e "s|^APP_ENV=.*|APP_ENV=${APP_ENV}|" \
-    -e "s|^APP_KEY=.*|APP_KEY=base64:${APP_SECRET}|" \
-    -e "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" \
-    -e "s|^APP_URL=.*|APP_URL=${APP_URL}|" \
-    -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" \
-    -e "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" \
-    -e "s|^API_KEY=.*|API_KEY=${API_SECRET}|" \
-    -e "s|^PZ_ADMIN_PASSWORD=.*|PZ_ADMIN_PASSWORD=${PZ_ADMIN_PASS}|" \
-    -e "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=${ADMIN_USERNAME}|" \
-    -e "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=${ADMIN_EMAIL}|" \
-    -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
-    -e "s|^LOG_LEVEL=.*|LOG_LEVEL=${LOG_LEVEL}|" \
-    "$APP_TEMPLATE" > app/.env
-
-# Production-specific overrides for app/.env
-if [ "$APP_ENV" = "production" ]; then
-    sed -i "s|^SESSION_ENCRYPT=.*|SESSION_ENCRYPT=true|" app/.env 2>/dev/null || true
-    sed -i "s|^SESSION_SECURE_COOKIE=.*|SESSION_SECURE_COOKIE=true|" app/.env 2>/dev/null || true
-fi
-
-# Always set LOG_STACK to daily
-sed -i "s|^LOG_STACK=.*|LOG_STACK=daily|" app/.env 2>/dev/null || true
+# app/.env was generated here for the Laravel panel. The app tree was removed
+# along with it; the root .env above is now the only env file the stack reads.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Host bind-mount dirs (all persistent data under ./data/ — no named volumes)
@@ -688,7 +654,6 @@ echo "Ensuring host data directories (./data/*)..."
 mkdir -p \
     data/zomboid/Lua data/server data/backups data/map-tiles \
     data/postgres data/redis \
-    data/app-vendor data/app-node-modules data/app-build \
     data/caddy-data data/caddy-config
 # Containers may run as various UIDs — make host dirs writable.
 # Do NOT chmod -R all of ./data (map-tiles / postgres can be huge and hang setup).
@@ -715,7 +680,7 @@ pz_down 2>/dev/null || true
 
 # Fix ownership on directories that may be root-owned from a previous Docker run
 # The container runs as non-root and needs write access to these.
-for dir in app/bootstrap/cache app/storage app/storage/logs app/storage/framework/cache app/storage/framework/sessions app/storage/framework/views; do
+for dir in data/zomboid data/server data/backups; do
     if [ -d "$dir" ]; then
         chown -R "$(id -u):$(id -g)" "$dir" 2>/dev/null || \
             sudo chown -R "$(id -u):$(id -g)" "$dir" 2>/dev/null || true

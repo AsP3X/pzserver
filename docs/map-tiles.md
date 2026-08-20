@@ -123,13 +123,6 @@ data/map-tiles/html/map_data/base/layer0_files/{z}/{x}_{y}.webp
 
 **UI:** Admin → **Player map** → **Basemap setup** → **Isometric tiles (Advanced)** (Generate / Stop / Resume / Start over + progress bar).
 
-> **Frontend not updating after git pull?** Host volume `./data/app-build` can pin an old Vite build. Redeploy rebuilds the app image; entrypoint now re-syncs `public/build` when the image manifest changes. Force refresh once:
-> ```bash
-> rm -rf data/app-build/*
-> ./deploy.sh
-> # hard-refresh browser (Ctrl+Shift+R)
-> ```
-
 **CLI (Docker — preferred for logs / SSH):**
 
 The artisan command runs in the **app** container (`container_name: pz-app`). Stack must already be up (`make up` / `docker compose up -d`).

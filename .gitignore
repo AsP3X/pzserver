@@ -9,18 +9,9 @@ ACCESS.local.txt
 *.local.txt
 
 # PHP / Composer
-/app/vendor/
 *.cache
 
 # Laravel
-/app/storage/*.key
-/app/storage/framework/cache/data/*
-/app/storage/framework/sessions/*
-/app/storage/framework/views/*
-/app/bootstrap/cache/*
-/app/public/hot
-/app/public/storage
-/app/public/docs
 
 # IDE
 .idea/
@@ -50,12 +41,9 @@ backups/*.tar.gz
 /data/**
 !/data/**/.gitkeep
 
-# Do NOT add a .gitkeep to data/postgres, data/app-node-modules or data/app-build.
 # Those dirs must look *empty* to the container on first boot:
 #   - postgres: initdb refuses to initialize a PGDATA that contains any file,
 #     including dot-prefixed ones, and the db container ends up in a restart loop.
-#   - app-node-modules: entrypoint.sh seeds it only when `ls -A` reports it empty.
-#   - app-build: the Vite resync wipes the dir, which would delete a tracked file.
 # The Makefile's `ensure-data-dirs` target creates all of them via `mkdir -p`.
 
 # Node (frontend - future)
@@ -69,6 +57,4 @@ node_modules/
 workshop/KnoxRelay/Contents/mods/KnoxRelay/42/media/
 
 # Test / Coverage
-/app/.phpunit.result.cache
-/app/coverage/
 .playwright-mcp/

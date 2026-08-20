@@ -22,139 +22,12 @@ services:
     networks:
       # Public: Steam / player traffic path (and outbound SteamCMD)
       - proxy-network
-      # Private: RCON from app/queue only
+      # Private: RCON from web-api only
       - pzserver-internal
 
-  # ---------------------------------------------------------------------------
-  # Laravel Application — parked. Live starts use web-ui + web-api
-  # (docker-compose.web.yml) instead of this panel on :8000.
-  # Uncomment `app` and `queue` to bring the old UI back.
-  # ---------------------------------------------------------------------------
-  # app:
-  #   image: ${PZ_APP_IMAGE:-pzserver-app:local}
-  #   build:
-  #     context: ./app
-  #     dockerfile: Dockerfile
-  #   pull_policy: build
-  #   container_name: pz-app
-  #   restart: unless-stopped
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   ports:
-  #     # Localhost-only admin panel (production uses prebuilt Vite assets — no :5173)
-  #     - "127.0.0.1:${APP_PORT:-8000}:8000"
-  #   volumes:
-  #     - ./app:/var/www/html
-  #     # Host-mapped app runtime dirs (seeded from image on first boot if empty)
-  #     - ${PZ_APP_VENDOR_HOST:-./data/app-vendor}:/var/www/html/vendor
-  #     - ${PZ_APP_NODE_MODULES_HOST:-./data/app-node-modules}:/var/www/html/node_modules
-  #     - ${PZ_APP_BUILD_HOST:-./data/app-build}:/var/www/html/public/build
-  #     - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
-  #     - ${PZ_SERVER_HOST:-./data/server}:/pz-server:ro
-  #     - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
-  #     # Same Lua dir the game writes into (subdir of PZ_DATA_HOST)
-  #     - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
-  #     - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles
-  #   env_file: ./app/.env
-  #   environment:
-  #     DB_HOST: ${DB_HOST:-db}
-  #     REDIS_HOST: ${REDIS_HOST:-redis}
-  #     GAME_SERVER_CONTAINER_NAME: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
-  #     DOCKER_PROXY_URL: http://docker-socket-proxy:2375
-  #     PZ_DATA_PATH: /pz-data
-  #     PZ_SERVER_PATH: /pz-server
-  #     PZ_RCON_HOST: game-server
-  #     # From the root .env, which is also what configure-server.sh writes into
-  #     # server.ini — so the two cannot drift. Without these the app fell back
-  #     # to app/.env's own copy, which had gone stale, and every RCON call
-  #     # failed with "RCON: password doesn't match" in the game console while
-  #     # the panel just showed the server as unreachable.
-  #     PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
-  #     PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:-}
-  #     BACKUP_PATH: /backups
-  #     LUA_BRIDGE_PATH: /lua-bridge
-  #     PZ_MAP_TILES_PATH: /map-tiles
-  #     ADMIN_USERNAME: ${ADMIN_USERNAME:-}
-  #     ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-  #     ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-  #   cap_drop:
-  #     - ALL
-  #   cap_add:
-  #     - CHOWN
-  #     - SETUID
-  #     - SETGID
-  #     - DAC_OVERRIDE
-  #   networks:
-  #     # Both memberships are required. pzserver-internal is declared
-  #     # `internal: true`, and Docker silently drops published ports on a
-  #     # container attached only to an internal network — the `ports:` entry
-  #     # above never binds and `docker port pz-app` returns nothing. Joining the
-  #     # non-internal proxy-network is what makes the publish take effect, so
-  #     # WEB_PROXY_MODE=local can reach the panel on 127.0.0.1:${APP_PORT}.
-  #     # Same reason web-ui joins both in docker-compose.web.yml.
-  #     - proxy-network
-  #     # Private: db, redis, RCON, docker-socket-proxy
-  #     - pzserver-internal
-
-  # ---------------------------------------------------------------------------
-  # Queue Worker — parked with the Laravel UI. Uncomment with `app`.
-  # ---------------------------------------------------------------------------
-  # queue:
-  #   image: ${PZ_APP_IMAGE:-pzserver-app:local}
-  #   build:
-  #     context: ./app
-  #     dockerfile: Dockerfile
-  #   pull_policy: build
-  #   container_name: pz-queue
-  #   restart: unless-stopped
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   command: php artisan queue:work redis --tries=3 --timeout=600 --sleep=3
-  #   volumes:
-  #     - ./app:/var/www/html
-  #     - ${PZ_APP_VENDOR_HOST:-./data/app-vendor}:/var/www/html/vendor
-  #     - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
-  #     - ${PZ_SERVER_HOST:-./data/server}:/pz-server:ro
-  #     - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
-  #     - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
-  #     - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles
-  #   env_file: ./app/.env
-  #   environment:
-  #     DB_HOST: ${DB_HOST:-db}
-  #     REDIS_HOST: ${REDIS_HOST:-redis}
-  #     GAME_SERVER_CONTAINER_NAME: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
-  #     DOCKER_PROXY_URL: http://docker-socket-proxy:2375
-  #     PZ_DATA_PATH: /pz-data
-  #     PZ_SERVER_PATH: /pz-server
-  #     PZ_RCON_HOST: game-server
-  #     # From the root .env, which is also what configure-server.sh writes into
-  #     # server.ini — so the two cannot drift. Without these the app fell back
-  #     # to app/.env's own copy, which had gone stale, and every RCON call
-  #     # failed with "RCON: password doesn't match" in the game console while
-  #     # the panel just showed the server as unreachable.
-  #     PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
-  #     PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:-}
-  #     BACKUP_PATH: /backups
-  #     LUA_BRIDGE_PATH: /lua-bridge
-  #     PZ_MAP_TILES_PATH: /map-tiles
-  #     ADMIN_USERNAME: ${ADMIN_USERNAME:-}
-  #     ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-  #     ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-  #   cap_drop:
-  #     - ALL
-  #   cap_add:
-  #     - CHOWN
-  #     - SETUID
-  #     - SETGID
-  #     - DAC_OVERRIDE
-  #   networks:
-  #     - pzserver-internal
+  # The Laravel `app` and `queue` services lived here, parked in c318e99 and
+  # removed with the ./app tree. Live starts use web-ui + web-api from
+  # docker-compose.web.yml; git history has the old definitions.
 
   # ---------------------------------------------------------------------------
   # PostgreSQL — Primary database
@@ -163,7 +36,7 @@ services:
     image: postgres:16-alpine
     container_name: pz-db
     restart: unless-stopped
-    # Not published on the host — app/queue reach it via DNS name "db" on pzserver-internal.
+    # Not published on the host — reachable via DNS name "db" on pzserver-internal.
     volumes:
       - ${PZ_POSTGRES_HOST:-./data/postgres}:/var/lib/postgresql/data
       - ./db/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
@@ -206,7 +79,7 @@ services:
       - pzserver-internal
 
   # ---------------------------------------------------------------------------
-  # Docker Socket Proxy — Restricted Docker API access for app/queue
+  # Docker Socket Proxy — Restricted Docker API access for web-api
   # ---------------------------------------------------------------------------
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:v0.4.2
@@ -268,8 +141,5 @@ networks:
 #   ./data/map-tiles         map tiles (tiles.sqlite pack after generation; see docs/map-tiles.md)
 #   ./data/postgres          PostgreSQL data
 #   ./data/redis             Redis AOF/data
-#   ./data/app-vendor        Composer vendor (seeded from image if empty)
-#   ./data/app-node-modules  npm modules (seeded from image if empty)
-#   ./data/app-build         Vite public/build (seeded from image if empty)
 #   ./data/caddy-data        Caddy certificates / storage
 #   ./data/caddy-config      Caddy config state
