@@ -85,6 +85,24 @@ The long **Checking for available updates / Verifying installation** phase is St
 4. Check logs: `make logs`
 5. If nothing is listening on the port at all, see [port never binds](#admin-panel-port-never-binds-docker-port-pz-app-is-empty) below
 
+## Panel returns 502 after recreating `web-api` on its own
+
+Symptom: every `/api` call returns nginx's `502 Bad Gateway`, while `docker ps`
+shows `pz-web-api` up and healthy and its own log says `listening addr=0.0.0.0:8080`.
+
+Cause: `web-ui`'s nginx resolves `web-api` once, at startup, and caches the
+address. Recreating `web-api` alone (`up -d --force-recreate web-api`, or a
+rebuild of just that image) gives the container a new IP, and nginx keeps
+proxying to the old one.
+
+Fix:
+
+```bash
+docker restart pz-web-ui
+```
+
+Recreating both together avoids it in the first place.
+
 ## Admin panel port never binds (`docker port pz-app` is empty)
 
 Symptom: `pz-app` is up, but `http://localhost:8000` refuses the connection and the
