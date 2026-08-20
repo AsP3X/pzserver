@@ -21,6 +21,21 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+# Service names (or extra args) that follow the command, e.g.
+#   .\make.ps1 logs game-server web-api
+# Kept separate from $CmdArgs so `exec` keeps its own raw argument handling.
+$script:PassthruArgs = @()
+if ($CmdArgs) {
+    $script:PassthruArgs = @($CmdArgs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+# Per-container stop timeout. game-server sets stop_grace_period: 60s, so an
+# unbounded stop looks like a hang; mirror PZ_STOP_TIMEOUT from compose-env.sh.
+function Get-StopTimeout {
+    if ($env:PZ_STOP_TIMEOUT) { return "$($env:PZ_STOP_TIMEOUT)" }
+    return "15"
+}
+
 # ── Architecture detection ──────────────────────────────────────────
 $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) {
     "aarch64"
@@ -63,6 +78,8 @@ $ComposeArgs = Get-ComposeArgs
 $PZ_GAME_PORT   = if ($env:PZ_GAME_PORT)   { $env:PZ_GAME_PORT }   else { "16261" }
 $PZ_DIRECT_PORT = if ($env:PZ_DIRECT_PORT) { $env:PZ_DIRECT_PORT } else { "16262" }
 $APP_PORT       = if ($env:APP_PORT)       { $env:APP_PORT }       else { "8000" }
+# The Laravel panel is parked; a live stack serves the admin UI from web-ui.
+$WEB_UI_PORT    = if ($env:WEB_UI_PORT)    { $env:WEB_UI_PORT }    else { "8100" }
 
 # ── Helpers ─────────────────────────────────────────────────────────
 function Ensure-DataDirs {
@@ -103,12 +120,22 @@ $script:StackContainers = @(
 )
 
 function Remove-StackContainers {
+    $timeout = Get-StopTimeout
+    $any = $false
     foreach ($name in $script:StackContainers) {
         docker container inspect $name 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "  Removing leftover container: $name" -ForegroundColor Yellow
+            $any = $true
+            $state = (docker inspect -f "{{.State.Status}}" $name 2>$null | Out-String).Trim()
+            if (-not $state) { $state = "unknown" }
+            Write-Host "  [$name] status=$state - stop -t $timeout..." -ForegroundColor Yellow
+            docker stop -t $timeout $name 2>$null | Out-Null
             docker rm -f $name 2>$null | Out-Null
+            Write-Host "  [$name] removed" -ForegroundColor DarkGray
         }
+    }
+    if (-not $any) {
+        Write-Host "  (no leftover stack containers)" -ForegroundColor DarkGray
     }
 }
 
@@ -134,10 +161,19 @@ function Invoke-Compose {
             "-f", "docker-compose.web-npm.yml",
             "--profile", "caddy"
         )
-        $downArgs = @("down", "--remove-orphans") + @($Arguments | Select-Object -Skip 1)
+        $timeout = Get-StopTimeout
+        # Stop by name first: `compose down` on its own waits out game-server's
+        # 60s stop_grace_period with no output and reads as a hang.
+        Write-Host "  Step 1/3: stop/remove known containers..." -ForegroundColor DarkGray
+        Remove-StackContainers
+        $downArgs = @("down", "-t", $timeout, "--remove-orphans") + @($Arguments | Select-Object -Skip 1)
         $allArgs = $baseArgs + $downArgs
-        Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
-        & docker @allArgs 2>$null
+        Write-Host "  Step 2/3: > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
+        & docker @allArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  (compose down reported an error - continuing with force cleanup)" -ForegroundColor Yellow
+        }
+        Write-Host "  Step 3/3: final container sweep..." -ForegroundColor DarkGray
         Remove-StackContainers
         Write-Host "Stack stopped." -ForegroundColor Green
         return
@@ -233,7 +269,7 @@ function Do-Deploy {
 
 function Do-Up {
     Ensure-DbVolume
-    Invoke-Compose @("up", "-d", "--build")
+    Invoke-Compose @("up", "-d", "--build", "--remove-orphans")
 }
 
 function Do-Down {
@@ -245,7 +281,21 @@ function Do-Build {
 }
 
 function Do-Restart {
-    Invoke-Compose @("restart")
+    Invoke-Compose (@("restart") + $script:PassthruArgs)
+}
+
+# Rebuild the local fixed images on top of their upstream bases, then start.
+function Do-Rebuild {
+    Write-Host "Rebuilding images from upstream bases (--pull)..." -ForegroundColor Cyan
+    Invoke-Compose @("build", "--pull", "web-api", "web-ui", "game-server")
+    Do-Up
+}
+
+# Rebuild only the game-server overlay (upstream base + our entrypoints).
+function Do-RebuildGame {
+    Write-Host "Rebuilding game-server local image from upstream base..." -ForegroundColor Cyan
+    Invoke-Compose @("build", "--pull", "game-server")
+    Invoke-Compose @("up", "-d", "game-server")
 }
 
 function Do-Stop {
@@ -254,7 +304,7 @@ function Do-Stop {
 
 function Do-Logs {
     # Don't use Invoke-Compose - Ctrl+C exit code is non-zero and that's OK
-    $allArgs = $script:ComposeArgs + @("logs", "-f")
+    $allArgs = $script:ComposeArgs + @("logs", "-f", "--tail", "200") + $script:PassthruArgs
     Write-Host "  > docker $($allArgs -join ' ')" -ForegroundColor DarkGray
     & docker @allArgs
 }
@@ -350,7 +400,8 @@ function Do-Info {
     Write-Host ([char]0x2551 + "          Zomboid Manager - Status            " + [char]0x2551) -ForegroundColor Cyan
     Write-Host ([char]0x255A + ([string][char]0x2550 * 46) + [char]0x255D) -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  Local Admin:   http://localhost:$APP_PORT"
+    Write-Host "  Local Admin:   http://localhost:$WEB_UI_PORT"
+    Write-Host "  Web mode:      $(Get-WebProxyMode)"
 
     if (Test-Path ".firewall.conf") {
         $conf = Get-Content ".firewall.conf" | Where-Object { $_ -match "=" -and $_ -notmatch "^\s*#" }
@@ -597,11 +648,16 @@ function Do-Help {
     Write-Host "    .\make.ps1 up               Start services"
     Write-Host "    .\make.ps1 down             Stop services"
     Write-Host "    .\make.ps1 build            Build Docker images"
-    Write-Host "    .\make.ps1 restart          Restart services"
+    Write-Host "    .\make.ps1 restart [svc...] Restart all services, or the named ones"
+    Write-Host "    .\make.ps1 rebuild          Rebuild images from upstream bases, then start"
+    Write-Host "    .\make.ps1 rebuild-game     Rebuild game-server only"
     Write-Host "    .\make.ps1 stop             Stop without removing containers"
-    Write-Host "    .\make.ps1 logs             Follow service logs"
+    Write-Host "    .\make.ps1 logs [svc...]    Follow logs (all services, or the named ones)"
     Write-Host "    .\make.ps1 ps               List running containers"
     Write-Host "    .\make.ps1 pull             Pull latest images"
+    Write-Host ""
+    Write-Host "  Service names:" -ForegroundColor White
+    Write-Host "    game-server  web-api  web-ui  web-db  db  redis  docker-socket-proxy"
     Write-Host ""
     Write-Host "  Firewall (Windows Firewall - requires Administrator):" -ForegroundColor White
     Write-Host "    .\make.ps1 expose           Open game ports (UDP)"
@@ -639,6 +695,8 @@ switch ($Command) {
     "down"           { Do-Down }
     "build"          { Do-Build }
     "restart"        { Do-Restart }
+    "rebuild"        { Do-Rebuild }
+    "rebuild-game"   { Do-RebuildGame }
     "stop"           { Do-Stop }
     "logs"           { Do-Logs }
     "ps"             { Do-Ps }
@@ -664,5 +722,6 @@ switch ($Command) {
     default {
         Write-Host "Unknown command: $Command" -ForegroundColor Red
         Write-Host "Run '.\make.ps1 help' for available commands."
+        exit 1
     }
 }

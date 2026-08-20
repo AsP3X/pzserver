@@ -10,7 +10,7 @@
 #   ./deploy.sh --ps             # container table
 #   ./deploy.sh --logs [svc...]  # follow logs
 #   ./deploy.sh --restart [svc]  # restart services
-#   ./deploy.sh --rebuild        # rebuild app + game-server, then start
+#   ./deploy.sh --rebuild        # rebuild web + game-server, then start
 #   ./deploy.sh --rebuild-game   # rebuild game-server only
 #   ./deploy.sh --down           # stop stack
 #   ./deploy.sh --help
@@ -71,16 +71,16 @@ show_help() {
     ./deploy.sh --ps               Container table only
     ./deploy.sh --logs [svc...]    Follow logs (all services, or the named ones)
     ./deploy.sh --restart [svc...] Restart all services, or the named ones
-    ./deploy.sh --rebuild          Rebuild app + game-server images, then start
+    ./deploy.sh --rebuild          Rebuild web + game-server images, then start
     ./deploy.sh --rebuild-game     Rebuild game-server only (upstream + our entrypoints)
     ./deploy.sh --down             Stop and remove all services
     ./deploy.sh --help             This help
 
   ${BOLD}Service names${NC} (for --logs / --restart):
-    app  queue  game-server  db  redis  docker-socket-proxy  ${DIM}caddy (caddy mode only)${NC}
+    game-server  web-api  web-ui  web-db  db  redis  docker-socket-proxy  ${DIM}caddy (caddy mode only)${NC}
 
   ${BOLD}After deploy:${NC}
-    Panel:   http://localhost:8000  (default APP_PORT; --status shows the real one)
+    Panel:   http://localhost:8100  (default WEB_UI_PORT; --status shows the real one)
     Game:    UDP 16261 + 16262 (forward these for remote players)
     Data:    ./data/zomboid  ./data/server  ./data/backups
 
@@ -91,7 +91,7 @@ show_help() {
 
   ${BOLD}Examples:${NC}
     ./deploy.sh --logs game-server        tail just the game server
-    ./deploy.sh --restart app queue       restart the panel and its worker
+    ./deploy.sh --restart web-api web-ui  restart the panel services
     PZ_STOP_TIMEOUT=5 ./deploy.sh --down  stop impatiently
 
 EOF
@@ -307,7 +307,7 @@ echo ""
 CURRENT_STAGE="stack build/start"
 if [[ "$CMD" == "rebuild" ]]; then
   step "Rebuilding images from upstream bases (--pull)…"
-  pz_compose build --pull app game-server
+  pz_compose build --pull web-api web-ui game-server
 fi
 pz_up
 
