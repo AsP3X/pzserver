@@ -30,6 +30,10 @@ COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
 COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py check_cache.py audit.py run.sh /tools/
 # region.py and set_render_range.py import cells.py by name.
 ENV PYTHONPATH=/tools
+# run.sh pipes the render through tee so check_cache.py can read its output.
+# A pipe makes Python block-buffer stdout, which strands progress lines for
+# minutes at a time and blinds anything watching the log live.
+ENV PYTHONUNBUFFERED=1
 RUN chmod +x /tools/run.sh
 
 ENTRYPOINT ["/tools/run.sh"]
