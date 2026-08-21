@@ -225,6 +225,18 @@ services:
     pull_policy: build
     container_name: pz-map-tiles
     profiles: ["tools"]
+    # pzmap2dzi renders through a multiprocessing pool that passes 2048x2048
+    # RGBA tiles between workers in POSIX shared memory, which is /dev/shm.
+    # Docker's default /dev/shm is 64 MB; one such buffer is 16 MB, and
+    # worker_count: auto spawns one worker per core. On a 16-core host that is
+    # 256 MB of demand against 64 MB of tmpfs.
+    #
+    # The failure is silent and total: workers die on the allocation without
+    # raising, the parent waits on them forever, and the render sits at 0% CPU
+    # having written nothing. It does not crash, so nothing reports it.
+    #
+    # tmpfs is allocated lazily, so this ceiling costs nothing until used.
+    shm_size: 4gb
     volumes:
       # The game install, for the map cells and textures. Read-only: rendering
       # must never be able to damage the server's own files.
