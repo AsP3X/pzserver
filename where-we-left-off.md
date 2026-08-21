@@ -426,6 +426,33 @@ then correct the sizing table and the free-space requirement in
 `docs/map-tiles.md`. Not urgent operationally — 185 GB free here — but an
 operator trusting "25 GB free" on a smaller box would run out mid-render.
 
+### The free-space figure is worse than the raw size, because of VACUUM
+
+`pack.py:62` ends with `con.execute("VACUUM")`. SQLite implements VACUUM by
+rebuilding the entire database into a temporary copy and then replacing the
+original — so at that moment the disk holds **two full copies**. On a ~26 GB
+pack that is ~52 GB, and it happens *after* the loose tree has been deleted, so
+it is a second, separate peak.
+
+Rough shape of the run's disk usage:
+
+| Phase | Peak on disk |
+|---|---|
+| Render | loose tree, ~26 GB |
+| Pack | tree shrinking, DB growing — roughly flat at ~26–30 GB |
+| **VACUUM** | **DB + temp copy, ~52 GB** |
+
+The temp copy lands in the container's `/tmp` (overlay, `temp_store=0`), not in
+the `/out` bind mount — but on Docker Desktop that overlay is backed by the same
+Windows drive, so it is the same pool of free space either way.
+
+**Open question for after the run:** whether that VACUUM earns its cost at all.
+The packer only ever INSERTs, in level order, with no deletes and no updates, so
+there is very little fragmentation for VACUUM to reclaim. It buys a marginally
+smaller file in exchange for a full 26 GB read+write and a doubled peak disk
+requirement. Dropping it is probably right, but it is a change to tested code
+and there was no reason to churn it mid-render — decide with the real numbers.
+
 ---
 
 ### Also fixed on the way: CRLF corruption
