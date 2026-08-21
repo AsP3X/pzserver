@@ -317,6 +317,63 @@ carries the default and both options.
 
 Commits: `30b1bc6` (mount + mkdir + guard), `a2b46c0` (docs).
 
+## ⚠ SECOND BLOCKER, also silent: /dev/shm was 64 MB
+
+Hit on the first real render (2026-08-21). Worth reading before touching the
+render service, because it looks exactly like "slow" and is not.
+
+**Symptom.** The render reached `Working`, wrote 23 files, and then stopped.
+Not slowly — completely. 0.00% CPU across repeated samples, 140 MB resident
+(the parent alone), zero file growth over 30 s, and **no error of any kind** in
+the log. It sat like that for 15 minutes looking like a long render.
+
+**Cause.** pzmap2dzi renders through a multiprocessing pool that passes
+2048×2048 RGBA tiles between workers in POSIX shared memory — `/dev/shm`.
+Docker defaults that to **64 MB**. One tile buffer is 16 MB, and
+`worker_count: auto` spawns one worker per core: 16 cores → **256 MB of demand
+against 64 MB of tmpfs**. Workers die on the allocation without raising, the
+parent waits on them forever.
+
+The only trace is a `resource_tracker: leaked shared_memory objects` warning per
+dead worker — **16 warnings, 16 workers, 16 abandoned `.pending` tiles.** That
+warning also fires on healthy worker exit, so on its own it means nothing.
+
+**What ruled out the obvious suspects:**
+
+| Suspect | Evidence against |
+|---|---|
+| OOM | `OOMKilled=false`, container memory unlimited, VM `dmesg` has no kill records, 140 MB of 31 GB in use |
+| A crash | No traceback anywhere in the log |
+| Just slow | 0.00% CPU on three consecutive samples |
+
+**Fix:** `shm_size: 4gb` on the `map-tiles` service (`74539d0`). tmpfs is
+allocated lazily, so the ceiling costs nothing until used.
+
+**Proof it was right:** the restarted run reports **1.8 GB of /dev/shm in use** —
+28× the old 64 MB ceiling — with **1479% CPU** and tiles landing at a median
+1.2 MB. The previous run could never have completed.
+
+### While you are here: `omit_levels` is a disk saving, not a time saving
+
+The plan reads as though dropping levels 21–22 cuts the work. It does not.
+`pzdzi.py:127` is `if not write_all and level >= levels - skip_level: return
+'skip'` — the deepest levels are still **rendered**, just never **written**,
+because each coarser tile is built by merging its four children. So level-22
+`.pending` files during a run are correct and expected, and the runtime is
+full-depth regardless. `omit_levels: 2` saves roughly 185 GB of disk and zero
+hours.
+
+### Tile sizes are running larger than the plan estimated
+
+Early sample of 286 tiles: **median 1188 KB, mean 1093 KB**, against the plan's
+581 KB mean. Those are all level-20 — the deepest saved level and so the densest
+— and not a representative sample yet, but if it holds, ~27,000 tiles is nearer
+**27 GB than the documented 15 GB**. Re-measure when the run finishes and correct
+`docs/map-tiles.md` if it stands. Disk here is 190 GB free, so it is a
+documentation problem rather than an operational one.
+
+---
+
 ### Also fixed on the way: CRLF corruption
 
 The Python edits used to patch files wrote CRLF on Windows, which silently broke
