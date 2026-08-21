@@ -9,6 +9,7 @@ pub mod character;
 pub mod datadirs;
 pub mod economy;
 pub mod i18n;
+pub mod items;
 pub mod news;
 pub mod obituary;
 pub mod rate_limit;

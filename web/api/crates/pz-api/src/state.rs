@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use crate::config::Config;
 use crate::services::backups::{self, JobLock};
 use crate::services::datadirs;
+use crate::services::items::ItemCatalogService;
 use crate::services::rate_limit::AttemptLimiter;
 use crate::services::status::StatusService;
 
@@ -23,6 +24,10 @@ pub struct AppState {
     /// short one inside `StatusService`.
     pub docker: DockerClient,
     pub bridge: LuaBridge,
+    /// The item catalogue, parsed once and held until the export changes.
+    /// Long-lived because the cache is the point; a per-request reader would
+    /// re-parse the file every time the picker opened.
+    pub item_catalog: Arc<ItemCatalogService>,
     pub backup_job: JobLock,
     /// Why the archive directory is unusable, if it is. `None` means the
     /// start-up probe wrote a file there and removed it again. `/api/health`
@@ -54,6 +59,7 @@ impl AppState {
             std::time::Duration::from_secs(12),
         );
         let bridge = LuaBridge::new(&config.lua_bridge_path);
+        let item_catalog = Arc::new(ItemCatalogService::new(&config.lua_bridge_path));
 
         let status = Arc::new(StatusService::new(
             Arc::clone(&config),
@@ -82,6 +88,7 @@ impl AppState {
             login_limiter,
             docker,
             bridge,
+            item_catalog,
             backup_job: backups::new_job_lock(),
             backups_error,
             lua_bridge_error,
