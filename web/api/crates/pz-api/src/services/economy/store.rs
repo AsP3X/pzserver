@@ -301,7 +301,7 @@ pub async fn buy(
     .await?
     {
         delivery::GiveOutcome::Instant => on_delivered(state, purchase.id).await,
-        delivery::GiveOutcome::Queued(_) => {
+        delivery::GiveOutcome::Queued => {
             sqlx::query("UPDATE store_purchases SET status = 'queued' WHERE id = $1")
                 .bind(purchase.id)
                 .execute(&state.db)

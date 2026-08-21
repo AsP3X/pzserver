@@ -199,13 +199,12 @@ pub async fn create(
     if kind == "report" && accused.is_none() {
         return Err(ApiError::Validation("Say who you are reporting.".to_owned()));
     }
-    if let Some(name) = accused {
-        if !accused_name(name) {
+    if let Some(name) = accused
+        && !accused_name(name) {
             return Err(ApiError::Validation(
                 "That name can only contain letters, numbers, spaces, underscores and hyphens.".to_owned(),
             ));
         }
-    }
 
     let author = sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1")
         .bind(user_id)
@@ -526,13 +525,12 @@ pub async fn create_from_desk(
     if kind == "report" && accused.is_none() {
         return Err(ApiError::Validation("Say who you are reporting.".to_owned()));
     }
-    if let Some(name) = accused {
-        if !accused_name(name) {
+    if let Some(name) = accused
+        && !accused_name(name) {
             return Err(ApiError::Validation(
                 "That name can only contain letters, numbers, spaces, underscores and hyphens.".to_owned(),
             ));
         }
-    }
 
     let id = sqlx::query_scalar::<_, i64>(
         r#"

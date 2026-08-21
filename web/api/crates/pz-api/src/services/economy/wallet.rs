@@ -332,6 +332,7 @@ async fn ensure_wallet(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_tx(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,

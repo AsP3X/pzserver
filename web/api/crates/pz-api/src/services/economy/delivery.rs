@@ -43,7 +43,7 @@ pub async fn give_now(
     if try_rcon_give(state, username, item_type, count).await {
         return Ok(GiveOutcome::Instant);
     }
-    let order = enqueue(
+    enqueue(
         state,
         "give_verified",
         username,
@@ -56,7 +56,7 @@ pub async fn give_now(
         reference_id,
     )
     .await?;
-    Ok(GiveOutcome::Queued(order))
+    Ok(GiveOutcome::Queued)
 }
 
 pub async fn take(
@@ -83,6 +83,7 @@ pub async fn take(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn give_with_condition(
     state: &AppState,
     username: &str,
@@ -113,6 +114,7 @@ pub async fn give_with_condition(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn give_kit(
     state: &AppState,
     username: &str,
@@ -138,6 +140,7 @@ pub async fn give_kit(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn enqueue(
     state: &AppState,
     action: &str,
@@ -198,7 +201,7 @@ pub async fn try_rcon_give(state: &AppState, username: &str, item_type: &str, co
     let Ok(name) = admin::player_name(username) else {
         return false;
     };
-    if count < 1 || count > 100 || item_type.contains('"') {
+    if !(1..=100).contains(&count) || item_type.contains('"') {
         return false;
     }
     let command = format!("additem \"{name}\" \"{item_type}\" {count}");
@@ -378,5 +381,5 @@ async fn mark_failed(db: &PgPool, id: Uuid, detail: Option<&str>) -> Result<(), 
 #[derive(Debug)]
 pub enum GiveOutcome {
     Instant,
-    Queued(ItemOrder),
+    Queued,
 }

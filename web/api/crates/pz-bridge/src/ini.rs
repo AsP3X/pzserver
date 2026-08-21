@@ -125,11 +125,10 @@ impl ServerIni {
         }
 
         if !remaining.is_empty() {
-            if let Some(last) = lines.last() {
-                if !last.is_empty() {
+            if let Some(last) = lines.last()
+                && !last.is_empty() {
                     lines.push(String::new());
                 }
-            }
             for (key, value) in remaining {
                 lines.push(format!("{key}={value}"));
             }

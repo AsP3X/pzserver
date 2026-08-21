@@ -923,6 +923,7 @@ async fn take_item_tx(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn restore_item(
     db: &PgPool,
     user_id: Uuid,

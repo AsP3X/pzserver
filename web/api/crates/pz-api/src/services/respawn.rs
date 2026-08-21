@@ -79,7 +79,7 @@ pub async fn configure(
     enabled: bool,
     delay_minutes: i64,
 ) -> ApiResult<RespawnView> {
-    if delay_minutes < 1 || delay_minutes > MAX_DELAY_MINUTES {
+    if !(1..=MAX_DELAY_MINUTES).contains(&delay_minutes) {
         return Err(ApiError::Validation(format!(
             "Cooldown must be between 1 and {MAX_DELAY_MINUTES} minutes."
         )));
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn a_cooldown_longer_than_a_week_is_refused() {
-        assert!(MAX_DELAY_MINUTES == 10_080);
+        assert_eq!(MAX_DELAY_MINUTES, 10_080);
     }
 
     /// Partial minutes round up, so "1 minute left" never displays as 0 while

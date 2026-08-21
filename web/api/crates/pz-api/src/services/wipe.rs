@@ -194,8 +194,8 @@ async fn wipe_save_tree(
         remove_children(&multiplayer, errors).await;
     }
     let saves = data.join("Saves");
-    if saves.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&saves) {
+    if saves.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&saves) {
             for entry in entries.flatten() {
                 if entry.file_name() == "Multiplayer" {
                     continue;
@@ -203,7 +203,6 @@ async fn wipe_save_tree(
                 force_remove(&entry.path(), errors).await;
             }
         }
-    }
 
     for stem in [server_name.to_owned(), "serverPZ".to_owned()] {
         let db = data.join("db").join(format!("{stem}.db"));
@@ -225,8 +224,8 @@ async fn wipe_save_tree(
         }
     }
 
-    if lua.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(lua) {
+    if lua.is_dir()
+        && let Ok(entries) = std::fs::read_dir(lua) {
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
@@ -238,14 +237,12 @@ async fn wipe_save_tree(
                     remove_children(&path, errors).await;
                     continue;
                 }
-                if path.is_file() && name.ends_with(".json") {
-                    if let Err(error) = std::fs::write(&path, "") {
+                if path.is_file() && name.ends_with(".json")
+                    && let Err(error) = std::fs::write(&path, "") {
                         errors.push(format!("clear {}: {error}", path.display()));
                     }
-                }
             }
         }
-    }
 
 }
 

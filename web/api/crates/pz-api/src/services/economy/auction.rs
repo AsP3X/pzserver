@@ -43,6 +43,7 @@ pub struct ListingView {
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
+#[allow(dead_code, reason = "row mapping for auction_bids; no query reads it back yet")]
 pub struct Bid {
     pub id: Uuid,
     pub listing_id: Uuid,

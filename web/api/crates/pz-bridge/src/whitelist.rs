@@ -30,10 +30,7 @@ pub fn authenticate(db_path: &Path, username: &str, password: &str) -> Option<Wh
         return None;
     }
 
-    let (stored_name, stored_password, steam_id) = match read_row(db_path, username) {
-        Some(row) => row,
-        None => return None,
-    };
+    let (stored_name, stored_password, steam_id) = read_row(db_path, username)?;
 
     if !verify_password(password, &stored_password) {
         return None;

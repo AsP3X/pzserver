@@ -710,19 +710,17 @@ fn inside_area(node: &GraphNode, position: Option<(f64, f64, i32)>) -> bool {
     let Some((px, py, pz)) = position else {
         return false;
     };
-    if let Some(floor) = node.data.area_z {
-        if pz != floor {
+    if let Some(floor) = node.data.area_z
+        && pz != floor {
             return false;
         }
-    }
-    if let Some(cells) = node.data.area_cells.as_ref() {
-        if !cells.is_empty() {
+    if let Some(cells) = node.data.area_cells.as_ref()
+        && !cells.is_empty() {
             let size = f64::from(node.data.area_cell_size.unwrap_or(16).max(1));
             let cx = (px / size).floor() as i32;
             let cy = (py / size).floor() as i32;
             return cells.iter().any(|cell| cell.x == cx && cell.y == cy);
         }
-    }
     let (Some(x), Some(y), Some(radius)) = (node.data.area_x, node.data.area_y, node.data.area_radius)
     else {
         return false;
@@ -736,8 +734,7 @@ async fn current_position(state: &AppState, username: &str) -> Option<(f64, f64,
     if let Ok(Some(read)) = pz_bridge::LuaBridge::new(&state.config.lua_bridge_path)
         .players_live()
         .await
-    {
-        if let Some(player) = read
+        && let Some(player) = read
             .data
             .players
             .iter()
@@ -745,7 +742,6 @@ async fn current_position(state: &AppState, username: &str) -> Option<(f64, f64,
         {
             return Some((player.x, player.y, player.z));
         }
-    }
     character::last_position(&state.db, username)
         .await
         .ok()

@@ -88,6 +88,7 @@ pub async fn actions(db: &PgPool) -> Result<Vec<String>, sqlx::Error> {
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn record(
     db: &PgPool,
     actor_id: Option<Uuid>,

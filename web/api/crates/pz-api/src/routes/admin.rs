@@ -283,7 +283,7 @@ async fn give_item(
         staff.id,
     )
     .await?;
-    let queued = matches!(outcome, crate::services::economy::delivery::GiveOutcome::Queued(_));
+    let queued = matches!(outcome, crate::services::economy::delivery::GiveOutcome::Queued);
     Ok(Json(serde_json::json!({
         "message": if queued {
             "Queued. They receive it the next time they are in the world."

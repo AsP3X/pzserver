@@ -92,8 +92,8 @@ pub async fn list_admin(db: &PgPool) -> Result<Vec<NewsPost>, sqlx::Error> {
 pub async fn create(db: &PgPool, author_id: Uuid, patch: NewsPatch) -> ApiResult<NewsPost> {
     let title = require_title(patch.title.as_deref())?;
     let body = require_body(patch.body.as_deref())?;
-    let excerpt = clean_excerpt(patch.excerpt.flatten().as_deref(), &body);
-    let slug = unique_slug(db, &title, None).await?;
+    let excerpt = clean_excerpt(patch.excerpt.flatten().as_deref(), body);
+    let slug = unique_slug(db, title, None).await?;
     let published_at = if patch.published.unwrap_or(false) {
         Some(Utc::now())
     } else {

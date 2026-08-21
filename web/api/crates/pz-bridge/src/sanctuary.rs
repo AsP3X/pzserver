@@ -29,21 +29,12 @@ pub enum SanctuaryError {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SafeZoneConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub zones: Vec<SafeZone>,
-}
-
-impl Default for SafeZoneConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            zones: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

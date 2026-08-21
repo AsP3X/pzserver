@@ -174,14 +174,13 @@ pub async fn update_game(
     branch: Option<&str>,
     message: Option<&str>,
 ) -> ApiResult<()> {
-    if let Some(branch) = branch {
-        if !STEAM_BRANCHES.contains(&branch) {
+    if let Some(branch) = branch
+        && !STEAM_BRANCHES.contains(&branch) {
             return Err(ApiError::Validation(format!(
                 "Unknown branch. Pick one of: {}.",
                 STEAM_BRANCHES.join(", ")
             )));
         }
-    }
 
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         let body = sanitise_message(message);

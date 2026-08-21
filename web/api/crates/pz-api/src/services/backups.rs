@@ -332,11 +332,10 @@ pub async fn delete_many(db: &PgPool, ids: &[Uuid]) -> ApiResult<BulkDeleteOutco
 
     // One stubborn archive should not sink the rest of the batch, but a batch
     // that removed nothing is a failure and has to reach the admin as one.
-    if outcome.total_failure() {
-        if let Some(error) = first_error {
+    if outcome.total_failure()
+        && let Some(error) = first_error {
             return Err(error);
         }
-    }
 
     Ok(outcome)
 }
@@ -816,8 +815,8 @@ fn list_zip(path: &Path) -> Result<Vec<String>, String> {
     }
     let mut entries = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if let Some(caps) = line.split_whitespace().nth(3) {
-            if caps != "Name" && !caps.is_empty() {
+        if let Some(caps) = line.split_whitespace().nth(3)
+            && caps != "Name" && !caps.is_empty() {
                 // unzip -l: length date time name — name may contain spaces.
                 if let Some(name) = line.splitn(4, char::is_whitespace).last() {
                     let name = name.trim();
@@ -826,7 +825,6 @@ fn list_zip(path: &Path) -> Result<Vec<String>, String> {
                     }
                 }
             }
-        }
     }
     // Simpler parse: skip header/footer, take the remainder after the third column.
     let mut cleaned = Vec::new();
