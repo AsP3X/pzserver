@@ -24,8 +24,13 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 
-def pack(tiles_dir: Path, db_path: Path, meta: dict) -> int:
-    """Store every tile under `tiles_dir`. Returns how many were newly added."""
+def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False) -> int:
+    """Store every tile under `tiles_dir`. Returns how many were newly added.
+
+    `replace` is for a re-render: without it the fresh bytes lose to the row
+    already there and the whole run is a no-op. The default stays skip-on-
+    conflict, which is what makes an interrupted first pack resumable.
+    """
     con = sqlite3.connect(db_path)
     con.executescript(SCHEMA)
 
@@ -39,10 +44,10 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict) -> int:
             batch.append((z, int(x), int(y), tile.read_bytes(), tile))
 
             if len(batch) >= 500:
-                added += _flush(con, batch)
+                added += _flush(con, batch, replace)
                 batch.clear()
 
-        added += _flush(con, batch)
+        added += _flush(con, batch, replace)
         print(f"level {z}: packed, {added} tiles so far", flush=True)
 
     # Ask the table, not the directory listing. pzmap2dzi creates a directory
@@ -80,16 +85,19 @@ def _level_dirs(tiles_dir: Path):
             yield entry
 
 
-def _flush(con, batch) -> int:
+def _flush(con, batch, replace: bool = False) -> int:
     """Insert a batch, then unlink the files that are now safely stored."""
     if not batch:
         return 0
 
     rows = [(z, x, y, blob) for z, x, y, blob, _ in batch]
     before = con.total_changes
+    conflict = (
+        "DO UPDATE SET data = excluded.data" if replace else "DO NOTHING"
+    )
     con.executemany(
         "INSERT INTO tiles (z, x, y, data) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(z, x, y) DO NOTHING",
+        f"ON CONFLICT(z, x, y) {conflict}",
         rows,
     )
     con.commit()
@@ -105,6 +113,8 @@ if __name__ == "__main__":
         print("usage: pack.py <layer0_files dir> <tiles.sqlite> [k=v ...]", file=sys.stderr)
         raise SystemExit(2)
 
-    extra = dict(pair.split("=", 1) for pair in sys.argv[3:])
-    n = pack(Path(sys.argv[1]), Path(sys.argv[2]), extra)
+    args = [a for a in sys.argv[3:] if a != "--replace"]
+    replace = "--replace" in sys.argv[3:]
+    extra = dict(pair.split("=", 1) for pair in args)
+    n = pack(Path(sys.argv[1]), Path(sys.argv[2]), extra, replace=replace)
     print(f"packed {n} new tiles into {sys.argv[2]}")

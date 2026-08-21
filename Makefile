@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game map-tiles restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -142,7 +142,18 @@ map-tiles:
 	@# reaches the texture check.
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" map-tiles
+
+# Redraw part of the map instead of all of it, for when the world has changed:
+#   make map-tiles-region CELLS="34,30,4,4"    x, y, width, height in cells
+#   make map-tiles-region CELLS="34,30"        one cell
+#   make map-tiles-region CELLS="34,30;40,12"  several
+# Minutes rather than hours, and it updates the existing pack in place.
+map-tiles-region:
+	@test -n "$(CELLS)" || { echo "set CELLS, e.g. make map-tiles-region CELLS=\"34,30,4,4\""; exit 1; }
+	@mkdir -p data/server/media/texturepacks
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" map-tiles
 
 # SVC limits these to named services, e.g. make logs SVC="game-server web-api"
 restart:
@@ -451,6 +462,7 @@ help:
 	@echo "    rebuild        - Rebuild images from upstream bases, then start"
 	@echo "    rebuild-game   - Rebuild game-server only"
 	@echo "    map-tiles      - Render the isometric basemap locally (hours, ~15 GB)"
+	@echo "    map-tiles-region CELLS=\"x,y,w,h\" - Redraw only those map cells (minutes)"
 	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
 	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""
