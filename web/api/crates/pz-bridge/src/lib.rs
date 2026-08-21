@@ -9,6 +9,7 @@
 //! Every reader returns `Option`/`Result` rather than panicking. A missing file
 //! is the normal state of a stopped server, not an error worth surfacing.
 
+pub mod catalog;
 pub mod delivery;
 pub mod deposit;
 pub mod docker;
@@ -33,6 +34,7 @@ pub use deposit::{
     DepositChannel, DepositError, DepositRates, DepositRequest, DepositRequests, DepositResult,
     DepositResults,
 };
+pub use catalog::{ITEMS_CATALOG_FILE, ItemCatalogEntry, ItemCatalogExport, ItemCatalogReader};
 pub use docker::{ContainerState, ContainerStatus, DockerClient, DockerError, parse_docker_logs};
 pub use ini::ServerIni;
 pub use steam_update::{PublicUpdate, UpdateReport, UpdateVerdict};
