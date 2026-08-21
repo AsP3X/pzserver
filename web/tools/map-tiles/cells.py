@@ -108,3 +108,45 @@ def merge_inputs(targets: set, deepest: int) -> set:
             for dy in (0, 1):
                 needed.add((z + 1, x * 2 + dx, y * 2 + dy))
     return needed - set(targets)
+
+
+def dzi_to_world(geo: Geometry, px: float, py: float) -> tuple[float, float]:
+    """Inverse of `world_to_dzi`. Matches dziToWorld() in the client."""
+    a = (px - geo.x0) / (geo.sqr / 2)
+    b = (py - geo.y0) / (geo.sqr / 4)
+    return (a + b) / 2, (b - a) / 2
+
+
+def expand_to_whole_tiles(geo: Geometry, rects, level: int) -> list:
+    """Widen a cell request until it covers every tile it touches, entirely.
+
+    `render_cell_range` paints only the cells it is given. A tile that
+    straddles the edge of the request therefore comes back with the requested
+    part drawn and the rest black -- trading one hole for a bigger one. Asking
+    for the whole of every affected tile is what keeps a regional re-render
+    from damaging its own edges.
+
+    Iso rotates the square, so a tile's axis-aligned pixel rect maps to a
+    diamond in world space; the cell box around it is wider than strictly
+    needed. Rendering a few extra cells is cheap, and getting this wrong is not.
+    """
+    tiles = cell_rect_to_tiles(geo, rects, [level])
+    if not tiles:
+        return list(rects)
+
+    span = geo.span(level)
+    cells_x, cells_y = [], []
+    for _, tx, ty in tiles:
+        for px in (tx * span, (tx + 1) * span):
+            for py in (ty * span, (ty + 1) * span):
+                wx, wy = dzi_to_world(geo, px, py)
+                cells_x.append(wx / geo.cell_size)
+                cells_y.append(wy / geo.cell_size)
+
+    import math
+
+    lo_x = max(0, math.floor(min(cells_x)))
+    hi_x = math.ceil(max(cells_x))
+    lo_y = max(0, math.floor(min(cells_y)))
+    hi_y = math.ceil(max(cells_y))
+    return [(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y)]

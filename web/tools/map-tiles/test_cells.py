@@ -78,3 +78,37 @@ def test_merge_inputs_stop_at_the_deepest_rendered_level():
     needed = merge_inputs({(20, 8, 12)}, deepest=20)
 
     assert needed == set(), "level 20 has no children to merge from"
+
+
+def test_tiles_expand_back_to_every_cell_they_touch():
+    """render_cell_range paints only the cells named. A tile straddling the
+    edge of that range therefore comes back part-painted and part-black -- it
+    fixed one hole and cut a bigger one. So the cells asked for have to be
+    widened to whole tiles before rendering."""
+    from cells import expand_to_whole_tiles
+
+    asked = [(39, 36, 1, 1)]
+    widened = expand_to_whole_tiles(GEO, asked, level=20)
+
+    # the original cell must still be in there
+    covered = set()
+    for cx, cy, w, h in widened:
+        for x in range(cx, cx + w):
+            for y in range(cy, cy + h):
+                covered.add((x, y))
+    assert (39, 36) in covered
+
+    # and it must genuinely widen: one cell is smaller than a level-20 tile
+    assert len(covered) > 1
+
+
+def test_widening_covers_the_tiles_it_claims_to():
+    from cells import cell_rect_to_tiles, expand_to_whole_tiles
+
+    asked = [(39, 36, 1, 1)]
+    target_tiles = cell_rect_to_tiles(GEO, asked, levels=[20])
+    widened = expand_to_whole_tiles(GEO, asked, level=20)
+
+    # every target tile must be fully inside the widened cell area
+    widened_tiles = cell_rect_to_tiles(GEO, widened, levels=[20])
+    assert target_tiles <= widened_tiles

@@ -86,8 +86,9 @@ if [ -n "$REGION" ]; then
     # dzi_cell_range is left alone, so the pyramid's geometry -- and therefore
     # every tile index the client computes -- is identical to a full render.
     # verify.py still gates on it below.
+    # The widened range, not the one asked for -- see region.py.
     echo "==> limiting the render to those cells"
-    python /tools/set_render_range.py "$CONF" "$REGION"
+    python /tools/set_render_range.py "$CONF" "$(cat /tmp/render_cells.txt)"
 
     # Without this the fresh bytes lose to the rows already in the pack and the
     # whole run is a no-op.
