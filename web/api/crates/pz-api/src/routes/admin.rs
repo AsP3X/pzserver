@@ -59,6 +59,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/whitelist", patch(whitelist_settings))
         .route("/admin/whitelist/{username}", post(whitelist_add).delete(whitelist_remove))
         .route("/admin/bridge", get(bridge))
+        .route("/admin/items", get(items))
         .route("/admin/logs", get(logs))
         .route("/admin/events", get(events))
         .route("/admin/reports", get(report_queue))
@@ -627,6 +628,29 @@ async fn bridge(
     _staff: AdminUser,
 ) -> ApiResult<Json<admin::BridgeHealth>> {
     Ok(Json(admin::bridge_health(&state).await?))
+}
+
+#[derive(Serialize)]
+struct ItemCatalogResponse {
+    items: Vec<pz_bridge::ItemCatalogEntry>,
+}
+
+/// Every item the server has registered, modded ones included.
+///
+/// An absent catalogue answers `200` with an empty list rather than an error.
+/// The mod writes it at boot, so "not written yet" is the normal state of a
+/// server that has never started, and the picker renders an explanation for it.
+///
+/// The clone off the cached `Arc` is deliberate: `serde` only serialises `Arc`
+/// behind its `rc` feature, and this endpoint is hit about once per admin
+/// session — not worth widening a dependency's feature set over.
+async fn items(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<ItemCatalogResponse>> {
+    Ok(Json(ItemCatalogResponse {
+        items: state.item_catalog.items().await.to_vec(),
+    }))
 }
 
 #[derive(Deserialize)]

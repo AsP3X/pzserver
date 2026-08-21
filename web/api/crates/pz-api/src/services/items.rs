@@ -76,7 +76,8 @@ mod tests {
 
     use super::*;
 
-    const ONE: &str = r#"{"items":[{"full_type":"Base.Axe","name":"Axe","category":"ToolWeapon"}]}"#;
+    const ONE: &str =
+        r#"{"items":[{"full_type":"Base.Axe","name":"Axe","category":"ToolWeapon"}]}"#;
     const TWO: &str = r#"{"items":[{"full_type":"Base.Pan","name":"Pan","category":"Cooking"}]}"#;
 
     /// `tempfile` is not a dependency of this crate; `services::datadirs`
