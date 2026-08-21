@@ -132,6 +132,9 @@ services:
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
       # World archives. Same host folder the PHP stack writes to.
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
+      # The packed isometric pyramid. Read-only: the API only ever reads it,
+      # and `make map-tiles` is what writes it.
+      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles:ro
     tmpfs:
       - /tmp
     environment:
@@ -209,3 +212,23 @@ services:
       # the publish take effect; pzserver-internal is how nginx reaches web-api.
       - proxy-network
       - pzserver-internal
+
+  # ---------------------------------------------------------------------------
+  # One-off tile render. `profiles` keeps it out of `up`; it is run on demand
+  # through `make map-tiles` and exits when finished.
+  # ---------------------------------------------------------------------------
+  map-tiles:
+    image: ${PZ_MAP_TILES_IMAGE:-pzserver-map-tiles:local}
+    build:
+      context: ./web/tools/map-tiles
+      dockerfile: Dockerfile
+    pull_policy: build
+    container_name: pz-map-tiles
+    profiles: ["tools"]
+    volumes:
+      # The game install, for the map cells and textures. Read-only: rendering
+      # must never be able to damage the server's own files.
+      - ${PZ_SERVER_HOST:-./data/server}:/pz:ro
+      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/out
+    environment:
+      PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}

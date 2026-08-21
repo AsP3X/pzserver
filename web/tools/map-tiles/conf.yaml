@@ -50,13 +50,8 @@ render_conf:
 # run. They set the image bounds, and the defaults are what pzmap.org used.
 # The Task 1 geometry gate (verify.py) is what tests that assumption.
 #
-# Expected output path, per output_root/output_route/output_entry above:
-#   /out/map_data/default/base/layer0.dzi
-#   /out/map_data/default/base/layer0_files/{z}/{x}_{y}.jpg
-# TODO(Task 1, Step 10): replace with the path actually printed by `find`
-# once the single-cell render below has been run.
-
-# Verified output layout (differs from the obvious guess — no `default` segment):
+# Verified output layout (differs from the obvious guess — no `default` segment,
+# despite output_entry/output_route above reading as though there would be one):
 #   /out/html/map_data/base/layer0.dzi
 #   /out/html/map_data/base/map_info.json      <- geometry, checked by verify.py
 #   /out/html/map_data/base/layer0_files/{z}/{x}_{y}.jpg

@@ -296,6 +296,14 @@ function Do-RebuildGame {
     Invoke-Compose @("up", "-d", "game-server")
 }
 
+# Renders the isometric basemap from the game files into data\map-tiles.
+# Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
+function Do-MapTiles {
+    Write-Host "Rendering the isometric basemap from the game files (hours, ~15 GB)..." -ForegroundColor Cyan
+    Invoke-Compose @("--profile", "tools", "build", "map-tiles")
+    Invoke-Compose @("--profile", "tools", "run", "--rm", "map-tiles")
+}
+
 function Do-Stop {
     Invoke-Compose @("stop")
 }
@@ -658,6 +666,7 @@ function Do-Help {
     Write-Host "    .\make.ps1 restart [svc...] Restart all services, or the named ones"
     Write-Host "    .\make.ps1 rebuild          Rebuild images from upstream bases, then start"
     Write-Host "    .\make.ps1 rebuild-game     Rebuild game-server only"
+    Write-Host "    .\make.ps1 map-tiles        Render the isometric basemap locally (hours, ~15 GB)"
     Write-Host "    .\make.ps1 stop             Stop without removing containers"
     Write-Host "    .\make.ps1 logs [svc...]    Follow logs (all services, or the named ones)"
     Write-Host "    .\make.ps1 ps               List running containers"
@@ -704,6 +713,7 @@ switch ($Command) {
     "restart"        { Do-Restart }
     "rebuild"        { Do-Rebuild }
     "rebuild-game"   { Do-RebuildGame }
+    "map-tiles"      { Do-MapTiles }
     "stop"           { Do-Stop }
     "logs"           { Do-Logs }
     "ps"             { Do-Ps }

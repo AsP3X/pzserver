@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -133,6 +133,12 @@ rebuild: ensure-data-dirs ensure-networks
 rebuild-game:
 	$(COMPOSE) build --pull game-server
 	$(COMPOSE) up -d game-server
+
+# Renders the isometric basemap from the game files into data/map-tiles.
+# Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
+map-tiles:
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm map-tiles
 
 # SVC limits these to named services, e.g. make logs SVC="game-server web-api"
 restart:
@@ -440,6 +446,7 @@ help:
 	@echo "    test           - Run tests in the app container"
 	@echo "    rebuild        - Rebuild images from upstream bases, then start"
 	@echo "    rebuild-game   - Rebuild game-server only"
+	@echo "    map-tiles      - Render the isometric basemap locally (hours, ~15 GB)"
 	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
 	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""
