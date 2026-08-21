@@ -557,6 +557,96 @@ test runner, so this was the plan's own suggested approach):
 The second row is the one that matters: without it this fix would be an
 unbounded cache, i.e. a memory leak instead of a blank map.
 
+## The pack is incomplete — two separate defects
+
+Found after cutover, by chasing a black rectangle the user spotted at world
+`10206, 9281`.
+
+### Defect A: a hole baked into the tile
+
+That coordinate maps to tile `20/134_59`. It **is** in the pack (689 KB), it
+serves byte-identically to what is stored, and it is a valid JPEG — it simply
+has a solid black rectangle painted into it. Extracted and looked at directly.
+Not a retrieval problem.
+
+**Cause, and it was mine.** When run #2 stalled I deleted the `.pending` markers
+but kept the `.jpg` files, on the stated reasoning that "completed .jpg and
+.empty tiles are valid". They are not. A worker killed mid-render leaves a
+**complete, valid JPEG that is only partly painted**, and the `.pending` marker
+is the only record of that. Deleting it made the half-drawn tile look finished,
+so the resumed run skipped it.
+
+A scan for rectangular black regions found **413 tiles**, though many of the
+100%-black ones sit on the map-diamond diagonal (`z19 45_0, 47_1, 49_2 …`,
+x+2/y+1) and are legitimately void. The true count of holes-in-painted-terrain
+is lower and was not pinned down.
+
+### Defect B: the upward merge never finished
+
+Worse, and unrelated to A. A parent must exist wherever any of its four
+children do:
+
+| Parent level | Expected | Present | Missing |
+|---|---|---|---|
+| 19 | 4107 | 4084 | 23 |
+| 18 | 1071 | 1052 | 19 |
+| 17 | 293 | 277 | 16 |
+| 16 | 89 | 77 | 12 |
+| 15 | 25 | 20 | 5 |
+| 14 | 10 | 7 | 3 |
+| 13 | 3 | 1 | 2 |
+
+It cascades: by level 13 only 1 tile of 3 survives, and **levels 8–11 do not
+exist at all**. The render exited 0 at `job: 347351/347597` — 246 short — and
+packed anyway.
+
+**This is why zooming out blanks the map.** The client's `MIN_ISO_SCALE` allows
+level 8, the pack starts at 12, and `ancestor()` falls back by walking *toward*
+the missing shallow levels, so there is nothing to fall back on either.
+
+**Not yet fixed.** The cheap repair is re-merging existing children into the
+missing parents — no game data needed, minutes not hours — rather than
+re-rendering. Not built.
+
+## Regional re-render — built, NOT yet proven working
+
+Asked for so the map can be updated as the world changes on the server, rather
+than paying hours for a few cells.
+
+```bash
+make map-tiles-region CELLS="34,30,4,4"     # x, y, w, h in map cells
+.\make.ps1 map-tiles-region 34,30,4,4
+```
+
+`render_cell_range` is the primitive: it renders a subset while leaving
+`dzi_cell_range` — and therefore the pyramid geometry and every tile index the
+client computes — untouched. `verify.py` still gates on it.
+
+Three supporting pieces (`0451835`, 16 tests):
+
+- **`unpack.py`** — restores tiles from the pack, because the packer deletes the
+  loose tree and parents merge from four children; a region rendered without its
+  neighbours on disk yields parents three-quarters black. Restores **only the
+  merge inputs**: one cell needs 28 tiles back, not 21,480.
+- **`cells.py`** — cell rect → covering tiles, same projection as the client's
+  `worldToDzi`. Targets are deliberately **not** restored; the hole is what tells
+  pzmap2dzi to redraw.
+- **`pack.py --replace`** — the default `DO NOTHING` keeps a first pack
+  resumable but would silently discard every re-rendered tile.
+
+`run.sh` now also deletes `.pending` markers **together with their half-drawn
+`.jpg`**, which is exactly the trap that caused Defect A.
+
+### Status: the first live run did not update the pack
+
+Planning worked — `region 39,36: 29 tiles to redraw, 28 to restore` — and the
+merge inputs were restored. Then nothing: `generated_at` unchanged, tile
+`20/134_59` byte-identical, 23 loose tiles stranded in the tree. It failed
+between restore and pack, and the `--rm` container took its logs with it.
+
+**Next step: re-run with output captured** and find where it stops. Do not
+assume the feature works until a tile actually changes in the pack.
+
 ### Still on the table, not done
 
 - **Move the pack to a Docker named volume.** Lives inside the VM's ext4 rather
