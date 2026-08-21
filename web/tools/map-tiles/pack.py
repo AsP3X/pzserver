@@ -69,7 +69,15 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False) -> i
         list(meta.items()),
     )
     con.commit()
-    con.execute("VACUUM")
+
+    # Only after a full pack. VACUUM rebuilds the entire database into a
+    # temporary copy beside it, so on a 24 GB pack it costs tens of minutes and
+    # briefly doubles the disk -- absurd for a regional re-render that replaced
+    # a few dozen rows. Even here it earns little: this only ever INSERTs, in
+    # level order, so there is barely any fragmentation to reclaim.
+    if not replace:
+        con.execute("VACUUM")
+
     con.close()
     return added
 

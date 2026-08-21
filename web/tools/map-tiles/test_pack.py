@@ -57,3 +57,45 @@ def test_meta_levels_come_from_stored_tiles_not_empty_directories(tmp_path):
     meta = dict(con.execute("SELECT key, value FROM meta"))
     assert meta["min_level"] == "8", "empty level 0 must not become min_level"
     assert meta["max_level"] == "20", "empty level 22 must not become max_level"
+
+
+def _statements(fn):
+    """Capture the SQL a pack() call issues."""
+    seen = []
+    real = sqlite3.connect
+
+    def traced(*a, **kw):
+        con = real(*a, **kw)
+        con.set_trace_callback(seen.append)
+        return con
+
+    sqlite3.connect = traced
+    try:
+        fn()
+    finally:
+        sqlite3.connect = real
+    return seen
+
+
+def test_a_regional_repack_does_not_vacuum(tmp_path):
+    """VACUUM rebuilds the whole database into a temporary copy. On the real
+    24 GB pack that is tens of minutes and double the disk, which is absurd
+    for a re-render that touched 59 rows -- and it only ever INSERTs, so there
+    is next to no fragmentation to reclaim anyway."""
+    tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
+    build_tree(tree)
+    tiles = tree / "base" / "layer0_files"
+
+    sql = _statements(lambda: pack(tiles, db, {}, replace=True))
+
+    assert not any("VACUUM" in s.upper() for s in sql), "a replace pack must not VACUUM"
+
+
+def test_the_first_full_pack_still_vacuums(tmp_path):
+    tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
+    build_tree(tree)
+    tiles = tree / "base" / "layer0_files"
+
+    sql = _statements(lambda: pack(tiles, db, {}))
+
+    assert any("VACUUM" in s.upper() for s in sql)
