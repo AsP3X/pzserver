@@ -169,21 +169,21 @@ than a category the admin picks.
 
 ## Matching
 
-A small scorer in `lib/`, roughly forty lines, no dependency. `web/ui` has
-twelve runtime dependencies and no fuzzy-search library; adding one to rank
-five thousand short strings would not pay for itself.
+No new scorer. `lib/fuzzy.ts` already exports `fuzzyMatchWords`, a
+subsequence matcher that scores consecutive hits and word-boundary hits
+higher, and `fuzzySlices`, which splits a string into matched and unmatched
+runs for highlighting. Nine admin pages already use them, `me/vault.tsx`
+among them, matching against exactly this kind of item string.
 
-Case-insensitive, matched against both the display name and the `full_type`.
-Scoring, best first:
+The picker follows the ranked idiom `admin/config.tsx` established: map each
+item to `fuzzyMatchWords(query, haystack)`, drop the nulls, sort by score
+descending. The haystack is `` `${name} ${full_type} ${category}` ``, the same
+shape `me/vault.tsx` builds, so both the display name and the ID are
+searchable in one pass. `fireax` hits Fire Axe through the subsequence rule;
+`base.ax` hits it through the exact-substring rule inside `fuzzyMatchWords`.
 
-1. Exact `full_type` match
-2. Query is a prefix of the display name
-3. Every query token appears as a substring, in either field
-4. Query characters appear in order as a subsequence
-
-Ties break on shorter display name, so `Axe` outranks `Axe Handle` for `axe`.
-Both `fireax` and `base.ax` must find the Fire Axe — the first through the
-subsequence rule, the second through the token rule against `full_type`.
+Matched characters in the name and ID are highlighted with `fuzzySlices`,
+which is what `logs.tsx` and `backup-editor.tsx` do.
 
 ## Translations
 
@@ -206,11 +206,11 @@ contents)` fixture:
 - a second read with an unchanged mtime does not re-parse
 - a read after the mtime changes returns the new contents
 
-The scorer's ranking is worth testing, but `web/ui` has no test runner and this
-change does not justify introducing one. The dialog and the ranking get
-verified in the browser preview instead: search behaviour, keyboard navigation,
-nested-Escape, the prefill conditional on both forms, and the empty-catalogue
-state.
+Nothing new to test on the matching side — `fuzzyMatchWords` is existing,
+already-exercised code. `web/ui` has no test runner and this change does not
+justify introducing one, so the dialog gets verified in the browser preview:
+search behaviour and ranking, keyboard navigation, nested-Escape, the prefill
+conditional on both forms, and the empty-catalogue state.
 
 ## Out of scope
 
