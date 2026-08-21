@@ -1,92 +1,161 @@
 # Map tiles (3D isometric basemap)
 
-> **Currently unavailable.** This was a Laravel feature of the `app` container,
-> parked in `c318e99`. The Rust API that replaced it has no map routes, so the
-> `artisan` commands here have nothing to run in. Kept as the reference for what
-> the feature did and how the tile pyramids are laid out.
+The admin **Player map** (`/admin/players/map`) plots player markers on a
+basemap, and offers two of them. This document covers the **3D isometric** one:
+game-like tiles rendered from the dedicated server's own game files, packed into
+a single SQLite file, and served by this stack's own API.
 
-The admin **Player map** (`/admin/players/map`) plots player markers on a basemap. The same basemap config is reused for safe zones, moderation, and the player portal map widget.
+Nothing leaves the origin. After a render the map works with no internet
+connection at all.
 
-## Default: vector basemap (no tile generation)
-
-Out of the box the panel uses a **compact vector pack** baked from vanilla `worldmap.xml` (~1.5 MB, Canvas-rendered). See **[map-vector.md](map-vector.md)**.
-
-- No `pzmap2dzi` run, no multi-file pyramid
-- Schematic “in-game world map” look (water, roads, buildings, labels)
+For the default schematic basemap, see **[map-vector.md](map-vector.md)**.
 
 ## Map view: Vector vs 3D isometric
 
-Admin → Player map → the **Vector (2D) / 3D isometric** switch above the map (stored in browser `localStorage` as `pz-map-view-mode`):
+Admin → Player map → the **Vector (2D) / 3D isometric** switch above the map
+(stored in browser `localStorage` as `pz-map-view-mode`):
 
-| Mode | What you see | Server load |
-|------|----------------|-------------|
-| **Vector (2D)** | Schematic worldmap (default) | Minimal (static JSON) |
-| **3D isometric** | Game-like isometric tiles | **Live CDN** immediately; optional local pack |
+| Mode | What you see | Needs |
+|------|--------------|-------|
+| **Vector (2D)** | Schematic worldmap (default) | Nothing — a static JSON pack ships with the UI |
+| **3D isometric** | Game-like isometric tiles | A local render (below) |
 
-Backend: `MapConfigBuilder::buildModes()` exposes both configs (`vector` + `isometric`). Isometric = local `tiles.sqlite` when ready, else public proxy so the UI always has something live to render.
+There is **no CDN fallback**. The isometric tiles previously came from
+`map.projectzomboid.com` and then the community `tiles.pzmap.org`; both are gone
+from this stack. A server that has not rendered its tiles shows the vector
+basemap and says so, rather than putting its traffic on a host someone else pays
+for.
 
-### Live first (no wait)
-
-Switching to **3D isometric** always shows tiles **right away** via **map.projectzomboid.com** when local tiles are not ready. Optional local generation runs in the background and **never blanks the map**.
-
-CDN isometric is **vanilla** Knox Country. Custom map mods need a **local** generate for accurate art (vector mode already merges `Map=` packs).
-
-### Efficient local generation (`--profile=lite` default)
-
-When you need offline / modded isometric tiles, generate with the **lite** profile (Admin UI default):
-
-| Setting | Lite | Full |
-|---------|------|------|
-| Layers | Ground only `[0,0]` | Ground + walls `[0,1]` |
-| `omit_levels` | 5 (fewer high-zoom tiles) | 3 |
-| Workers | 1 (config default) | 1+ (`PZ_MAP_WORKERS`) |
-| Priority | nice + ionice | same |
-| Output | WebP → pack `tiles.sqlite` | same |
+## Generating the tiles
 
 ```bash
-# Lite (recommended on a live server)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=lite
-
-# Full detail (heavier — prefer when idle)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=full
-
-# Compose / Make
-docker compose exec app php artisan zomboid:generate-map-tiles --force --profile=lite
-make exec CMD="php artisan zomboid:generate-map-tiles --force --profile=lite"
+make map-tiles
 ```
 
-**Admin UI:** **Basemap setup** (page header) → **Isometric tiles (Advanced)** → choose Lite/Full → Generate.  
-API: `POST /admin/players/map/generate-tiles` body `{ "profile": "lite"|"full", "force"?: true, "resume"?: true }`.
+```powershell
+.\make.ps1 map-tiles
+```
 
-After a successful pack, 3D mode automatically prefers **local** tiles over the CDN.
+That builds the render image and runs it once. Both wrap a build and a
+`--profile tools run --rm map-tiles`. The service lives in
+`docker-compose.web.yml` behind the `tools` profile, so a normal `make up` never
+starts it.
 
-### Env / force defaults
+### What it costs
 
-| Env | Meaning |
-|-----|---------|
-| `PZ_MAP_BASEMAP=auto` | Prefer vector for default page config (UI still offers both modes) |
-| `PZ_MAP_BASEMAP=vector` | Force vector for `build()` |
-| `PZ_MAP_BASEMAP=local` | Force local tiles when usable |
-| `PZ_MAP_BASEMAP=proxy` | Force public isometric CDN |
-| `PZ_MAP_PROXY_URL` | CDN tile URL template |
-| `PZ_MAP_WORKERS` | Render worker count (default 1) |
+| Fact | Value |
+|---|---|
+| Levels rendered | 8–20 |
+| Tiles | ~27,000 |
+| Result on disk | ~15 GB |
+| Free space needed | **~25 GB**, for the loose tree ahead of the packer |
+| Runtime | Hours |
 
-## Optional: proxy tiles only
+Depth is the whole cost. Levels 21 and 22 would take the pyramid to ~360,000
+tiles and ~200 GB, so `omit_levels: 2` in `web/tools/map-tiles/conf.yaml` drops
+them. `DEFAULT_ISO_SCALE` resolves to level 20, so the view you get when
+centring on a survivor is still native resolution; zooming past it upscales from
+level 20 through `IsoTileCache.ancestor()`.
 
-Set `PZ_MAP_BASEMAP=proxy` (or fall back when the vector pack is missing) to use tiles from **map.projectzomboid.com** without offering vector as the server default.
+Check there is room first:
 
-- No local disk usage beyond the panel itself
-- Requires outbound HTTPS from the browser (or users) to the proxy host
+```bash
+df -h .
+```
 
-## Optional: local tiles (packed SQLite)
+### It is safe to interrupt
 
-Local tiles are rendered with [pzmap2dzi](https://github.com/cff29546/pzmap2dzi) from the dedicated server game files (`media/`, workshop content). The tool is installed in the **app** image at `/opt/pzmap2dzi`.
+Ctrl-C and re-run. `pzmap2dzi` is incremental and skips tiles it has already
+painted, and the packer skips `(z, x, y)` rows already in the database. A reboot
+mid-render costs nothing but the time already spent.
 
-### Why not keep the raw DZI pyramid?
+### What the run does
 
-`pzmap2dzi` writes a Deep Zoom Image pyramid: one small `.webp`/`.jpg` per tile under nested zoom folders. A full isometric basemap is commonly **hundreds of thousands to millions of files**.
+`web/tools/map-tiles/run.sh`, in order:
 
-That layout is painful for operators:
+1. **deploy** / **unpack** — pzmap2dzi's own preparation steps
+2. **render base** — paints the loose DZI pyramid into
+   `/out/html/map_data/base/layer0_files/{z}/{x}_{y}.jpg` (hours)
+3. **verify** — `verify.py` checks the geometry, and **stops here on a
+   mismatch** (see below)
+4. **pack** — `pack.py` folds every tile into `/out/tiles.sqlite`, deleting each
+   file as it stores it
+
+Step 4 deletes as it walks deliberately. Holding the whole loose tree and the
+finished database at once costs roughly double the final size; unlinking each
+tile once it is safely stored keeps the peak near 15 GB rather than 30.
+
+### The geometry gate
+
+The client hardcodes the pyramid's bounds in `web/ui/src/lib/iso-tiles.ts`:
+
+```ts
+export const ISO_DZI = {
+  width: 2_318_656, height: 1_019_040,
+  x0: 1_040_384, y0: -139_296,
+  sqr: 128, tileSize: 2048, maxLevel: 22, minLevel: 8,
+} as const
+```
+
+`worldToDzi()` places every pin using `x0`/`y0`/`sqr`. If a render produces
+different bounds, **every pin lands in the wrong place while the tiles still
+look plausible** — the worst kind of failure, because it looks like it works.
+
+`verify.py` reads `map_info.json` and refuses to let the run reach the packer
+unless the geometry matches. It is not optional, and it is cheap: `map_info.json`
+is written about ten seconds into a render, long before any tile is painted.
+
+If it ever fails, the fix is a corrected `dzi_cell_range` in `conf.yaml` and a
+re-render — **not** editing `ISO_DZI` to match. The client's coordinate maths is
+the contract.
+
+## After a render
+
+The store is opened once at API start-up, so a render against a running stack
+needs a restart before the API sees it:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.amd64.yml -f docker-compose.web.yml restart web-api
+```
+
+Then:
+
+```bash
+curl -s http://127.0.0.1:8100/api/v1/map-tiles/meta
+```
+
+```json
+{"generated":true,"min_level":8,"max_level":20,"game_version":"42.20.0"}
+```
+
+Before any render the same endpoint answers
+`{"generated":false,"min_level":null,"max_level":null,"game_version":null}` and
+every tile is a `404`. That is the correct state, not a failure — the UI reads it
+and tells staff the tiles have not been generated yet.
+
+## On-disk layout
+
+Host bind (default): `./data/map-tiles/` → container `/out` for the renderer,
+`/map-tiles` read-only for the API.
+
+```
+data/map-tiles/
+└── tiles.sqlite              # the whole basemap, one file
+```
+
+During generation only, then deleted as it packs:
+
+```
+data/map-tiles/html/map_data/base/
+├── layer0.dzi
+├── map_info.json             # geometry, checked by verify.py
+└── layer0_files/{z}/{x}_{y}.jpg
+```
+
+### Why one file instead of the pyramid
+
+`pzmap2dzi` writes a Deep Zoom pyramid: one small JPEG per tile under nested
+zoom folders. That layout is painful for operators:
 
 | Operation | Multi-file pyramid | Single pack |
 |-----------|--------------------|-------------|
@@ -94,218 +163,106 @@ That layout is painful for operators:
 | Host backup / rsync / tar | Extremely slow | One large file |
 | Disk checks / antivirus | Pathological | Normal |
 
-This stack therefore **always packs** the pyramid after a successful render:
+### Schema
 
-1. **Render** — temporary multi-file pyramid under `/map-tiles/html/map_data/base/layer0_files/`
-2. **Pack** — all tiles + `map_info` metadata into **`/map-tiles/tiles.sqlite`**
-3. **Cleanup** — remove the loose `layer0_files/` tree (`rm -rf`)
+```sql
+CREATE TABLE tiles (
+  z INTEGER NOT NULL,
+  x INTEGER NOT NULL,
+  y INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  PRIMARY KEY (z, x, y)
+) WITHOUT ROWID;
 
-The HTTP tile endpoint (`GET /admin/map-tiles/{level}/{tile}`) reads blobs from SQLite (and still understands legacy loose files if packing has not been run yet).
-
-### On-disk layout
-
-Host bind (default): `./data/map-tiles/` → container `/map-tiles`.
-
-```
-data/map-tiles/
-├── tiles.sqlite              # canonical basemap (required for local tiles)
-└── html/map_data/base/
-    └── map_info.json         # small sidecar (also stored inside the pack meta table)
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
-During generation only (then deleted):
+`WITHOUT ROWID` because the primary key is the only lookup a tile read ever
+does, and a second index would be dead weight across 27,000 rows of blob.
 
-```
-data/map-tiles/html/map_data/base/layer0_files/{z}/{x}_{y}.webp
-```
+Grid positions with no tile have **no row**. pzmap2dzi emits nothing for empty
+regions — about 53% of level-22 grid positions never existed at all — so absence
+is the answer, not a sentinel.
 
-### How to generate
+`meta` holds `game_version`, `min_level`, `max_level`, `tile_size`, `width`,
+`height`, `generated_at`, `tile_count`.
 
-**UI:** Admin → **Player map** → **Basemap setup** → **Isometric tiles (Advanced)** (Generate / Stop / Resume / Start over + progress bar).
+## Serving
 
-**CLI (Docker — preferred for logs / SSH):**
+| Route | Answers |
+|---|---|
+| `GET /api/v1/map-tiles/meta` | The `meta` table, as JSON |
+| `GET /api/v1/map-tiles/{z}/{x}_{y}.jpg` | `200 image/jpeg`, `Cache-Control: public, max-age=604800` |
 
-The artisan command runs in the **app** container (`container_name: pz-app`). Stack must already be up (`make up` / `docker compose up -d`).
+A missing row, a missing `tiles.sqlite`, or a tile name that does not parse all
+answer `404` with an empty body. Both routes are public, like the rest of the map
+surface — a tile is not a secret.
 
-```bash
-# Full generate: render → pack into tiles.sqlite → remove loose files
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
+The cache header is deliberately **not** `immutable`: the URL carries no version,
+so re-rendering for a new game build returns different bytes at the same path. A
+week of staleness after a re-render is the accepted cost of keeping the URL
+simple.
 
-# Pack only (no re-render)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
-```
+`rusqlite::Connection` is `!Sync`, so the store holds one mutex-guarded read-only
+connection and reads it inside `spawn_blocking`.
 
-Equivalent via Compose service name:
+## Configuration
 
-```bash
-docker compose exec app php artisan zomboid:generate-map-tiles --force
-docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
-```
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `PZ_MAP_TILES_HOST` | `./data/map-tiles` | Host bind mount |
+| `MAP_TILES_PATH` | `/map-tiles/tiles.sqlite` | Path inside the API container |
+| `PZ_SERVER_HOST` | `./data/server` | Game install the render reads (mounted read-only) |
+| `PZ_GAME_VERSION` | `42.20.0` | Recorded in `meta.game_version` |
+| `PZ_MAP_TILES_IMAGE` | `pzserver-map-tiles:local` | Render image tag |
 
-Make / PowerShell wrappers (optional):
+Render settings — tile size, level depth, layer cap, JPEG quality — live in
+`web/tools/map-tiles/conf.yaml`. `tile_size: 2048` and the `.jpg` format are
+load-bearing: the client's `tileSpan()` maths and its tile URLs both assume them,
+and `verify.py` enforces the tile size.
 
-```bash
-make exec CMD="php artisan zomboid:generate-map-tiles --force"
-```
+## Custom map mods
 
-```powershell
-.\make.ps1 exec php artisan zomboid:generate-map-tiles --force
-.\make.ps1 exec php artisan zomboid:generate-map-tiles --pack-only
-```
+The render reads `mod_root: /pz/steamapps/workshop/content/108600`, so workshop
+map packs the server already has are available to it. `base_map: default` and
+`mod_maps: []` in `conf.yaml` currently render vanilla Knox County only; add the
+mod's map name to `mod_maps` to include it.
 
-Generation is **not** scheduled and **not** run automatically on container start (too heavy).
+Note that the geometry gate checks the vanilla bounds. Changing what is rendered
+changes those bounds, so `verify.py` and `ISO_DZI` have to move together.
 
-#### Artisan options
-
-| Option | Description |
-|--------|-------------|
-| `--force` | Delete existing pack and loose tiles, then re-render and pack |
-| `--pack-only` | Pack an existing loose pyramid into `tiles.sqlite` without re-rendering |
-| `--status` | Report what is on disk (per-level tile counts, pack size, progress state) |
-| `--keep-loose` | Keep the multi-file pyramid after packing (not recommended) |
-| `--workers=N` | Render worker processes (default: detected CPU cores) |
-| `--map=` | Specific map name passed to pzmap2dzi (default: vanilla / all) |
-
-### Migrating an existing multi-file install
-
-If you already generated tiles **before** packing existed, you likely have a huge `layer0_files/` tree. Convert without re-rendering:
-
-```bash
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
-```
-
-After it finishes you should see `./data/map-tiles/tiles.sqlite` and the loose pyramid removed. Backups and deletes become normal again.
-
-If packing is interrupted, re-run `--pack-only` (or regenerate with `--force`).
-
-### Resource expectations / disk lag
-
-Local isometric render is **extremely disk-heavy** (millions of small tile writes). On the same disk as the game world this can briefly push **disk util to 100%** and lag the dedicated server.
-
-This stack throttles generation by default:
-
-| Control | Default | Env |
-|---------|---------|-----|
-| Render workers | **1** | `PZ_MAP_WORKERS` |
-| CPU/I/O priority | `nice -n 15` + `ionice -c 2 -n 7` (low, not idle) | `PZ_MAP_LOW_PRIORITY`, `PZ_MAP_IONICE_CLASS` |
-| Pack micro-pauses | every 100 tiles, 10ms | `PZ_MAP_PACK_PAUSE_EVERY` / `PZ_MAP_PACK_PAUSE_US` |
-
-> **Note:** `ionice -c 3` (idle) was tried earlier but can leave render stuck in “preparing” for a very long time while the game server keeps the disk busy. Default is now best-effort low priority so prepare/scan still progresses.
-
-Still plan for:
-
-- Long runtime (hours with 1 worker is normal and intentional)
-- Temporary disk use while the loose pyramid exists **before** pack+delete
-- Prefer generating when few players are online
-
-Quieter host (even slower generate):
-
-```bash
-# in .env / app env
-PZ_MAP_WORKERS=1
-PZ_MAP_LOW_PRIORITY=true
-PZ_MAP_PACK_PAUSE_EVERY=50
-PZ_MAP_PACK_PAUSE_US=20000
-```
-
-Faster generate (more lag risk):
-
-```bash
-PZ_MAP_WORKERS=4
-# or one-shot:
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --workers=4
-```
-
-### Progress
-
-While generation runs, progress is written to `app/storage/app/map-tiles.progress.json` and shown:
-
-- **CLI** — live status line (`job: done/total`, saved tiles, elapsed time) when using `docker exec -it`
-- **Admin UI** — progress bar in the Player map's Basemap setup panel (polls every 5s, 3s while generating)
-
-Inspect progress manually:
-
-```bash
-docker exec pz-app php artisan zomboid:generate-map-tiles --status
-```
-
-```bash
-docker exec pz-app tail -f /var/www/html/storage/logs/pzmap2dzi.log
-```
-
-**`saved tiles` staying at 0 early in a render is normal.** pzmap2dzi walks tiles in
-Z-order starting at the top-left of the DZI bounding box, which in isometric projection
-is outside the map diamond — void area. Void tiles are written as zero-byte `.empty`
-sentinels, not images, so the image counter stays at 0 until the walk reaches actual map
-data. `--status` shows both columns, so a level with a large `empty` count and zero
-images is proof the renderer is working, not stalled.
-
-The basemap keeps using proxy tiles for the whole render. pzmap2dzi builds the pyramid
-bottom-up, so the zoom levels Leaflet requests are the last ones written; the map only
-switches to local tiles once `tiles.sqlite` exists (step 3), or once a loose pyramid is
-present with no render running.
-
-### Stop & resume
-
-You can interrupt generation without losing the multi-file pyramid, then continue later (pzmap2dzi is incremental).
-
-| Action | Docker / CLI | Admin UI |
-|--------|--------------|----------|
-| **Stop** (keep partial tiles) | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop` | **Stop generation** |
-| **Resume** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume` | **Resume generation** |
-| **Clear everything** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear` | **Start over** (confirm) |
-
-`--clear` renames large tile trees to `.trash-*` and deletes them **in the background** so the command returns quickly. Live paths are empty immediately; disk space free-up may continue for a while (`storage/logs/map-tiles-purge.log`, `ls data/map-tiles/.trash-*`).
-| **Full regenerate** | `docker exec -it pz-app php artisan zomboid:generate-map-tiles --force` | **Start over** / regenerate |
-
-Notes:
-
-- **Do not use `--force`** if you want to resume — it deletes the partial pyramid.
-- Auto-resume: if loose tiles exist and you run without flags, the command continues incrementally.
-- After a full successful run, only `tiles.sqlite` remains (loose files removed).
-
-Logs:
-
-- Artisan / UI background job: `app/storage/logs/map-tiles.log`
-- pzmap2dzi subprocess: `app/storage/logs/pzmap2dzi.log`
-- Shared progress JSON: `app/storage/app/map-tiles.progress.json`
-
-### Configuration
-
-| Env / config | Default | Meaning |
-|--------------|---------|---------|
-| `PZ_MAP_TILES_PATH` | `/map-tiles` | Path **inside** the app container |
-| `PZ_MAP_TILES_HOST` | `./data/map-tiles` | Host bind mount (compose) |
-| `config('zomboid.map.*')` | see `app/config/zomboid.php` | Zoom defaults, proxy URL/DZI, tile size |
-
-Detection order in `MapConfigBuilder` (`PZ_MAP_BASEMAP=auto`):
-
-1. Vector pack (`public/map-vector/vanilla/map.json`) → `source: vector`
-2. Local pack (`tiles.sqlite`) or legacy loose tiles → `source: local`
-3. Else public proxy → `source: proxy`
-
-Force with `PZ_MAP_BASEMAP=vector|local|proxy`.
-
-### Implementation pointers (developers)
+## Files
 
 | Piece | Location |
 |-------|----------|
-| Generate + pack command | `app/Console/Commands/GenerateMapTiles.php` (`--profile=lite\|full`) |
-| Background UI spawn | `app/Services/MapTileGenerator.php` |
-| SQLite pack / serve store | `app/Services/MapTileStore.php` |
-| Dual modes + defaults | `app/Services/MapConfigBuilder.php` → `build()` / `buildModes()` |
-| Admin Map view + generate | `resources/js/pages/admin/player-map.tsx` |
-| Tile HTTP route | `GET /map-tiles/{level}/{tile}` (and admin alias) |
-| Unit tests | `tests/Unit/MapTileStoreTest.php`, `MapConfigBuilderTest.php` |
+| Render image | `web/tools/map-tiles/Dockerfile` |
+| pzmap2dzi settings | `web/tools/map-tiles/conf.yaml` |
+| Geometry gate | `web/tools/map-tiles/verify.py` |
+| Packer + its tests | `web/tools/map-tiles/pack.py`, `test_pack.py` |
+| Render → verify → pack | `web/tools/map-tiles/run.sh` |
+| Store (read side) | `web/api/crates/pz-api/src/services/map_tiles.rs` |
+| Routes | `web/api/crates/pz-api/src/routes/map_tiles.rs` |
+| Compose service | `docker-compose.web.yml`, `map-tiles` under the `tools` profile |
+| Client | `web/ui/src/lib/iso-tiles.ts`, `web/ui/src/components/ui/worldmap.tsx` |
 
-Pack schema (version `1`):
+## Troubleshooting
 
-- `meta(key, value)` — includes `map_info` JSON, `version`, `created_at`
-- `tiles(z, x, y, format, data)` — primary key `(z, x, y)`, `format` = `webp` or `jpg`
+**The map is blank in 3D mode.** Check `/api/v1/map-tiles/meta`. If it says
+`generated: false`, no render has completed — the UI should already be showing
+the vector basemap and saying so. If it says `true`, check that `web-api` was
+restarted after the render.
 
-### Related docs
+**Pins are offset from the buildings.** Stop and re-render. This is the failure
+the geometry gate exists to prevent, so it should be unreachable; if it does
+happen, the render's bounds differ from `ISO_DZI` and the answer is a corrected
+`dzi_cell_range`, never an edited `ISO_DZI`.
 
-- [Command reference](commands.md) — vector bake + isometric generate (docker variants)
-- [Vector basemap](map-vector.md) — default 2D schematic pack
-- [Troubleshooting](troubleshooting.md) — map / disk issues
-- [README — Map basemap](../README.md#map-basemap-admin-player-map) — short operator summary
+**The render says it cannot find the game files.** On Windows, a hand-run
+`docker run` needs `MSYS_NO_PATHCONV=1` from Git Bash or the bind mount silently
+does not happen and it looks like the install is missing. `make map-tiles` and
+`.\make.ps1 map-tiles` are unaffected.
+
+**`pzmap2dzi` fails looking for map descriptions.** `conf.yaml` has to sit beside
+`vanilla.txt`, `default_b42.txt` and `mod/` — pzmap2dzi resolves those relative to
+the config file's own directory. The Dockerfile copies it over pzmap2dzi's
+shipped `conf/conf.yaml` for exactly this reason.
