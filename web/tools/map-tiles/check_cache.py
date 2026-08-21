@@ -1,58 +1,68 @@
-"""Fail a render that silently lost tiles.
+"""Fail a render whose tile cache filled up.
 
-pzmap2dzi keeps the deepest levels only in a shared-memory cache -- with
-`omit_levels` set they are never written to disk. Evicting one destroys it:
-`release_cache` asks the worker to save, and `save_tile` returns 'skip' for
-exactly those levels. The tile's parent then merges a missing quadrant as
-black.
+The levels `omit_levels` discards are rendered but never written to disk --
+they live only in the shared-memory cache, and the level below is merged from
+them. When the cache is full, `release_cache` asks the worker to save a tile
+to make room, and `save_tile` returns 'skip' for exactly those levels
+(pzdzi.py:127). The tile is destroyed rather than spilled, and its parent
+merges the missing quadrant as black.
 
-A cache miss is therefore not a performance note, it is data loss. The render
-still exits 0, still passes the geometry gate, and still packs cleanly -- the
-damage only shows up as black rectangles on the map, hours later.
+So the number that matters is the peak, not the hit rate. Measured:
 
-  python check_cache.py render.log
+  limit 4096, peak 4112  -> ceiling reached, ~13,000 tiles destroyed
+  limit 16384, peak 5760 -> never evicted, no holes
+
+Cache *misses* are not the signal. `merge_tile` falls back to `load_tile` on a
+miss, which recovers any tile that was written to disk; both runs above missed
+~3.7% and only the first lost data.
+
+  python check_cache.py render.log <cache_limit_mb>
 """
 import re
 import sys
 from pathlib import Path
 
-PATTERN = re.compile(r"cache hit:\s*(\d+)\s*/\s*(\d+)")
+PEAK = re.compile(r"cache max used:\s*([0-9.]+)\s*MB")
+
+# A peak this close to the ceiling means eviction either ran or was about to.
+# The figure is a high-water sample, so treat the margin as the safe signal.
+SAFE_FRACTION = 0.95
 
 
-def main(log_path: str) -> int:
-    text = Path(log_path).read_text(encoding="utf-8", errors="replace")
-    matches = PATTERN.findall(text.replace("\r", "\n"))
+def main(log_path: str, limit_mb: int) -> int:
+    text = Path(log_path).read_text(encoding="utf-8", errors="replace").replace("\r", "\n")
+    peaks = PEAK.findall(text)
 
-    if not matches:
+    if not peaks:
         print(
-            "FAIL: the render never reported a cache hit rate.\n"
-            "Without it there is no way to tell whether deep tiles were evicted\n"
-            "and lost, so this run cannot be trusted.",
+            "FAIL: the render never reported its peak cache use.\n"
+            "Without it there is no way to tell whether tiles were evicted and\n"
+            "destroyed, so this run cannot be trusted.",
             file=sys.stderr,
         )
         return 1
 
-    hits, gets = (int(v) for v in matches[-1])
-    misses = gets - hits
+    peak = float(peaks[-1])
+    ceiling = limit_mb * SAFE_FRACTION
 
-    if misses > 0:
+    if peak >= ceiling:
         print(
-            f"FAIL: {misses} cache misses out of {gets}.\n\n"
-            f"Each miss is a tile that was evicted before its parent could merge\n"
-            f"it. The deepest levels are never written to disk, so those tiles are\n"
-            f"gone and their parents have black quadrants -- holes in the map.\n\n"
-            f"Raise cache_limit_mb in web/tools/map-tiles/conf.yaml (and shm_size\n"
-            f"in docker-compose.web.yml above it), then render again.",
+            f"FAIL: cache peaked at {peak:.0f} MB against a {limit_mb} MB limit.\n\n"
+            f"At the ceiling the render evicts tiles to make room. The deepest\n"
+            f"levels are never written to disk, so evicting one destroys it and\n"
+            f"its parent merges a black quadrant -- holes in the map.\n\n"
+            f"Raise cache_limit_mb in web/tools/map-tiles/conf.yaml, and shm_size\n"
+            f"in docker-compose.web.yml above it, then render again.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"cache: {hits}/{gets} hits, no tiles lost")
+    print(f"cache peaked at {peak:.0f} MB of {limit_mb} MB - nothing evicted")
     return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: check_cache.py <render log>", file=sys.stderr)
+    if len(sys.argv) != 3:
+        print("usage: check_cache.py <render log> <cache_limit_mb>", file=sys.stderr)
         raise SystemExit(2)
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(sys.argv[1], int(sys.argv[2])))

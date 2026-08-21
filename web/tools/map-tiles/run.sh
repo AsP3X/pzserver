@@ -111,12 +111,14 @@ fi
 RENDER_LOG=/tmp/render.log
 python main.py -c "$CONF" render base 2>&1 | tee "$RENDER_LOG"
 
-# Before anything is packed. A cache miss means a deep tile was evicted and
-# destroyed -- those levels are never written to disk -- leaving its parent
-# with a black quadrant. The render still exits 0 and still passes the
-# geometry gate, so this is the only thing that catches it.
+# Before anything is packed. If the cache filled up, the render evicted tiles
+# to make room -- and the levels omit_levels drops are never written to disk,
+# so evicting one destroys it and its parent merges a black quadrant. The run
+# still exits 0 and still passes the geometry gate, so this is the only thing
+# that catches it.
+CACHE_LIMIT=$(grep -oE "^[ 	]*cache_limit_mb:[ 	]*[0-9]+" "$CONF" | grep -oE "[0-9]+$")
 echo "==> verify nothing was evicted"
-python /tools/check_cache.py "$RENDER_LOG"
+python /tools/check_cache.py "$RENDER_LOG" "${CACHE_LIMIT:-0}"
 
 echo "==> verify geometry"
 python /tools/verify.py "$TREE/map_info.json"
