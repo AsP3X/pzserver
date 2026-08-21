@@ -229,6 +229,25 @@ API. After this the map works with no internet at all.
               1.1.16. **So pins will land correctly** — the thing the whole gate
               exists to protect is confirmed good.
 
+      **Still to run — this is what is left of the whole feature:**
+
+      - [ ] **Step 2: render.** `.\make.ps1 map-tiles`. Hours. Safe to interrupt;
+            re-running resumes.
+      - [ ] **Step 3: check what landed.** Expect ~27,000 tiles, `min_level` 8,
+            `max_level` 20.
+      - [ ] **Step 4: restart `web-api`** so it opens the new file, then
+            `curl /api/v1/map-tiles/meta` → expect `"generated":true`.
+      - [ ] **Step 5: prove tiles serve.** z8 and z20 → `200 image/jpeg` with
+            non-zero size; z22 → `404`.
+      - [ ] **Step 6: prove nothing calls out.** Network panel filtered on
+            `pzmap.org` while panning the map → no requests. (Already true by
+            construction — CSP no longer permits that host at all.)
+      - [ ] **Step 7: prove the pins line up.** Signed in, on the real map,
+            against a survivor whose in-game position is known. **This is the
+            check the entire geometry gate exists to protect.**
+      - [ ] **Task 7's browser console assertions** (see Task 7 above) — they
+            need a real `max_level` from meta, so they belong with this run.
+
 ## ⚠ THE BLOCKER: the dedicated server has no texture packs
 
 Found by that proving run, and it would have cost a whole night otherwise.
@@ -301,7 +320,8 @@ Commits: `30b1bc6` (mount + mkdir + guard), `a2b46c0` (docs).
 ### Also fixed on the way: CRLF corruption
 
 The Python edits used to patch files wrote CRLF on Windows, which silently broke
-`run.sh` — the container failed with `env: 'bash': No such file or directory`.
+`run.sh` — the container failed with `env: 'bash
+': No such file or directory`.
 `.gitattributes` mandates `eol=lf` for `*.sh`, but a direct file write bypasses
 git entirely, and Docker `COPY`s from the working tree, not from the index.
 
@@ -314,24 +334,7 @@ nothing else was disturbed.
 `** or you
 will rebuild this bug.
 
-      **Still to run — this is what is left of the whole feature:**
-
-      - [ ] **Step 2: render.** `.\make.ps1 map-tiles`. Hours. Safe to interrupt;
-            re-running resumes.
-      - [ ] **Step 3: check what landed.** Expect ~27,000 tiles, `min_level` 8,
-            `max_level` 20.
-      - [ ] **Step 4: restart `web-api`** so it opens the new file, then
-            `curl /api/v1/map-tiles/meta` → expect `"generated":true`.
-      - [ ] **Step 5: prove tiles serve.** z8 and z20 → `200 image/jpeg` with
-            non-zero size; z22 → `404`.
-      - [ ] **Step 6: prove nothing calls out.** Network panel filtered on
-            `pzmap.org` while panning the map → no requests. (Already true by
-            construction — CSP no longer permits that host at all.)
-      - [ ] **Step 7: prove the pins line up.** Signed in, on the real map,
-            against a survivor whose in-game position is known. **This is the
-            check the entire geometry gate exists to protect.**
-      - [ ] **Task 7's browser console assertions** (see Task 7 above) — they
-            need a real `max_level` from meta, so they belong with this run.
+---
 
 ### Decisions settled
 
@@ -363,7 +366,7 @@ All are written up in the plan's "What Task 1 established" section:
 Written before the Laravel app was removed in `36e213d`, and never updated.
 Anyone following these chases commands and settings that do not exist.
 
-- [ ] `docs/map-tiles.md`
+- [x] `docs/map-tiles.md` — **done** (`da1f5bb`, `a2b46c0`)
 - [ ] `docs/map-vector.md`
 - [ ] `docs/commands.md`
 - [ ] `docs/troubleshooting.md`
