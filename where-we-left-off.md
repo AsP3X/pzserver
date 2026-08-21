@@ -442,9 +442,12 @@ Rough shape of the run's disk usage:
 | Pack | tree shrinking, DB growing — roughly flat at ~26–30 GB |
 | **VACUUM** | **DB + temp copy, ~52 GB** |
 
-The temp copy lands in the container's `/tmp` (overlay, `temp_store=0`), not in
-the `/out` bind mount — but on Docker Desktop that overlay is backed by the same
-Windows drive, so it is the same pool of free space either way.
+**Observed, not predicted:** SQLite writes the rebuild as `tiles.sqlite-journal`
+**directly beside the database** in `data/map-tiles/` — not in `/tmp`, which is
+what an earlier version of this note guessed. So the doubled peak falls on the
+**same volume the pack lives on**. An operator who sized that volume at the
+documented 25 GB would survive the render and then hit the wall during VACUUM,
+with the whole render already spent.
 
 **Open question for after the run:** whether that VACUUM earns its cost at all.
 The packer only ever INSERTs, in level order, with no deletes and no updates, so
