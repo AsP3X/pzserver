@@ -229,6 +229,21 @@ services:
       # The game install, for the map cells and textures. Read-only: rendering
       # must never be able to damage the server's own files.
       - ${PZ_SERVER_HOST:-./data/server}:/pz:ro
+      # Texture packs, layered onto the read-only server install at the path
+      # pzmap2dzi's own vanilla.txt derives: '{pz_root}/media/texturepacks'.
+      #
+      # The dedicated server download does NOT ship them — it never draws
+      # anything, so it has no use for them. pzmap2dzi does: without them every
+      # tile renders untextured and the map comes out blank. verify.py cannot
+      # catch that, because it reads map_info.json, which is geometry and not
+      # pixels; run.sh fails fast on it instead.
+      #
+      # The default is the path inside the server install, so an operator who
+      # copies the packs there needs no override at all. On a machine with a PZ
+      # *client*, point PZ_TEXTUREPACKS_HOST at its media/texturepacks instead.
+      # The make targets mkdir the default first, because Docker cannot create
+      # a mountpoint inside a read-only bind mount.
+      - ${PZ_TEXTUREPACKS_HOST:-./data/server/media/texturepacks}:/pz/media/texturepacks:ro
       - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/out
     environment:
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}

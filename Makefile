@@ -137,6 +137,10 @@ rebuild-game:
 # Renders the isometric basemap from the game files into data/map-tiles.
 # Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
 map-tiles:
+	@# Docker cannot create a mountpoint inside a read-only bind mount, and /pz
+	@# is one. Without this the run dies on "read-only file system" before it
+	@# reaches the texture check.
+	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
 	$(COMPOSE) --profile tools run --rm map-tiles
 

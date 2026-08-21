@@ -300,6 +300,10 @@ function Do-RebuildGame {
 # Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
 function Do-MapTiles {
     Write-Host "Rendering the isometric basemap from the game files (hours, ~15 GB)..." -ForegroundColor Cyan
+    # Docker cannot create a mountpoint inside a read-only bind mount, and /pz
+    # is one. Without this the run dies on "read-only file system" before it
+    # reaches the texture check.
+    New-Item -ItemType Directory -Force "data\server\media	exturepacks" | Out-Null
     Invoke-Compose @("--profile", "tools", "build", "map-tiles")
     Invoke-Compose @("--profile", "tools", "run", "--rm", "map-tiles")
 }

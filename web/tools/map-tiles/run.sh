@@ -9,6 +9,24 @@ TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segmen
 
 cd /opt/pzmap2dzi
 
+# Fail before the hours, not after them.
+#
+# The dedicated server download has no media/texturepacks: it never draws
+# anything. pzmap2dzi does, and without them it renders every tile untextured
+# and finishes with a blank map. verify.py cannot catch that — it reads
+# map_info.json, which is geometry, not pixels. So check the art up front.
+TEXTURES=/pz/media/texturepacks
+if [ -z "$(ls -A "$TEXTURES"/*.pack 2>/dev/null)" ]; then
+    echo "FAIL: no texture packs at $TEXTURES" >&2
+    echo >&2
+    echo "The dedicated server install does not ship them. Point" >&2
+    echo "PZ_TEXTUREPACKS_HOST at a PZ client install's media/texturepacks" >&2
+    echo "(about 527 MB), or copy that folder onto the server once." >&2
+    echo "Rendering without it produces a blank map. See docs/map-tiles.md." >&2
+    exit 1
+fi
+echo "==> textures: $(ls "$TEXTURES"/*.pack | wc -l) packs found"
+
 echo "==> deploy"
 python main.py -c "$CONF" deploy
 
