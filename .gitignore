@@ -58,3 +58,7 @@ workshop/KnoxRelay/Contents/mods/KnoxRelay/42/media/
 
 # Test / Coverage
 .playwright-mcp/
+
+# Python bytecode from the map-tiles tooling's tests.
+# (.pytest_cache ignores itself via the .gitignore pytest writes inside it.)
+__pycache__/
