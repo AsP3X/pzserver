@@ -321,12 +321,37 @@ export class IsoTileCache {
       this.order.splice(index, 1)
     }
     this.order.push(key)
-    while (this.order.length > this.limit) {
-      const oldest = this.order.shift()
-      if (oldest) {
-        this.entries.delete(oldest)
+
+    if (this.order.length <= this.limit) {
+      return
+    }
+
+    /**
+     * Evict the oldest *settled* entries, and never an in-flight one.
+     *
+     * Dropping a request that is still loading does not cancel it. The image
+     * still arrives, `settle` finds its entry gone and discards the bytes, the
+     * next frame asks for the same tile again, and it is evicted again. The
+     * view never converges — which looked like "zoom too fast and half the map
+     * stops loading", and it was the top half, because `visibleIsoTiles` emits
+     * rows top-down so the top rows are requested first and evicted first.
+     *
+     * In-flight entries are self-limiting: the browser caps concurrent
+     * requests per origin, and they hold no decoded bitmap yet, so sparing
+     * them costs far less memory than a ready tile does.
+     */
+    let over = this.order.length - this.limit
+    const keep: string[] = []
+    for (const candidate of this.order) {
+      if (over > 0 && this.entries.get(candidate)?.status !== 'loading') {
+        this.entries.delete(candidate)
+        over -= 1
+      } else {
+        keep.push(candidate)
       }
     }
+    this.order.length = 0
+    this.order.push(...keep)
   }
 
   get(tile: IsoTile): HTMLImageElement | null {
