@@ -39,6 +39,9 @@ pub struct Config {
     /// Directory the KnoxRelay mod writes its JSON exports into.
     pub lua_bridge_path: PathBuf,
     pub backup_path: PathBuf,
+    /// Packed isometric tile pyramid. `/map-tiles` in the container; the host
+    /// side is PZ_MAP_TILES_HOST.
+    pub map_tiles_path: PathBuf,
     pub steam_branch: Option<String>,
     /// Path to the live `server.ini`.
     pub server_ini_path: PathBuf,
@@ -128,6 +131,7 @@ impl Config {
             server_name,
             lua_bridge_path,
             backup_path: PathBuf::from(string("BACKUP_PATH", "/backups")),
+            map_tiles_path: PathBuf::from(string("MAP_TILES_PATH", "/map-tiles/tiles.sqlite")),
             steam_branch: optional("PZ_STEAM_BRANCH"),
             server_ini_path,
             bridge_workshop_id: optional("PZ_BRIDGE_WORKSHOP_ID"),
