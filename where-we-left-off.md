@@ -208,8 +208,8 @@ API. After this the map works with no internet at all.
             from scratch around `make map-tiles`. The whole 311-line Laravel
             version was describing code deleted in `36e213d` — `artisan
             zomboid:generate-map-tiles`, `PZ_MAP_BASEMAP`, `--profile=lite|full`,
-            the `pz-app` container, the proxy fallback. All gone. The new 268-line
-            version documents the real flow, the schema, both routes, the
+            the `pz-app` container, the proxy fallback. All gone. The rewritten
+            doc documents the real flow, the schema, both routes, the
             `web-api` restart, the geometry gate, and the `MSYS_NO_PATHCONV=1`
             trap. The one surviving mention of `map.projectzomboid.com` is the
             deliberate note explaining *why* there is no CDN fallback.
