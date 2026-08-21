@@ -30,10 +30,8 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict) -> int:
     con.executescript(SCHEMA)
 
     added = 0
-    levels = []
     for level_dir in sorted(_level_dirs(tiles_dir), key=lambda p: int(p.name)):
         z = int(level_dir.name)
-        levels.append(z)
 
         batch = []
         for tile in level_dir.glob("*.jpg"):
@@ -47,10 +45,17 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict) -> int:
         added += _flush(con, batch)
         print(f"level {z}: packed, {added} tiles so far", flush=True)
 
-    if levels:
-        meta = dict(meta)
-        meta.setdefault("min_level", str(min(levels)))
-        meta.setdefault("max_level", str(max(levels)))
+    # Ask the table, not the directory listing. pzmap2dzi creates a directory
+    # for every DZI level whether or not it ends up with tiles in it -- levels
+    # 0-11 and 21-22 come out empty on a `skip_level` render -- and reporting
+    # those as the rendered range tells the client the pack is deeper than it
+    # is. The client sets its zoom clamp from max_level, so an inflated value
+    # disables the clamp and it requests levels that can only 404.
+    low, high = con.execute("SELECT MIN(z), MAX(z) FROM tiles").fetchone()
+    meta = dict(meta)
+    if low is not None:
+        meta.setdefault("min_level", str(low))
+        meta.setdefault("max_level", str(high))
     meta["tile_count"] = str(con.execute("SELECT COUNT(*) FROM tiles").fetchone()[0])
 
     con.executemany(

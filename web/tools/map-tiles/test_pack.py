@@ -39,3 +39,21 @@ def test_pack_resumes_without_duplicating(tmp_path):
     con = sqlite3.connect(db)
     assert con.execute("SELECT COUNT(*) FROM tiles").fetchone()[0] == 3
     assert count == 0
+
+
+def test_meta_levels_come_from_stored_tiles_not_empty_directories(tmp_path):
+    """pzmap2dzi pre-creates a directory per DZI level, including ones it never
+    fills. Reporting those as the rendered range tells the client the pack is
+    deeper than it is, and the client's zoom clamp then does nothing."""
+    tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
+    build_tree(tree)
+    tiles = tree / "base" / "layer0_files"
+    for z in (0, 1, 7, 21, 22):          # created by the renderer, never filled
+        (tiles / str(z)).mkdir(parents=True, exist_ok=True)
+
+    pack(tiles, db, {})
+
+    con = sqlite3.connect(db)
+    meta = dict(con.execute("SELECT key, value FROM meta"))
+    assert meta["min_level"] == "8", "empty level 0 must not become min_level"
+    assert meta["max_level"] == "20", "empty level 22 must not become max_level"
