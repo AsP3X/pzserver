@@ -477,6 +477,61 @@ will rebuild this bug.
 
 ---
 
+## Tile loading was slow — measured, and it is mostly not the code
+
+Reported after cutover: the map works but tiles take ages. Measured rather than
+guessed, and the answer was not where it looked.
+
+**Ruled out, each by measurement:**
+
+| Suspect | Verdict |
+|---|---|
+| gzip on JPEGs | Not applied at all; identical timing with `Accept-Encoding: identity` |
+| Audit middleware | 0 rows for map-tiles paths; `/map-tiles/meta` in the *same* router answers in **2 ms** |
+| Router / nginx | `/api/health` 2 ms through the same proxy |
+| Bad query plan | `SEARCH tiles USING PRIMARY KEY` — optimal |
+| Tile bytes | A **404**, returning no body at all, still cost **140 ms** |
+
+**The actual cause: the Docker Desktop bind mount.**
+
+| Reading the same pack | MISS | HIT |
+|---|---|---|
+| Windows filesystem directly | 4.8 ms | 6.4 ms |
+| Through the bind mount | **144.6 ms** | **181.8 ms** |
+
+~30x, and it matches the API's numbers exactly. Every tile read is random I/O
+into a 24 GB file across Docker Desktop's filesystem translation layer. **This
+is a Windows dev-environment problem; a Linux server bind-mounts natively and
+does not pay it.**
+
+`PRAGMA cache_size` and `mmap_size` were tried and made **no difference**
+(~2050 ms for 9 tiles in every configuration) — the working set is far too
+large to cache.
+
+### What was fixed: the store serialised every read
+
+Concurrency *does* help through the bind mount — 9 tiles go 2107 ms serial to
+623 ms parallel, **3.4x**. The API was getting none of it: measured speedup
+**1.0x**, because `MapTiles` held one `Mutex<Connection>` and every read queued
+behind it.
+
+Replaced with a round-robin pool of 8 read-only connections (no new dependency,
+just `Vec<Mutex<Connection>>` + an `AtomicUsize`). A concurrency test now guards
+it — note that every other test in that file passes with a single connection,
+since serialisation is invisible to one-at-a-time assertions.
+
+### Still on the table, not done
+
+- **Move the pack to a Docker named volume.** Lives inside the VM's ext4 rather
+  than the translation layer, so it should recover most of the 30x on Windows.
+  Costs moving 24 GB and changes deployment topology. **Biggest remaining win
+  on this machine, and pointless on the Linux server.**
+- **Smaller tiles.** Level 20 averages **1215 KB** at quality 85, so a viewport
+  of nine is ~11 MB. Quality ~70 would roughly halve that. Needs a re-render or
+  a re-encode pass over 21,480 blobs.
+
+---
+
 ### Decisions settled
 
 - [x] **Inline, not subagents, for Tasks 2–7.** Settled 2026-08-21: this
