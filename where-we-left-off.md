@@ -214,6 +214,106 @@ API. After this the map works with no internet at all.
             trap. The one surviving mention of `map.projectzomboid.com` is the
             deliberate note explaining *why* there is no CDN fallback.
 
+      - [x] **Proving run of `run.sh` — PASSED, and it found a blocker.** Rather
+            than commit hours blind, the image was built and the run taken as
+            far as the geometry gate, then stopped.
+
+            - Image builds: `pzserver-map-tiles:local`, 815 MB.
+            - `deploy`, `unpack` and `render base` all execute. `map_info.json`
+              landed as promised, ~10s into the render.
+            - **Geometry gate: PASSED.**
+              `python web/tools/map-tiles/verify.py .../map_info.json` →
+              `OK: x0/y0/sqr match exactly; 579616x253944 at skip=2 is the
+              expected 2318656x1019040 pyramid`. `x0=1040384`, `y0=-139296`,
+              `sqr=128` and `cell_rects` all match `ISO_DZI` exactly. pzmap2dzi
+              1.1.16. **So pins will land correctly** — the thing the whole gate
+              exists to protect is confirmed good.
+
+## ⚠ THE BLOCKER: the dedicated server has no texture packs
+
+Found by that proving run, and it would have cost a whole night otherwise.
+
+The render printed `invalid texture_path: /pz/media/texturepacks`, then
+**1009 `missing texture […]` lines covering 232 distinct textures** — every
+texture it asked for. `find data/server -iname '*.pack'` returns **zero**, and so
+does the same search inside `pz-game-server`.
+
+**The spec's premise was wrong.** It says *"The game files that pyramid was
+rendered from are already on the server."* They are not. The dedicated server
+download ships `media/maps` (the cells) but **not** `media/texturepacks` — it
+never draws anything, so it has no use for them. pzmap2dzi does. Without them
+the render completes and produces a **blank, untextured map**.
+
+**`verify.py` cannot catch this.** It reads `map_info.json`, which is geometry,
+not pixels. The gate passes on a fully blank render. That is a second silent
+failure of exactly the kind the plan feared, on an axis nobody checked.
+
+### The fix, implemented and tested
+
+pzmap2dzi's own `conf/vanilla.txt` derives the path as
+`texture_path: '{pz_root}/media/texturepacks'`, so the packs have to appear
+under `/pz`. Three parts:
+
+1. **A mount** in `docker-compose.web.yml`, layering the packs onto the
+   read-only server install at that exact path, via `PZ_TEXTUREPACKS_HOST`.
+   Default `./data/server/media/texturepacks`, so an operator who copies the
+   folder onto the server needs no override.
+2. **`mkdir -p data/server/media/texturepacks`** in both `map-tiles` targets.
+   Docker **cannot create a mountpoint inside a read-only bind mount** — without
+   this the run dies on `read-only file system` before reaching any check.
+   Verified: that is exactly how it failed first time.
+3. **A fail-fast guard at the top of `run.sh`** — checks for `*.pack` before
+   `deploy` and exits 1 with instructions. Turns a silent blank map into a loud
+   error in under a second.
+
+**Test: guard fires. PASSED.** With the directory empty:
+`FAIL: no texture packs at /pz/media/texturepacks` → exit 1, before any render.
+
+### What this means for deploying
+
+The packs are ~527 MB and live in a PZ **client** install
+(`…/Steam/steamapps/common/ProjectZomboid/media/texturepacks`, 26 files on this
+machine). The production Linux server has no client, so someone has to either:
+
+- **copy that folder once** into `data/server/media/texturepacks` on the server, or
+- **render on a machine that has the client** and ship the resulting
+  `tiles.sqlite` — which is a single file, and one of the stated reasons for
+  packing it that way in the first place.
+
+**This is a decision for the operator and it is not made yet.** For now this
+dev box's `.env` points at its own client install, so `.\make.ps1 map-tiles`
+works here immediately:
+
+```
+PZ_TEXTUREPACKS_HOST=C:/Program Files (x86)/Steam/steamapps/common/ProjectZomboid/media/texturepacks
+```
+
+`.env` is untracked, so that line is local to this machine only. `.env.example`
+carries the default and both options.
+
+**Test: the fix works. PASSED.** Re-run with that path mounted:
+`==> textures: 24 packs found`, and **`missing texture` count 0** — against
+1009 before. The render then moved on to unpacking textures
+(`Processing pages: n/144`) and was stopped there, since only proof was wanted.
+
+Commits: `30b1bc6` (mount + mkdir + guard), `a2b46c0` (docs).
+
+### Also fixed on the way: CRLF corruption
+
+The Python edits used to patch files wrote CRLF on Windows, which silently broke
+`run.sh` — the container failed with `env: 'bash': No such file or directory`.
+`.gitattributes` mandates `eol=lf` for `*.sh`, but a direct file write bypasses
+git entirely, and Docker `COPY`s from the working tree, not from the index.
+
+Every file that `.gitattributes` pins to LF and these edits touched has been
+normalized back; `make.ps1` was left CRLF, which is what `*.ps1 eol=crlf` asks
+for. `git diff` afterwards showed only the six genuinely-changed files, so
+nothing else was disturbed.
+
+**If you patch files with a script on Windows, write bytes with `
+`** or you
+will rebuild this bug.
+
       **Still to run — this is what is left of the whole feature:**
 
       - [ ] **Step 2: render.** `.\make.ps1 map-tiles`. Hours. Safe to interrupt;
