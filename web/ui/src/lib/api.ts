@@ -1001,6 +1001,20 @@ export interface RewardClaimResult {
 
 export type StoreCategory = 'weapons' | 'ammo' | 'food' | 'medical' | 'tools' | 'clothing' | 'other'
 
+/**
+ * One entry from the game server's own item registry, as Knox Relay exported
+ * it at boot. `category` is the PZ display category, not one of the shop's.
+ */
+export interface CatalogItem {
+  full_type: string
+  name: string
+  category: string
+}
+
+export interface ItemCatalog {
+  items: CatalogItem[]
+}
+
 export interface StoreItem {
   id: string
   name: string
@@ -1483,6 +1497,8 @@ export const api = {
     del<CommandReply>(`/api/v1/admin/whitelist/${encodeURIComponent(username)}`),
 
   adminBridge: () => request<BridgeHealth>('/api/v1/admin/bridge'),
+
+  adminItems: () => request<ItemCatalog>('/api/v1/admin/items'),
 
   adminLogs: (tail = 200) =>
     request<ContainerLogs>(`/api/v1/admin/logs?tail=${tail}`),

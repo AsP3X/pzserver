@@ -140,6 +140,17 @@ export const adminBridgeQuery = queryOptions({
   staleTime: 5_000,
 })
 
+/**
+ * The item catalogue only moves when the game server boots, so once fetched it
+ * is good for the session. Not `Infinity`, though — a restart while the tab is
+ * open should eventually be noticed.
+ */
+export const adminItemsQuery = queryOptions({
+  queryKey: ['admin', 'items'],
+  queryFn: api.adminItems,
+  staleTime: 30 * 60_000,
+})
+
 export const adminLogsQuery = (tail: number) =>
   queryOptions({
     queryKey: ['admin', 'logs', tail],
