@@ -647,6 +647,46 @@ between restore and pack, and the `--rm` container took its logs with it.
 **Next step: re-run with output captured** and find where it stops. Do not
 assume the feature works until a tile actually changes in the pack.
 
+## Clean re-render, started 2026-08-21 ~18:35
+
+Chosen after the regional tool proved out but the pack turned out to be damaged
+in too many places to patch: **74 missing parent tiles across levels 14–19**,
+plus several hundred tiles with black rectangles painted into them. Repairing
+regionally would have drawn merge inputs from the same damaged pack.
+
+**The old pack is kept** as `data/map-tiles/tiles.sqlite.old` (24 GB) rather
+than deleted — it still serves a partly-working map, and a four-hour window
+with nothing at all is worse. Roll back by renaming it over `tiles.sqlite` and
+restarting `web-api`. Delete it once the new pack is verified.
+
+The `data/map-tiles/texture` cache was deliberately kept; the run reports
+`hash unchanged, skip` and saves the extraction step.
+
+### Every blocker this hit is now fixed
+
+| Was | Fix |
+|---|---|
+| No texture packs → blank render | `PZ_TEXTUREPACKS_HOST` mount + fail-fast guard in `run.sh` |
+| `/dev/shm` 64 MB → silent worker death | `shm_size: 8gb` |
+| Unbounded tile cache → same stall at any ceiling | `cache_limit_mb: 4096` |
+| `.pending` deleted, half-drawn `.jpg` kept → permanent holes | `run.sh` deletes both together |
+| VACUUM after every repack | skipped when `--replace` |
+| Exit 0 proved nothing | `audit.py` |
+
+### Verify before believing it
+
+```bash
+python web/tools/map-tiles/audit.py data/map-tiles/tiles.sqlite
+```
+
+Expect `pyramid is complete`. **Do not** trust the exit code alone — every
+defect this map shipped with came from a run that exited 0, opened fine, served
+fine, and passed `PRAGMA quick_check`.
+
+Then: restart `web-api` so it opens the new pack, and check a known tile's
+pixels rather than its byte count. `20/134_59` is the reference — it should be
+0.0% black.
+
 ### Still on the table, not done
 
 - **Move the pack to a Docker named volume.** Lives inside the VM's ext4 rather
