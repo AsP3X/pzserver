@@ -26,6 +26,41 @@ from this stack. A server that has not rendered its tiles shows the vector
 basemap and says so, rather than putting its traffic on a host someone else pays
 for.
 
+## Before you can render: texture packs
+
+**The dedicated server install is not enough on its own.** It ships
+`media/maps` — the cells — but not `media/texturepacks`, because a server never
+draws anything. pzmap2dzi does, and without those packs it renders every tile
+untextured and finishes with a blank map.
+
+The geometry gate cannot save you here: `verify.py` reads `map_info.json`, which
+is geometry, not pixels, so it passes happily on a blank render. `run.sh`
+therefore checks for the packs itself and refuses to start without them:
+
+```
+FAIL: no texture packs at /pz/media/texturepacks
+```
+
+The packs are ~527 MB and ship with the PZ **client**, at
+`<Steam>/steamapps/common/ProjectZomboid/media/texturepacks`. Pick one:
+
+| Situation | What to do |
+|---|---|
+| The render host has a PZ client | Point `PZ_TEXTUREPACKS_HOST` at that folder |
+| Headless server, no client | Copy the folder once into `data/server/media/texturepacks` — the default path, no override needed |
+| Neither | Render on a machine that has the client and copy the finished `tiles.sqlite` over. It is one file; that is much of why it is packed that way |
+
+```bash
+# Windows dev box, in .env
+PZ_TEXTUREPACKS_HOST=C:/Program Files (x86)/Steam/steamapps/common/ProjectZomboid/media/texturepacks
+```
+
+A correct run says so before it starts:
+
+```
+==> textures: 24 packs found
+```
+
 ## Generating the tiles
 
 ```bash
@@ -73,6 +108,7 @@ mid-render costs nothing but the time already spent.
 
 `web/tools/map-tiles/run.sh`, in order:
 
+0. **texture check** — refuses to start if `media/texturepacks` is empty (above)
 1. **deploy** / **unpack** — pzmap2dzi's own preparation steps
 2. **render base** — paints the loose DZI pyramid into
    `/out/html/map_data/base/layer0_files/{z}/{x}_{y}.jpg` (hours)
@@ -213,6 +249,7 @@ connection and reads it inside `spawn_blocking`.
 | `PZ_MAP_TILES_HOST` | `./data/map-tiles` | Host bind mount |
 | `MAP_TILES_PATH` | `/map-tiles/tiles.sqlite` | Path inside the API container |
 | `PZ_SERVER_HOST` | `./data/server` | Game install the render reads (mounted read-only) |
+| `PZ_TEXTUREPACKS_HOST` | `./data/server/media/texturepacks` | Texture packs for the render (see above) |
 | `PZ_GAME_VERSION` | `42.20.0` | Recorded in `meta.game_version` |
 | `PZ_MAP_TILES_IMAGE` | `pzserver-map-tiles:local` | Render image tag |
 
@@ -256,6 +293,15 @@ restarted after the render.
 the geometry gate exists to prevent, so it should be unreachable; if it does
 happen, the render's bounds differ from `ISO_DZI` and the answer is a corrected
 `dzi_cell_range`, never an edited `ISO_DZI`.
+
+**The render exits immediately with `no texture packs`.** Working as intended —
+see the texture packs section above. This check exists because the alternative
+is discovering a blank map after several hours.
+
+**The render dies with `read-only file system` mounting
+`/pz/media/texturepacks`.** Docker cannot create a mountpoint inside a read-only
+bind mount, and `/pz` is one. `mkdir -p data/server/media/texturepacks` on the
+host; both `make map-tiles` targets already do this for you.
 
 **The render says it cannot find the game files.** On Windows, a hand-run
 `docker run` needs `MSYS_NO_PATHCONV=1` from Git Bash or the bind mount silently
