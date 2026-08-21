@@ -29,17 +29,33 @@ def unpack(db_path: Path, tiles_dir: Path, skip: set | None = None,
 
     written = 0
     seen_levels = set()
-    for z, x, y, data in con.execute("SELECT z, x, y, data FROM tiles ORDER BY z, x, y"):
-        if (z, x, y) in skip:
-            continue
-        if only is not None and (z, x, y) not in only:
-            continue
+
+    def emit(z, x, y, data):
+        nonlocal written
         level_dir = tiles_dir / str(z)
         if z not in seen_levels:
             level_dir.mkdir(parents=True, exist_ok=True)
             seen_levels.add(z)
         (level_dir / f"{x}_{y}.jpg").write_bytes(data)
         written += 1
+
+    if only is not None:
+        # Look each one up by key. Scanning the table instead would pull every
+        # blob off disk to keep a handful of them -- on a 24 GB pack over a
+        # Docker bind mount that is about an hour, versus milliseconds here.
+        for z, x, y in sorted(only):
+            if (z, x, y) in skip:
+                continue
+            row = con.execute(
+                "SELECT data FROM tiles WHERE z = ? AND x = ? AND y = ?", (z, x, y)
+            ).fetchone()
+            if row is not None:
+                emit(z, x, y, row[0])
+    else:
+        for z, x, y, data in con.execute("SELECT z, x, y, data FROM tiles ORDER BY z, x, y"):
+            if (z, x, y) in skip:
+                continue
+            emit(z, x, y, data)
 
     con.close()
     return written

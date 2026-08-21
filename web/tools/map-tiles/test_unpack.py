@@ -82,3 +82,32 @@ def test_unpack_can_restore_just_the_merge_inputs(tmp_path):
     assert (tree / "20" / "2_2.jpg").exists()
     assert not (tree / "20" / "1_1.jpg").exists()
     assert not (tree / "20" / "3_3.jpg").exists()
+
+
+def test_only_mode_does_not_read_every_blob(tmp_path):
+    """The pack is 24 GB and lives on a slow bind mount. Scanning every row to
+    filter down to a handful takes about an hour; targeted lookups take
+    milliseconds. Assert the query shape, because the cost is invisible in a
+    small test."""
+    db, tree = tmp_path / "t.sqlite", tmp_path / "tree"
+    make_db(db, [(20, i, i, b"x" * 10) for i in range(200)])
+
+    seen = []
+    real_connect = sqlite3.connect
+
+    def traced(*a, **kw):
+        con = real_connect(*a, **kw)
+        con.set_trace_callback(seen.append)
+        return con
+
+    sqlite3.connect = traced
+    try:
+        unpack(db, tree, only={(20, 7, 7), (20, 9, 9)})
+    finally:
+        sqlite3.connect = real_connect
+
+    selects = [q for q in seen if "SELECT" in q.upper()]
+    assert selects, "expected at least one query"
+    assert not any("ORDER BY" in q.upper() and "WHERE" not in q.upper() for q in selects), (
+        f"only-mode must not full-scan the tiles table; queries were {selects}"
+    )
