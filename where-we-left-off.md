@@ -346,12 +346,50 @@ warning also fires on healthy worker exit, so on its own it means nothing.
 | A crash | No traceback anywhere in the log |
 | Just slow | 0.00% CPU on three consecutive samples |
 
-**Fix:** `shm_size: 4gb` on the `map-tiles` service (`74539d0`). tmpfs is
-allocated lazily, so the ceiling costs nothing until used.
+**First fix, and why it was not enough:** `shm_size: 4gb` (`74539d0`). The run
+restarted, hit 1479% CPU and 1.8 GB of shm, and rendered 819 tiles — then
+**stalled again at exactly the same 0% CPU**, this time with the log's last line
+reading `cache: 3744.00 MB` against the new 4 GB ceiling.
 
-**Proof it was right:** the restarted run reports **1.8 GB of /dev/shm in use** —
-28× the old 64 MB ceiling — with **1479% CPU** and tiles landing at a median
-1.2 MB. The previous run could never have completed.
+**The actual root cause** — found only by reading pzmap2dzi's scheduler:
+
+`cache_limit_mb` **defaults to 0**, and `scheduling.py:148` gates eviction on
+`if self.cache_size:`. **Zero is falsy, so the eviction loop never runs.** The
+shared-memory tile cache — which holds rendered children so a parent can be
+merged from them — grows without any limit until `/dev/shm` is exhausted.
+Raising `shm_size` only moves the wall further out.
+
+**Real fix (`d6a5287`):** `cache_limit_mb: 4096` in `conf.yaml`'s `render_conf`,
+under `shm_size: 8gb`, leaving the 16 workers' in-flight 16 MB buffers room
+above the cache. **`conf.yaml` is baked into the image, so this needs a
+rebuild** — editing it alone changes nothing.
+
+**Confirmed active:** the progress line now reads
+`job: 1152/347597 worker: 16/16 cache: 1376.00 / 4096 MB`. That ` / 4096`
+suffix is printed only when `cache_limit` is set (`scheduling.py:213`), so it is
+proof the bound took effect rather than an assumption.
+
+### How to tell this stall from slow progress
+
+It is genuinely indistinguishable by eye — both look like a long render. The
+`job: N/M` counter is the reliable signal, not the tile count: the render spends
+long stretches producing nothing saveable (void areas, and levels 21–22 which are
+rendered but never written), so a static `.jpg` count is normal and a static
+**job counter** is not.
+
+```bash
+C=$(docker ps -q --filter "ancestor=pzserver-map-tiles:local")
+docker logs "$C" 2>&1 | tr '' '
+' | grep -o "job: [0-9]*/[0-9]*.*" | tail -1
+docker stats --no-stream --format '{{.CPUPerc}}' "$C"
+```
+
+Frozen counter **and** 0.00% CPU across two samples = stalled. Anything else is
+just slow.
+
+**After any stall, delete the `.pending` markers before restarting** — they are
+work claims from dead workers. Completed `.jpg` and `.empty` tiles are valid and
+the run resumes past them.
 
 ### While you are here: `omit_levels` is a disk saving, not a time saving
 
