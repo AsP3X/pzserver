@@ -23,9 +23,24 @@ block = "    render_cell_range:\n" + "".join(
 )
 
 text = conf.read_text(encoding="utf-8")
-patched, n = re.subn(r"^[ \t]*render_cell_range:.*$", block.rstrip("\n"), text, count=1, flags=re.M)
+
+# Replace the key if it is already there, taking any list items under it with
+# it so a previous run's rects do not survive into this one.
+pattern = r"^[ \t]*render_cell_range:[^\n]*\n(?:[ \t]+-[^\n]*\n)*"
+patched, n = re.subn(pattern, block, text, count=1, flags=re.M)
+
 if not n:
-    print(f"FAIL: no render_cell_range key in {conf}", file=sys.stderr)
+    # Usually it is absent: this stack ships its own conf.yaml over
+    # pzmap2dzi's and never declared the key, so a replace-only patcher fails
+    # the whole run at the last moment. Add it under render_conf:, which is
+    # where pzmap2dzi reads it from.
+    patched, n = re.subn(r"^(render_conf:[ \t]*\n)", r"\1" + block, text, count=1, flags=re.M)
+
+if not n:
+    print(
+        f"FAIL: {conf} has neither a render_cell_range key nor a render_conf block",
+        file=sys.stderr,
+    )
     raise SystemExit(1)
 
 conf.write_text(patched, encoding="utf-8")
