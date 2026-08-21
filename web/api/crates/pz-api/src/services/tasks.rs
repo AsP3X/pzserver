@@ -620,9 +620,7 @@ async fn ticket_desk_loop(state: AppState) {
                 "read" => {
                     if let Some(report_id) = request.report_id {
                         crate::services::reports::mark_read_from_game(
-                            &state.db,
-                            &username,
-                            report_id,
+                            &state.db, &username, report_id,
                         )
                         .await
                         .map_err(|error| error.to_string())

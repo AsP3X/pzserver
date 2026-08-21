@@ -23,7 +23,10 @@ pub mod wallet;
 
 pub const SOURCE_ADMIN: &str = "admin";
 pub const SOURCE_STORE: &str = "store";
-#[allow(dead_code, reason = "reserved ledger source; no code path emits it yet")]
+#[allow(
+    dead_code,
+    reason = "reserved ledger source; no code path emits it yet"
+)]
 pub const SOURCE_STORE_REFUND: &str = "store_refund";
 pub const SOURCE_AUCTION_ESCROW: &str = "auction_escrow";
 pub const SOURCE_AUCTION_REFUND: &str = "auction_refund";
@@ -31,7 +34,10 @@ pub const SOURCE_AUCTION_SALE: &str = "auction_sale";
 pub const SOURCE_DAILY_REWARD: &str = "daily_reward";
 pub const SOURCE_DEPOSIT: &str = "deposit";
 pub const SOURCE_QUEST: &str = "quest";
-#[allow(dead_code, reason = "reserved ledger source; no code path emits it yet")]
+#[allow(
+    dead_code,
+    reason = "reserved ledger source; no code path emits it yet"
+)]
 pub const SOURCE_LEVEL: &str = "level";
 
 const MAX_COINS: i64 = 10_000_000;

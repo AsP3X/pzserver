@@ -22,11 +22,36 @@ struct TaskSpec {
 }
 
 const TASKS: &[TaskSpec] = &[
-    TaskSpec { id: "play", key: "task_play", coins: 10, goal: 1 },
-    TaskSpec { id: "cull", key: "task_cull", coins: 15, goal: 10 },
-    TaskSpec { id: "survive", key: "task_survive", coins: 10, goal: 1 },
-    TaskSpec { id: "spend", key: "task_spend", coins: 15, goal: 1 },
-    TaskSpec { id: "trade", key: "task_trade", coins: 15, goal: 1 },
+    TaskSpec {
+        id: "play",
+        key: "task_play",
+        coins: 10,
+        goal: 1,
+    },
+    TaskSpec {
+        id: "cull",
+        key: "task_cull",
+        coins: 15,
+        goal: 10,
+    },
+    TaskSpec {
+        id: "survive",
+        key: "task_survive",
+        coins: 10,
+        goal: 1,
+    },
+    TaskSpec {
+        id: "spend",
+        key: "task_spend",
+        coins: 15,
+        goal: 1,
+    },
+    TaskSpec {
+        id: "trade",
+        key: "task_trade",
+        coins: 15,
+        goal: 1,
+    },
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -145,7 +170,8 @@ pub async fn claim_quest_node(
     let today = Utc::now().date_naive();
     let snapshot = character::for_username(&state.db, username).await?;
     ensure_baseline(&state.db, user_id, today, snapshot.as_ref()).await?;
-    let (xp, coins) = quests::claim_node(state, user_id, username, quest_id, node_id, today).await?;
+    let (xp, coins) =
+        quests::claim_node(state, user_id, username, quest_id, node_id, today).await?;
     Ok(ClaimResult {
         claimed: coins,
         xp: i64::from(xp),
@@ -171,7 +197,9 @@ pub async fn claim_quest(
 async fn claim_daily(state: &AppState, user_id: Uuid, today: NaiveDate) -> ApiResult<i64> {
     let coins = state.config.daily_reward_coins;
     if coins < 1 {
-        return Err(ApiError::Validation("Daily rewards are disabled.".to_owned()));
+        return Err(ApiError::Validation(
+            "Daily rewards are disabled.".to_owned(),
+        ));
     }
     if claimed(&state.db, user_id, DAILY_KEY, today).await? {
         return Err(ApiError::Validation("Already claimed today.".to_owned()));
@@ -210,7 +238,9 @@ async fn claim_task(
         return Err(ApiError::Validation("Already claimed today.".to_owned()));
     }
     if !view.complete {
-        return Err(ApiError::Validation("That task is not finished yet.".to_owned()));
+        return Err(ApiError::Validation(
+            "That task is not finished yet.".to_owned(),
+        ));
     }
 
     let mut tx = state.db.begin().await?;
@@ -244,8 +274,14 @@ async fn task_views(
     let played_today = snapshot
         .as_ref()
         .is_some_and(|row| row.last_synced_at.date_naive() == today);
-    let kills = snapshot.as_ref().map(|row| i64::from(row.zombie_kills)).unwrap_or(0);
-    let hours = snapshot.as_ref().map(|row| row.hours_survived).unwrap_or(0.0);
+    let kills = snapshot
+        .as_ref()
+        .map(|row| i64::from(row.zombie_kills))
+        .unwrap_or(0);
+    let hours = snapshot
+        .as_ref()
+        .map(|row| row.hours_survived)
+        .unwrap_or(0.0);
     let spent = store_today(&state.db, user_id, start).await?;
     let traded = trade_today(&state.db, user_id, start).await?;
 
@@ -306,7 +342,11 @@ async fn ensure_baseline(
     let played_today = snapshot.is_some_and(|row| row.last_synced_at.date_naive() == today);
     let kill_goal = measure::daily_goal(db, "kills").await?.max(10);
     let hour_goal = measure::daily_goal(db, "hours").await?.max(1);
-    let start_kills = if played_today { (kills - kill_goal).max(0) } else { kills };
+    let start_kills = if played_today {
+        (kills - kill_goal).max(0)
+    } else {
+        kills
+    };
     let start_hours = if played_today {
         (hours - f64::from(hour_goal)).max(0.0)
     } else {
@@ -412,7 +452,11 @@ async fn streak(db: &PgPool, user_id: Uuid, today: NaiveDate) -> Result<i32, sql
     Ok(count)
 }
 
-async fn store_today(db: &PgPool, user_id: Uuid, start: DateTime<Utc>) -> Result<bool, sqlx::Error> {
+async fn store_today(
+    db: &PgPool,
+    user_id: Uuid,
+    start: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         r#"SELECT EXISTS(
                SELECT 1 FROM store_purchases
@@ -425,7 +469,11 @@ async fn store_today(db: &PgPool, user_id: Uuid, start: DateTime<Utc>) -> Result
     .await
 }
 
-async fn trade_today(db: &PgPool, user_id: Uuid, start: DateTime<Utc>) -> Result<bool, sqlx::Error> {
+async fn trade_today(
+    db: &PgPool,
+    user_id: Uuid,
+    start: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         r#"SELECT EXISTS(
                SELECT 1 FROM auction_listings

@@ -233,7 +233,12 @@ fn require_zone(patch: ZonePatch) -> ApiResult<SafeZone> {
             "The name must be at most 100 characters.".to_owned(),
         ));
     }
-    let id = match patch.id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    let id = match patch
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(raw) => require_id(raw)?.to_owned(),
         None => slugify(name),
     };

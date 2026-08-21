@@ -19,7 +19,11 @@ pub struct InventoryHold {
     pub kind: String,
 }
 
-pub async fn carried(state: &AppState, username: &str, item_type: &str) -> Result<i32, sqlx::Error> {
+pub async fn carried(
+    state: &AppState,
+    username: &str,
+    item_type: &str,
+) -> Result<i32, sqlx::Error> {
     let reader = InventoryReader::new(&state.config.lua_bridge_path);
     let Ok(Some(file)) = reader.read(username).await else {
         return Ok(0);
@@ -29,7 +33,9 @@ pub async fn carried(state: &AppState, username: &str, item_type: &str) -> Resul
         .data
         .items
         .iter()
-        .filter(|item| item.full_type == item_type || item.full_type.rsplit('.').next() == Some(short))
+        .filter(|item| {
+            item.full_type == item_type || item.full_type.rsplit('.').next() == Some(short)
+        })
         .map(|item| item.count as i32)
         .sum())
 }
@@ -95,7 +101,11 @@ pub fn wear_fraction(raw: Option<f32>) -> Option<f32> {
     Some(fraction.clamp(0.0, 1.0))
 }
 
-pub async fn holds(db: &PgPool, user_id: Uuid, username: &str) -> Result<Vec<InventoryHold>, sqlx::Error> {
+pub async fn holds(
+    db: &PgPool,
+    user_id: Uuid,
+    username: &str,
+) -> Result<Vec<InventoryHold>, sqlx::Error> {
     let listings = sqlx::query_as::<_, (String, String, i32)>(
         r#"SELECT item_type, item_name, quantity
            FROM auction_listings

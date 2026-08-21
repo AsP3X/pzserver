@@ -274,8 +274,9 @@ async fn finish_ok(state: &AppState, order: &ItemOrder, removed: i32) {
             .await;
         }
         "vault_move" => {
-            let _ = crate::services::economy::vault::on_delivered(state, order.reference_id, removed)
-                .await;
+            let _ =
+                crate::services::economy::vault::on_delivered(state, order.reference_id, removed)
+                    .await;
         }
         _ => {}
     }
@@ -303,14 +304,12 @@ async fn finish_failed(state: &AppState, order: &ItemOrder) {
 
 async fn requeue(state: &AppState, order: &ItemOrder) -> ApiResult<()> {
     let cargo = if order.action == "give_kit" {
-        sqlx::query_scalar::<_, serde_json::Value>(
-            "SELECT cargo FROM vault_moves WHERE id = $1",
-        )
-        .bind(order.reference_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
+        sqlx::query_scalar::<_, serde_json::Value>("SELECT cargo FROM vault_moves WHERE id = $1")
+            .bind(order.reference_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
     } else {
         None
     };

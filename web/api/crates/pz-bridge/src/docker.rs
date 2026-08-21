@@ -170,11 +170,12 @@ impl DockerClient {
         self.post_lifecycle("restart", Some(timeout_secs)).await
     }
 
-    async fn post_lifecycle(&self, action: &str, timeout_secs: Option<u64>) -> Result<(), DockerError> {
-        let mut url = format!(
-            "{}/containers/{}/{action}",
-            self.base_url, self.container
-        );
+    async fn post_lifecycle(
+        &self,
+        action: &str,
+        timeout_secs: Option<u64>,
+    ) -> Result<(), DockerError> {
+        let mut url = format!("{}/containers/{}/{action}", self.base_url, self.container);
         if let Some(seconds) = timeout_secs {
             url.push_str(&format!("?t={seconds}"));
         }

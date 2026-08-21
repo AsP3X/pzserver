@@ -270,12 +270,15 @@ async fn get_language(db: &PgPool, code: &str) -> ApiResult<Language> {
 }
 
 async fn ensure_language(db: &PgPool, code: &str) -> ApiResult<()> {
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ui_languages WHERE code = $1)")
-        .bind(code)
-        .fetch_one(db)
-        .await?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ui_languages WHERE code = $1)")
+            .bind(code)
+            .fetch_one(db)
+            .await?;
     if !exists {
-        return Err(ApiError::Validation("That language is not configured.".to_owned()));
+        return Err(ApiError::Validation(
+            "That language is not configured.".to_owned(),
+        ));
     }
     Ok(())
 }

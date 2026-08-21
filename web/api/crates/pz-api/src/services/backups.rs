@@ -191,11 +191,23 @@ pub async fn update_settings(db: &PgPool, patch: SchedulePatch) -> ApiResult<Bac
     .bind(patch.daily_enabled.unwrap_or(current.daily_enabled))
     .bind(daily_time)
     .bind(retain(patch.retention_manual, current.retention_manual)?)
-    .bind(retain(patch.retention_scheduled, current.retention_scheduled)?)
+    .bind(retain(
+        patch.retention_scheduled,
+        current.retention_scheduled,
+    )?)
     .bind(retain(patch.retention_daily, current.retention_daily)?)
-    .bind(retain(patch.retention_pre_rollback, current.retention_pre_rollback)?)
-    .bind(retain(patch.retention_pre_update, current.retention_pre_update)?)
-    .bind(retain(patch.retention_pre_import, current.retention_pre_import)?)
+    .bind(retain(
+        patch.retention_pre_rollback,
+        current.retention_pre_rollback,
+    )?)
+    .bind(retain(
+        patch.retention_pre_update,
+        current.retention_pre_update,
+    )?)
+    .bind(retain(
+        patch.retention_pre_import,
+        current.retention_pre_import,
+    )?)
     .execute(db)
     .await?;
 
@@ -228,11 +240,7 @@ pub async fn start_create(state: AppState, notes: Option<String>) -> ApiResult<(
 ///
 /// Used by the backup-then-restart cycle so the container is not torn down
 /// mid-archive. The job slot is claimed so the backups page shows progress.
-pub async fn create_now(
-    state: &AppState,
-    kind: &str,
-    notes: Option<&str>,
-) -> Result<(), String> {
+pub async fn create_now(state: &AppState, kind: &str, notes: Option<&str>) -> Result<(), String> {
     claim_job(state, "create", "Saving the world…")
         .await
         .map_err(|error| error.to_string())?;
@@ -272,8 +280,9 @@ pub async fn delete(db: &PgPool, id: Uuid) -> ApiResult<String> {
         .await?
         .ok_or_else(|| ApiError::Validation("That backup is gone.".to_owned()))?;
     if Path::new(&backup.path).exists() {
-        std::fs::remove_file(&backup.path)
-            .map_err(|error| ApiError::Internal(format!("could not delete the archive: {error}")))?;
+        std::fs::remove_file(&backup.path).map_err(|error| {
+            ApiError::Internal(format!("could not delete the archive: {error}"))
+        })?;
     }
     sqlx::query("DELETE FROM backups WHERE id = $1")
         .bind(id)
@@ -315,7 +324,10 @@ impl BulkDeleteOutcome {
 }
 
 pub async fn delete_many(db: &PgPool, ids: &[Uuid]) -> ApiResult<BulkDeleteOutcome> {
-    let mut outcome = BulkDeleteOutcome { deleted: 0, failed: 0 };
+    let mut outcome = BulkDeleteOutcome {
+        deleted: 0,
+        failed: 0,
+    };
     let mut first_error = None;
 
     for id in ids {
@@ -333,9 +345,10 @@ pub async fn delete_many(db: &PgPool, ids: &[Uuid]) -> ApiResult<BulkDeleteOutco
     // One stubborn archive should not sink the rest of the batch, but a batch
     // that removed nothing is a failure and has to reach the admin as one.
     if outcome.total_failure()
-        && let Some(error) = first_error {
-            return Err(error);
-        }
+        && let Some(error) = first_error
+    {
+        return Err(error);
+    }
 
     Ok(outcome)
 }
@@ -386,8 +399,21 @@ pub fn contents(backup: &Backup) -> ApiResult<ArchiveListing> {
 const EDITOR_MAX_BYTES: usize = 8 * 1024 * 1024;
 
 const TEXT_EXTENSIONS: &[&str] = &[
-    "ini", "lua", "txt", "json", "xml", "cfg", "log", "md", "csv", "yml", "yaml", "toml",
-    "properties", "conf", "example",
+    "ini",
+    "lua",
+    "txt",
+    "json",
+    "xml",
+    "cfg",
+    "log",
+    "md",
+    "csv",
+    "yml",
+    "yaml",
+    "toml",
+    "properties",
+    "conf",
+    "example",
 ];
 
 const BINARY_EXTENSIONS: &[&str] = &[
@@ -424,9 +450,10 @@ pub fn read_entry(backup: &Backup, requested: &str) -> ApiResult<ArchiveFile> {
         .spawn()
         .map_err(|error| ApiError::Internal(format!("tar extract failed: {error}")))?;
 
-    let mut stdout = child.stdout.take().ok_or_else(|| {
-        ApiError::Internal("tar produced no output".to_owned())
-    })?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ApiError::Internal("tar produced no output".to_owned()))?;
 
     let mut buf = Vec::new();
     let mut chunk = [0_u8; 64 * 1024];
@@ -464,9 +491,7 @@ pub fn read_entry(backup: &Backup, requested: &str) -> ApiResult<ArchiveFile> {
     }
 
     if looks_binary(&buf) {
-        return Err(ApiError::Validation(
-            "That file is not text.".to_owned(),
-        ));
+        return Err(ApiError::Validation("That file is not text.".to_owned()));
     }
 
     let content = String::from_utf8(buf)
@@ -476,11 +501,7 @@ pub fn read_entry(backup: &Backup, requested: &str) -> ApiResult<ArchiveFile> {
         })
         .map_err(|_| ApiError::Validation("That file is not valid text.".to_owned()))?;
 
-    let name = path
-        .rsplit('/')
-        .next()
-        .unwrap_or(path.as_str())
-        .to_owned();
+    let name = path.rsplit('/').next().unwrap_or(path.as_str()).to_owned();
 
     Ok(ArchiveFile {
         language: language_for(&path),
@@ -632,7 +653,9 @@ pub async fn tick_schedule(state: &AppState) {
             .ok()
             .flatten()
             .is_some_and(|stamp| stamp.date_naive() == now.date_naive());
-        if !today && now.time().hour() == settings.daily_time.hour() && now.time().minute() == settings.daily_time.minute()
+        if !today
+            && now.time().hour() == settings.daily_time.hour()
+            && now.time().minute() == settings.daily_time.minute()
         {
             tracing::info!("starting the daily backup");
             let _ = start_typed(state.clone(), "daily", Some("Daily backup".into())).await;
@@ -675,7 +698,9 @@ async fn create(state: &AppState, kind: &str, notes: Option<&str>) -> Result<(),
         return Err("tar did not write an archive".to_owned());
     }
 
-    let size = std::fs::metadata(&path).map(|meta| meta.len() as i64).unwrap_or(0);
+    let size = std::fs::metadata(&path)
+        .map(|meta| meta.len() as i64)
+        .unwrap_or(0);
     let version = game_version(&state.config.lua_bridge_path);
 
     sqlx::query(
@@ -698,7 +723,12 @@ async fn create(state: &AppState, kind: &str, notes: Option<&str>) -> Result<(),
 }
 
 async fn rollback(state: &AppState, backup: Backup) -> Result<(), String> {
-    create(state, "pre_rollback", Some(&format!("Before restoring {}", backup.filename))).await?;
+    create(
+        state,
+        "pre_rollback",
+        Some(&format!("Before restoring {}", backup.filename)),
+    )
+    .await?;
 
     let _ = crate::services::admin::save_world(state).await;
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -739,7 +769,12 @@ async fn import_world(state: &AppState, zip: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not stop the server: {error}"))?;
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    let result = extract_import(zip, &listing, &state.config.data_path, &state.config.server_name);
+    let result = extract_import(
+        zip,
+        &listing,
+        &state.config.data_path,
+        &state.config.server_name,
+    );
     let start = docker.start().await;
     result?;
     start.map_err(|error| format!("could not start the server: {error}"))?;
@@ -782,7 +817,9 @@ fn extract_archive(backup: &Backup, data: &Path) -> Result<(), String> {
 
 fn validate_archive(backup: &Backup) -> ApiResult<()> {
     if !Path::new(&backup.path).is_file() {
-        return Err(ApiError::Validation("That archive is not on disk.".to_owned()));
+        return Err(ApiError::Validation(
+            "That archive is not on disk.".to_owned(),
+        ));
     }
     let output = std::process::Command::new("tar")
         .args(["-tzf", &backup.path])
@@ -816,15 +853,17 @@ fn list_zip(path: &Path) -> Result<Vec<String>, String> {
     let mut entries = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Some(caps) = line.split_whitespace().nth(3)
-            && caps != "Name" && !caps.is_empty() {
-                // unzip -l: length date time name — name may contain spaces.
-                if let Some(name) = line.splitn(4, char::is_whitespace).last() {
-                    let name = name.trim();
-                    if name != "Name" && !name.is_empty() && !name.chars().all(|c| c == '-') {
-                        entries.push(name.to_owned());
-                    }
+            && caps != "Name"
+            && !caps.is_empty()
+        {
+            // unzip -l: length date time name — name may contain spaces.
+            if let Some(name) = line.splitn(4, char::is_whitespace).last() {
+                let name = name.trim();
+                if name != "Name" && !name.is_empty() && !name.chars().all(|c| c == '-') {
+                    entries.push(name.to_owned());
                 }
             }
+        }
     }
     // Simpler parse: skip header/footer, take the remainder after the third column.
     let mut cleaned = Vec::new();
@@ -851,7 +890,12 @@ fn list_zip(path: &Path) -> Result<Vec<String>, String> {
     }
 }
 
-fn extract_import(zip: &Path, listing: &[String], data: &Path, server_name: &str) -> Result<(), String> {
+fn extract_import(
+    zip: &Path,
+    listing: &[String],
+    data: &Path,
+    server_name: &str,
+) -> Result<(), String> {
     let has_saves = listing.iter().any(|entry| entry.starts_with("Saves/"));
     let has_server = listing.iter().any(|entry| entry.starts_with("Server/"));
     let has_db = listing.iter().any(|entry| entry.starts_with("db/"));
@@ -1068,14 +1112,20 @@ mod tests {
 
     #[test]
     fn a_batch_that_removed_nothing_is_not_a_success() {
-        let outcome = BulkDeleteOutcome { deleted: 0, failed: 4 };
+        let outcome = BulkDeleteOutcome {
+            deleted: 0,
+            failed: 4,
+        };
 
         assert!(outcome.total_failure());
     }
 
     #[test]
     fn a_batch_that_removed_everything_is_a_success() {
-        let outcome = BulkDeleteOutcome { deleted: 4, failed: 0 };
+        let outcome = BulkDeleteOutcome {
+            deleted: 4,
+            failed: 0,
+        };
 
         assert!(!outcome.total_failure());
         assert_eq!(outcome.message(), "Deleted 4 backup(s)");
@@ -1083,9 +1133,15 @@ mod tests {
 
     #[test]
     fn a_partly_removed_batch_says_how_many_were_left_behind() {
-        let outcome = BulkDeleteOutcome { deleted: 3, failed: 2 };
+        let outcome = BulkDeleteOutcome {
+            deleted: 3,
+            failed: 2,
+        };
 
         assert!(!outcome.total_failure());
-        assert_eq!(outcome.message(), "Deleted 3 of 5 — 2 could not be removed.");
+        assert_eq!(
+            outcome.message(),
+            "Deleted 3 of 5 — 2 could not be removed."
+        );
     }
 }

@@ -11,7 +11,16 @@ use crate::services::economy::{self, inventory, measure, wallet};
 use crate::state::AppState;
 
 const NODE_TYPES: &[&str] = &[
-    "start", "stage", "task", "objective", "reward", "end", "area", "find", "collect", "kills",
+    "start",
+    "stage",
+    "task",
+    "objective",
+    "reward",
+    "end",
+    "area",
+    "find",
+    "collect",
+    "kills",
 ];
 const CONDITIONS: &[&str] = &["task", "objective", "area", "find", "collect", "kills"];
 const AUDIENCES: &[&str] = &["all", "players", "group", "claimable"];
@@ -189,13 +198,11 @@ pub async fn create(db: &PgPool, patch: QuestPatch) -> ApiResult<Quest> {
 
 pub async fn update(db: &PgPool, id: Uuid, patch: QuestPatch) -> ApiResult<Quest> {
     let current = get(db, id).await?;
-    let title = patch
-        .title
-        .unwrap_or(current.title)
-        .trim()
-        .to_owned();
+    let title = patch.title.unwrap_or(current.title).trim().to_owned();
     if title.is_empty() || title.len() > 80 {
-        return Err(ApiError::Validation("Title must be 1–80 characters.".to_owned()));
+        return Err(ApiError::Validation(
+            "Title must be 1–80 characters.".to_owned(),
+        ));
     }
     let graph = patch.graph.unwrap_or(current.graph);
     validate_graph(&graph)?;
@@ -203,7 +210,9 @@ pub async fn update(db: &PgPool, id: Uuid, patch: QuestPatch) -> ApiResult<Quest
     if !AUDIENCES.contains(&audience.as_str()) {
         return Err(ApiError::Validation("Unknown audience.".to_owned()));
     }
-    let usernames = patch.audience_usernames.unwrap_or(current.audience_usernames);
+    let usernames = patch
+        .audience_usernames
+        .unwrap_or(current.audience_usernames);
     let group_id = match patch.audience_group_id {
         Some(value) => value,
         None => current.audience_group_id,
@@ -307,7 +316,9 @@ pub async fn claim_offer(db: &PgPool, user_id: Uuid, quest_id: Uuid) -> ApiResul
         ));
     }
     if claimed_by(db, quest_id, user_id).await? {
-        return Err(ApiError::Validation("You already have that flow.".to_owned()));
+        return Err(ApiError::Validation(
+            "You already have that flow.".to_owned(),
+        ));
     }
     sqlx::query(
         r#"INSERT INTO quest_claims (quest_id, user_id) VALUES ($1, $2)
@@ -357,7 +368,9 @@ pub async fn claim_node(
         .find(|item| item.id == node_id)
         .ok_or_else(|| ApiError::Validation("Unknown node.".to_owned()))?;
     if !node.unlocked {
-        return Err(ApiError::Validation("That stage is still locked.".to_owned()));
+        return Err(ApiError::Validation(
+            "That stage is still locked.".to_owned(),
+        ));
     }
     if node.claimed {
         return Err(ApiError::Validation("Already claimed.".to_owned()));
@@ -366,13 +379,19 @@ pub async fn claim_node(
         return award_node(state, user_id, quest_id, node, today).await;
     }
     if !CONDITIONS.contains(&node.kind.as_str()) {
-        return Err(ApiError::Validation("That node cannot be collected.".to_owned()));
+        return Err(ApiError::Validation(
+            "That node cannot be collected.".to_owned(),
+        ));
     }
     if node.measure.as_deref() == Some("manual") {
-        return Err(ApiError::Validation("Staff have to mark that done.".to_owned()));
+        return Err(ApiError::Validation(
+            "Staff have to mark that done.".to_owned(),
+        ));
     }
     if !node.complete {
-        return Err(ApiError::Validation("That step is not finished yet.".to_owned()));
+        return Err(ApiError::Validation(
+            "That step is not finished yet.".to_owned(),
+        ));
     }
     award_node(state, user_id, quest_id, node, today).await
 }
@@ -402,7 +421,9 @@ pub async fn grant_node(
 
     let quest = get(&state.db, quest_id).await?;
     if !visible_to(&state.db, &quest, user_id, &resolved).await? {
-        return Err(ApiError::Validation("That flow is not for that player.".to_owned()));
+        return Err(ApiError::Validation(
+            "That flow is not for that player.".to_owned(),
+        ));
     }
 
     let today = Utc::now().date_naive();
@@ -416,10 +437,14 @@ pub async fn grant_node(
         .ok_or_else(|| ApiError::Validation("Unknown node.".to_owned()))?;
 
     if !CONDITIONS.contains(&node.kind.as_str()) && node.kind != "reward" {
-        return Err(ApiError::Validation("That node cannot be granted.".to_owned()));
+        return Err(ApiError::Validation(
+            "That node cannot be granted.".to_owned(),
+        ));
     }
     if !node.unlocked {
-        return Err(ApiError::Validation("That stage is still locked.".to_owned()));
+        return Err(ApiError::Validation(
+            "That stage is still locked.".to_owned(),
+        ));
     }
     if node.claimed {
         return Err(ApiError::Validation("Already claimed.".to_owned()));
@@ -443,7 +468,9 @@ pub async fn list_groups(db: &PgPool) -> Result<Vec<PlayerGroup>, sqlx::Error> {
 pub async fn create_group(db: &PgPool, name: &str) -> ApiResult<PlayerGroup> {
     let name = name.trim();
     if name.is_empty() || name.len() > 60 {
-        return Err(ApiError::Validation("Group name must be 1–60 characters.".to_owned()));
+        return Err(ApiError::Validation(
+            "Group name must be 1–60 characters.".to_owned(),
+        ));
     }
     let row = sqlx::query_as::<_, PlayerGroup>(
         r#"INSERT INTO player_groups (name) VALUES ($1)
@@ -467,13 +494,12 @@ pub async fn delete_group(db: &PgPool, id: Uuid) -> ApiResult<()> {
 }
 
 pub async fn add_member(db: &PgPool, group_id: Uuid, username: &str) -> ApiResult<()> {
-    let user_id: Uuid = sqlx::query_scalar(
-        "SELECT id FROM users WHERE lower(username) = lower($1)",
-    )
-    .bind(username.trim())
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| ApiError::Validation("No account with that name.".to_owned()))?;
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(username.trim())
+            .fetch_optional(db)
+            .await?
+            .ok_or_else(|| ApiError::Validation("No account with that name.".to_owned()))?;
     sqlx::query(
         r#"INSERT INTO player_group_members (group_id, user_id)
            VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
@@ -495,13 +521,12 @@ pub async fn remove_member(db: &PgPool, group_id: Uuid, user_id: Uuid) -> ApiRes
 }
 
 pub async fn remove_member_named(db: &PgPool, group_id: Uuid, username: &str) -> ApiResult<()> {
-    let user_id: Uuid = sqlx::query_scalar(
-        "SELECT id FROM users WHERE lower(username) = lower($1)",
-    )
-    .bind(username.trim())
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| ApiError::Validation("No account with that name.".to_owned()))?;
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(username.trim())
+            .fetch_optional(db)
+            .await?
+            .ok_or_else(|| ApiError::Validation("No account with that name.".to_owned()))?;
     remove_member(db, group_id, user_id).await
 }
 
@@ -575,7 +600,9 @@ async fn progress(
             unlocked: false,
             complete: match node.kind.as_str() {
                 "start" => true,
-                "task" | "objective" => claimed || (measure.as_deref() != Some("manual") && progress >= goal),
+                "task" | "objective" => {
+                    claimed || (measure.as_deref() != Some("manual") && progress >= goal)
+                }
                 "area" | "find" | "collect" | "kills" => claimed || progress >= goal,
                 "reward" => claimed,
                 _ => false,
@@ -593,7 +620,8 @@ async fn progress(
         if !view.unlocked || view.claimed {
             continue;
         }
-        let baseline = ensure_kill_baseline(&state.db, quest.id, user_id, &node.id, kills_now).await?;
+        let baseline =
+            ensure_kill_baseline(&state.db, quest.id, user_id, &node.id, kills_now).await?;
         let gained = i64::from((kills_now - baseline).max(0));
         view.progress = gained.min(view.goal);
         view.complete = view.progress >= view.goal;
@@ -604,7 +632,10 @@ async fn progress(
     for index in 0..nodes.len() {
         let auto = {
             let node = &nodes[index];
-            (node.kind == "reward" && node.unlocked && !node.claimed && (node.xp > 0 || node.coins > 0))
+            (node.kind == "reward"
+                && node.unlocked
+                && !node.claimed
+                && (node.xp > 0 || node.coins > 0))
                 || (node.kind == "area"
                     && node.unlocked
                     && node.complete
@@ -614,7 +645,10 @@ async fn progress(
         };
         if auto {
             let node = nodes[index].clone();
-            if award_node(state, user_id, quest.id, &node, today).await.is_ok() {
+            if award_node(state, user_id, quest.id, &node, today)
+                .await
+                .is_ok()
+            {
                 nodes[index].claimed = true;
                 nodes[index].complete = true;
                 resolve_unlocks(graph, &mut nodes);
@@ -711,17 +745,20 @@ fn inside_area(node: &GraphNode, position: Option<(f64, f64, i32)>) -> bool {
         return false;
     };
     if let Some(floor) = node.data.area_z
-        && pz != floor {
-            return false;
-        }
+        && pz != floor
+    {
+        return false;
+    }
     if let Some(cells) = node.data.area_cells.as_ref()
-        && !cells.is_empty() {
-            let size = f64::from(node.data.area_cell_size.unwrap_or(16).max(1));
-            let cx = (px / size).floor() as i32;
-            let cy = (py / size).floor() as i32;
-            return cells.iter().any(|cell| cell.x == cx && cell.y == cy);
-        }
-    let (Some(x), Some(y), Some(radius)) = (node.data.area_x, node.data.area_y, node.data.area_radius)
+        && !cells.is_empty()
+    {
+        let size = f64::from(node.data.area_cell_size.unwrap_or(16).max(1));
+        let cx = (px / size).floor() as i32;
+        let cy = (py / size).floor() as i32;
+        return cells.iter().any(|cell| cell.x == cx && cell.y == cy);
+    }
+    let (Some(x), Some(y), Some(radius)) =
+        (node.data.area_x, node.data.area_y, node.data.area_radius)
     else {
         return false;
     };
@@ -739,9 +776,9 @@ async fn current_position(state: &AppState, username: &str) -> Option<(f64, f64,
             .players
             .iter()
             .find(|player| player.username.eq_ignore_ascii_case(username))
-        {
-            return Some((player.x, player.y, player.z));
-        }
+    {
+        return Some((player.x, player.y, player.z));
+    }
     character::last_position(&state.db, username)
         .await
         .ok()
@@ -918,13 +955,18 @@ async fn visible_to(
 
 fn validate_graph(graph: &Graph) -> ApiResult<()> {
     if graph.nodes.len() > 80 {
-        return Err(ApiError::Validation("A flow can have at most 80 nodes.".to_owned()));
+        return Err(ApiError::Validation(
+            "A flow can have at most 80 nodes.".to_owned(),
+        ));
     }
     let mut seen = std::collections::HashSet::new();
     let mut starts = 0;
     for node in &graph.nodes {
         if !NODE_TYPES.contains(&node.kind.as_str()) {
-            return Err(ApiError::Validation(format!("Unknown node type {}.", node.kind)));
+            return Err(ApiError::Validation(format!(
+                "Unknown node type {}.",
+                node.kind
+            )));
         }
         if !seen.insert(node.id.clone()) {
             return Err(ApiError::Validation("Duplicate node id.".to_owned()));
@@ -958,7 +1000,8 @@ fn validate_graph(graph: &Graph) -> ApiResult<()> {
             let circle = node.data.area_x.is_some() && node.data.area_y.is_some() && radius >= 1.0;
             if !painted && !circle {
                 return Err(ApiError::Validation(
-                    "An area node needs a painted district or a centre (X, Y) and radius.".to_owned(),
+                    "An area node needs a painted district or a centre (X, Y) and radius."
+                        .to_owned(),
                 ));
             }
         }
@@ -967,22 +1010,32 @@ fn validate_graph(graph: &Graph) -> ApiResult<()> {
             economy::item_type(raw)?;
         }
         if node.kind == "collect" && node.data.goal.unwrap_or(0) < 1 {
-            return Err(ApiError::Validation("Collect needs a count of at least 1.".to_owned()));
+            return Err(ApiError::Validation(
+                "Collect needs a count of at least 1.".to_owned(),
+            ));
         }
         if node.kind == "kills" && node.data.goal.unwrap_or(0) < 1 {
-            return Err(ApiError::Validation("A kill node needs a count of at least 1.".to_owned()));
+            return Err(ApiError::Validation(
+                "A kill node needs a count of at least 1.".to_owned(),
+            ));
         }
     }
     if starts != 1 {
-        return Err(ApiError::Validation("A flow needs exactly one Start node.".to_owned()));
+        return Err(ApiError::Validation(
+            "A flow needs exactly one Start node.".to_owned(),
+        ));
     }
     let ids = seen;
     for edge in &graph.edges {
         if !ids.contains(&edge.from) || !ids.contains(&edge.to) {
-            return Err(ApiError::Validation("An edge points at a missing node.".to_owned()));
+            return Err(ApiError::Validation(
+                "An edge points at a missing node.".to_owned(),
+            ));
         }
         if edge.from == edge.to {
-            return Err(ApiError::Validation("A node cannot connect to itself.".to_owned()));
+            return Err(ApiError::Validation(
+                "A node cannot connect to itself.".to_owned(),
+            ));
         }
     }
     if has_cycle(graph) {
@@ -995,7 +1048,10 @@ fn has_cycle(graph: &Graph) -> bool {
     use std::collections::HashMap;
     let mut outgoing: HashMap<&str, Vec<&str>> = HashMap::new();
     for edge in &graph.edges {
-        outgoing.entry(edge.from.as_str()).or_default().push(edge.to.as_str());
+        outgoing
+            .entry(edge.from.as_str())
+            .or_default()
+            .push(edge.to.as_str());
     }
     fn visit<'a>(
         id: &'a str,
@@ -1022,7 +1078,10 @@ fn has_cycle(graph: &Graph) -> bool {
     }
     let mut seen = std::collections::HashSet::new();
     let mut stack = Vec::new();
-    graph.nodes.iter().any(|node| visit(&node.id, &outgoing, &mut stack, &mut seen))
+    graph
+        .nodes
+        .iter()
+        .any(|node| visit(&node.id, &outgoing, &mut stack, &mut seen))
 }
 
 fn default_graph() -> Graph {
@@ -1054,8 +1113,16 @@ fn default_graph() -> Graph {
             },
         ],
         edges: vec![
-            GraphEdge { id: "e1".into(), from: "start".into(), to: "stage-1".into() },
-            GraphEdge { id: "e2".into(), from: "stage-1".into(), to: "end".into() },
+            GraphEdge {
+                id: "e1".into(),
+                from: "start".into(),
+                to: "stage-1".into(),
+            },
+            GraphEdge {
+                id: "e2".into(),
+                from: "stage-1".into(),
+                to: "end".into(),
+            },
         ],
     }
 }

@@ -101,7 +101,10 @@ impl ReportChannel {
         read_json(&self.dir.join(REPORT_RESULTS_FILE)).await
     }
 
-    pub async fn write_results(&self, mut results: ReportResults) -> Result<(), ReportChannelError> {
+    pub async fn write_results(
+        &self,
+        mut results: ReportResults,
+    ) -> Result<(), ReportChannelError> {
         if results.results.len() > RESULT_LIMIT {
             let excess = results.results.len() - RESULT_LIMIT;
             results.results.drain(..excess);

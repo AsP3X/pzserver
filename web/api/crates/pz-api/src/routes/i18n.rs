@@ -18,7 +18,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/i18n/languages", get(public_languages))
         .route("/i18n/{locale}", get(public_overrides))
-        .route("/admin/languages", get(admin_languages).post(create_language))
+        .route(
+            "/admin/languages",
+            get(admin_languages).post(create_language),
+        )
         .route(
             "/admin/languages/{code}",
             axum::routing::patch(update_language).delete(delete_language),
@@ -30,7 +33,10 @@ pub fn routes() -> Router<AppState> {
                 .delete(clear_translation),
         )
         .route("/admin/translations/import", put(import_translations))
-        .route("/admin/translations/export/{locale}", get(export_translations))
+        .route(
+            "/admin/translations/export/{locale}",
+            get(export_translations),
+        )
 }
 
 async fn public_languages(State(state): State<AppState>) -> ApiResult<Json<Vec<Language>>> {
@@ -80,7 +86,10 @@ async fn delete_language(
     Ok(Json(serde_json::json!({ "message": "Language removed." })))
 }
 
-async fn admin_catalog(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<Json<Catalog>> {
+async fn admin_catalog(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<Catalog>> {
     Ok(Json(i18n::catalog(&state.db).await?))
 }
 

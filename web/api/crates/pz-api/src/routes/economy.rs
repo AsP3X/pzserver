@@ -9,9 +9,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{AdminUser, AuthUser};
-use crate::services::economy::{
-    self, auction, deposit, quests, rewards, store, vault, wallet,
-};
+use crate::services::economy::{self, auction, deposit, quests, rewards, store, vault, wallet};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -21,7 +19,10 @@ pub fn routes() -> Router<AppState> {
         .route("/me/rewards", get(my_rewards))
         .route("/me/rewards/claim", post(claim_reward))
         .route("/me/rewards/quests/{id}/claim", post(claim_quest))
-        .route("/me/rewards/quests/{id}/nodes/{node_id}", post(claim_quest_node))
+        .route(
+            "/me/rewards/quests/{id}/nodes/{node_id}",
+            post(claim_quest_node),
+        )
         .route("/admin/quests", get(admin_quests).post(create_quest))
         .route(
             "/admin/quests/{id}",
@@ -58,7 +59,10 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/store/purchases", get(admin_purchases))
         .route("/admin/wallets", get(admin_wallets))
         .route("/admin/wallets/{user_id}", post(adjust_wallet))
-        .route("/admin/wallets/{user_id}/transactions", get(admin_transactions))
+        .route(
+            "/admin/wallets/{user_id}/transactions",
+            get(admin_transactions),
+        )
         .route("/admin/auctions", get(admin_auctions))
         .route("/admin/auctions/{id}/bids", get(admin_auction_bids))
         .route("/admin/auctions/{id}/cancel", post(admin_cancel_auction))
@@ -77,7 +81,10 @@ pub fn routes() -> Router<AppState> {
         .route("/me/vault/store", post(store_in_vault))
         .route("/me/vault/retrieve", post(retrieve_from_vault))
         .route("/me/vault/upgrade", post(upgrade_vault))
-        .route("/admin/vault", get(admin_vault).patch(update_vault_settings))
+        .route(
+            "/admin/vault",
+            get(admin_vault).patch(update_vault_settings),
+        )
 }
 
 async fn admin_auctions(
@@ -113,7 +120,9 @@ async fn my_rewards(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> ApiResult<Json<rewards::RewardsView>> {
-    Ok(Json(rewards::status(&state, user.id, &user.username).await?))
+    Ok(Json(
+        rewards::status(&state, user.id, &user.username).await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -192,7 +201,10 @@ async fn create_quest(
     _staff: AdminUser,
     Json(body): Json<quests::QuestPatch>,
 ) -> ApiResult<(StatusCode, Json<quests::Quest>)> {
-    Ok((StatusCode::CREATED, Json(quests::create(&state.db, body).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(quests::create(&state.db, body).await?),
+    ))
 }
 
 async fn update_quest(
@@ -277,9 +289,7 @@ async fn remove_group_member(
     Ok(Json(serde_json::json!({ "message": "Removed." })))
 }
 
-async fn store_catalogue(
-    State(state): State<AppState>,
-) -> ApiResult<Json<Vec<store::StoreItem>>> {
+async fn store_catalogue(State(state): State<AppState>) -> ApiResult<Json<Vec<store::StoreItem>>> {
     Ok(Json(store::list_public(&state.db).await?))
 }
 
@@ -391,7 +401,10 @@ async fn create_store_item(
     _staff: AdminUser,
     Json(body): Json<store::StoreItemPatch>,
 ) -> ApiResult<(StatusCode, Json<store::StoreItem>)> {
-    Ok((StatusCode::CREATED, Json(store::create(&state.db, body).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(store::create(&state.db, body).await?),
+    ))
 }
 
 async fn update_store_item(

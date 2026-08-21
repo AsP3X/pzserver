@@ -485,10 +485,9 @@ mod tests {
 
     #[test]
     fn a_failed_result_carries_its_reason() {
-        let result: DepositResult = serde_json::from_str(
-            r#"{"id":"abc","status":"failed","message":"player not online"}"#,
-        )
-        .expect("parse");
+        let result: DepositResult =
+            serde_json::from_str(r#"{"id":"abc","status":"failed","message":"player not online"}"#)
+                .expect("parse");
 
         assert!(!result.succeeded());
         assert_eq!(result.message.as_deref(), Some("player not online"));

@@ -230,7 +230,9 @@ pub async fn buy(
     .ok_or_else(|| ApiError::Validation("That item is gone.".to_owned()))?;
 
     if !item.active {
-        return Err(ApiError::Validation("That item is not for sale.".to_owned()));
+        return Err(ApiError::Validation(
+            "That item is not for sale.".to_owned(),
+        ));
     }
 
     let units = item.quantity.saturating_mul(quantity);
@@ -454,7 +456,10 @@ fn normalised(patch: StoreItemPatch, current: Option<&StoreItem>) -> ApiResult<D
     if !CATEGORIES.contains(&category.as_str()) {
         return Err(ApiError::Validation("Unknown category.".to_owned()));
     }
-    let quantity = patch.quantity.or(current.map(|row| row.quantity)).unwrap_or(1);
+    let quantity = patch
+        .quantity
+        .or(current.map(|row| row.quantity))
+        .unwrap_or(1);
     if !(1..=100).contains(&quantity) {
         return Err(ApiError::Validation("Quantity must be 1–100.".to_owned()));
     }
@@ -486,8 +491,17 @@ fn normalised(patch: StoreItemPatch, current: Option<&StoreItem>) -> ApiResult<D
             Some(value) => value,
             None => current.and_then(|row| row.max_per_player),
         },
-        featured: patch.featured.or(current.map(|row| row.featured)).unwrap_or(false),
-        active: patch.active.or(current.map(|row| row.active)).unwrap_or(true),
-        sort_order: patch.sort_order.or(current.map(|row| row.sort_order)).unwrap_or(0),
+        featured: patch
+            .featured
+            .or(current.map(|row| row.featured))
+            .unwrap_or(false),
+        active: patch
+            .active
+            .or(current.map(|row| row.active))
+            .unwrap_or(true),
+        sort_order: patch
+            .sort_order
+            .or(current.map(|row| row.sort_order))
+            .unwrap_or(0),
     })
 }

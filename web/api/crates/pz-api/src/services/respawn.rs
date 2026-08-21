@@ -65,7 +65,11 @@ pub async fn view(state: &AppState) -> ApiResult<RespawnView> {
         .collect();
 
     // Longest wait first: that is the player most likely to be asking about it.
-    timers.sort_by(|a, b| b.minutes_left.cmp(&a.minutes_left).then(a.username.cmp(&b.username)));
+    timers.sort_by(|a, b| {
+        b.minutes_left
+            .cmp(&a.minutes_left)
+            .then(a.username.cmp(&b.username))
+    });
 
     Ok(RespawnView {
         enabled: config.enabled,
@@ -182,6 +186,10 @@ mod tests {
         assert_eq!(round(60), 1);
         assert_eq!(round(61), 2);
         assert_eq!(round(0), 0);
-        assert_eq!(round(-30), 0, "an elapsed cooldown reads as zero, not negative");
+        assert_eq!(
+            round(-30),
+            0,
+            "an elapsed cooldown reads as zero, not negative"
+        );
     }
 }

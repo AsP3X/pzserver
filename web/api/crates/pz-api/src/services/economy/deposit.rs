@@ -77,9 +77,7 @@ pub async fn rates(state: &AppState) -> ApiResult<DepositRates> {
 
 pub async fn set_rates(state: &AppState, next: DepositRates) -> ApiResult<DepositRates> {
     if next.money_value < 0 || next.bundle_value < 0 {
-        return Err(ApiError::Validation(
-            "Rates cannot be negative.".to_owned(),
-        ));
+        return Err(ApiError::Validation("Rates cannot be negative.".to_owned()));
     }
 
     if next.money_value == 0 && next.bundle_value == 0 {

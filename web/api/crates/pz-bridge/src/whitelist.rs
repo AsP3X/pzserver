@@ -225,10 +225,7 @@ mod tests {
     #[test]
     fn candidates_prefer_the_named_server_file() {
         let paths = candidate_paths(Path::new("/pz-data"), "ZomboidServer");
-        assert_eq!(
-            paths[0],
-            Path::new("/pz-data/db/ZomboidServer.db")
-        );
+        assert_eq!(paths[0], Path::new("/pz-data/db/ZomboidServer.db"));
         assert!(paths.iter().any(|p| p.ends_with("serverPZ.db")));
     }
 }

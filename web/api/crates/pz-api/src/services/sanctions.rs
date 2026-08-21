@@ -116,14 +116,23 @@ pub async fn suspend(
     if let Some(open) = active_for(&state.db, name).await? {
         if open.expires_at.is_none() {
             return Err(ApiError::Validation(
-                "They are already banned. Lift that first if you want a timed suspension.".to_owned(),
+                "They are already banned. Lift that first if you want a timed suspension."
+                    .to_owned(),
             ));
         }
 
         return replace_timer(state, open.id, name, note.as_deref(), seconds, expires_at).await;
     }
 
-    impose(state, name, note.as_deref(), Some(seconds), Some(expires_at), staff_id).await
+    impose(
+        state,
+        name,
+        note.as_deref(),
+        Some(seconds),
+        Some(expires_at),
+        staff_id,
+    )
+    .await
 }
 
 /// Permanent ban, recorded so a later expiry cannot unban them.
@@ -138,9 +147,7 @@ pub async fn ban(
 
     if let Some(open) = active_for(&state.db, name).await? {
         if open.expires_at.is_none() {
-            return Err(ApiError::Validation(
-                "They are already banned.".to_owned(),
-            ));
+            return Err(ApiError::Validation("They are already banned.".to_owned()));
         }
 
         return convert_to_ban(state, open.id, note.as_deref()).await;

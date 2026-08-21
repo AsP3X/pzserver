@@ -19,15 +19,12 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/safe-zones", get(public_config))
         .route("/admin/safe-zones", get(show).post(create_zone))
-        .route("/admin/safe-zones/config", axum::routing::patch(update_config))
         .route(
-            "/admin/safe-zones/{id}",
-            axum::routing::delete(delete_zone),
+            "/admin/safe-zones/config",
+            axum::routing::patch(update_config),
         )
-        .route(
-            "/admin/safe-zones/violations/{id}",
-            post(resolve_violation),
-        )
+        .route("/admin/safe-zones/{id}", axum::routing::delete(delete_zone))
+        .route("/admin/safe-zones/violations/{id}", post(resolve_violation))
 }
 
 async fn public_config(State(state): State<AppState>) -> ApiResult<Json<SafeZoneConfig>> {

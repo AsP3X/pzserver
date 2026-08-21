@@ -90,7 +90,11 @@ pub async fn gather(
 pub fn progress_of(kind: &str, cadence: &str, measures: &Measures) -> i64 {
     let daily = cadence == "daily";
     match kind {
-        "play" => i64::from(if daily { measures.play_today } else { measures.play_ever }),
+        "play" => i64::from(if daily {
+            measures.play_today
+        } else {
+            measures.play_ever
+        }),
         "kills" => {
             if daily {
                 measures.kills_today
@@ -105,8 +109,16 @@ pub fn progress_of(kind: &str, cadence: &str, measures: &Measures) -> i64 {
                 measures.hours_life
             }
         }
-        "spend" => i64::from(if daily { measures.spend_today } else { measures.spend_ever }),
-        "trade" => i64::from(if daily { measures.trade_today } else { measures.trade_ever }),
+        "spend" => i64::from(if daily {
+            measures.spend_today
+        } else {
+            measures.spend_ever
+        }),
+        "trade" => i64::from(if daily {
+            measures.trade_today
+        } else {
+            measures.trade_ever
+        }),
         _ => 0,
     }
 }
@@ -155,7 +167,11 @@ pub async fn daily_goal(db: &PgPool, kind: &str) -> Result<i32, sqlx::Error> {
     Ok(value.unwrap_or(0))
 }
 
-async fn store_since(db: &PgPool, user_id: Uuid, start: DateTime<Utc>) -> Result<bool, sqlx::Error> {
+async fn store_since(
+    db: &PgPool,
+    user_id: Uuid,
+    start: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         r#"SELECT EXISTS(
                SELECT 1 FROM store_purchases
@@ -168,7 +184,11 @@ async fn store_since(db: &PgPool, user_id: Uuid, start: DateTime<Utc>) -> Result
     .await
 }
 
-async fn trade_since(db: &PgPool, user_id: Uuid, start: DateTime<Utc>) -> Result<bool, sqlx::Error> {
+async fn trade_since(
+    db: &PgPool,
+    user_id: Uuid,
+    start: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         r#"SELECT EXISTS(
                SELECT 1 FROM auction_listings

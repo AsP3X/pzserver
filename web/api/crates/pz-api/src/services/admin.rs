@@ -175,12 +175,13 @@ pub async fn update_game(
     message: Option<&str>,
 ) -> ApiResult<()> {
     if let Some(branch) = branch
-        && !STEAM_BRANCHES.contains(&branch) {
-            return Err(ApiError::Validation(format!(
-                "Unknown branch. Pick one of: {}.",
-                STEAM_BRANCHES.join(", ")
-            )));
-        }
+        && !STEAM_BRANCHES.contains(&branch)
+    {
+        return Err(ApiError::Validation(format!(
+            "Unknown branch. Pick one of: {}.",
+            STEAM_BRANCHES.join(", ")
+        )));
+    }
 
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         let body = sanitise_message(message);
@@ -207,9 +208,7 @@ pub async fn update_game(
     let flag = state.config.data_path.join(".force_update");
     tokio::fs::write(&flag, chrono::Utc::now().timestamp().to_string())
         .await
-        .map_err(|error| {
-            ApiError::Internal(format!("could not request the update: {error}"))
-        })?;
+        .map_err(|error| ApiError::Internal(format!("could not request the update: {error}")))?;
 
     // Best effort: a server that is already down still needs updating, and the
     // container stop below is what actually guarantees a clean shutdown.
@@ -368,8 +367,9 @@ pub async fn list_players(state: &AppState) -> ApiResult<Vec<AdminPlayer>> {
     }
 
     for player in live_players {
-        let entry = by_name.entry(player.username.clone()).or_insert_with(|| {
-            AdminPlayer {
+        let entry = by_name
+            .entry(player.username.clone())
+            .or_insert_with(|| AdminPlayer {
                 username: player.username.clone(),
                 online: true,
                 is_dead: player.is_dead,
@@ -383,8 +383,7 @@ pub async fn list_players(state: &AppState) -> ApiResult<Vec<AdminPlayer>> {
                 y: None,
                 z: None,
                 sanction: None,
-            }
-        });
+            });
         entry.online = true;
         entry.is_dead = player.is_dead;
         entry.x = Some(player.x);
@@ -870,18 +869,27 @@ pub async fn add_mod(
     let mod_id = mod_id.trim();
 
     if !valid_mod_id(mod_id) {
-        return Err(ApiError::Validation("That is not a valid mod id.".to_owned()));
+        return Err(ApiError::Validation(
+            "That is not a valid mod id.".to_owned(),
+        ));
     }
 
     let current = list_mods(state).await?;
     if current.iter().any(|entry| entry.workshop_id == workshop_id) {
-        return Err(ApiError::Validation("That Workshop item is already loaded.".to_owned()));
+        return Err(ApiError::Validation(
+            "That Workshop item is already loaded.".to_owned(),
+        ));
     }
     if current.iter().any(|entry| entry.mod_id == mod_id) {
-        return Err(ApiError::Validation("That mod id is already on the list.".to_owned()));
+        return Err(ApiError::Validation(
+            "That mod id is already on the list.".to_owned(),
+        ));
     }
 
-    let mut workshop: Vec<String> = current.iter().map(|entry| entry.workshop_id.clone()).collect();
+    let mut workshop: Vec<String> = current
+        .iter()
+        .map(|entry| entry.workshop_id.clone())
+        .collect();
     let mut mods: Vec<String> = current.iter().map(|entry| entry.mod_id.clone()).collect();
     workshop.push(workshop_id);
     mods.push(mod_id.to_owned());
@@ -899,7 +907,9 @@ pub async fn remove_mod(state: &AppState, workshop_id: &str) -> ApiResult<Vec<Mo
         (!workshop_id.is_empty() && entry.workshop_id == workshop_id)
             || (workshop_id.is_empty() && entry.mod_id == workshop_id)
     }) else {
-        return Err(ApiError::Validation("That mod is not on the list.".to_owned()));
+        return Err(ApiError::Validation(
+            "That mod is not on the list.".to_owned(),
+        ));
     };
     if current[index].protected {
         return Err(ApiError::Validation(
@@ -907,7 +917,10 @@ pub async fn remove_mod(state: &AppState, workshop_id: &str) -> ApiResult<Vec<Mo
         ));
     }
 
-    let mut workshop: Vec<String> = current.iter().map(|entry| entry.workshop_id.clone()).collect();
+    let mut workshop: Vec<String> = current
+        .iter()
+        .map(|entry| entry.workshop_id.clone())
+        .collect();
     let mut mods: Vec<String> = current.iter().map(|entry| entry.mod_id.clone()).collect();
     if index < workshop.len() {
         workshop.remove(index);
@@ -922,7 +935,9 @@ pub async fn remove_mod(state: &AppState, workshop_id: &str) -> ApiResult<Vec<Mo
 
 pub async fn reorder_mods(state: &AppState, entries: &[ModEntry]) -> ApiResult<Vec<ModEntry>> {
     if entries.is_empty() {
-        return Err(ApiError::Validation("The load list cannot be empty.".to_owned()));
+        return Err(ApiError::Validation(
+            "The load list cannot be empty.".to_owned(),
+        ));
     }
 
     let current = list_mods(state).await?;
@@ -941,7 +956,10 @@ pub async fn reorder_mods(state: &AppState, entries: &[ModEntry]) -> ApiResult<V
         ));
     }
 
-    let workshop: Vec<String> = entries.iter().map(|entry| entry.workshop_id.clone()).collect();
+    let workshop: Vec<String> = entries
+        .iter()
+        .map(|entry| entry.workshop_id.clone())
+        .collect();
     let mods: Vec<String> = entries.iter().map(|entry| entry.mod_id.clone()).collect();
     write_mod_lists(state, &workshop, &mods).await?;
     list_mods(state).await
@@ -954,7 +972,10 @@ pub async fn import_mods(
     map_folders: &[String],
 ) -> ApiResult<Vec<ModEntry>> {
     let current = list_mods(state).await?;
-    let mut workshop: Vec<String> = current.iter().map(|entry| entry.workshop_id.clone()).collect();
+    let mut workshop: Vec<String> = current
+        .iter()
+        .map(|entry| entry.workshop_id.clone())
+        .collect();
     let mut mods: Vec<String> = current.iter().map(|entry| entry.mod_id.clone()).collect();
 
     for raw in workshop_ids {
@@ -1071,7 +1092,8 @@ pub async fn bridge_health(state: &AppState) -> ApiResult<BridgeHealth> {
             None => true,
         };
 
-        let (status, reason, stale) = classify_bridge_file(kind, present, old, world_paused, world_fresh);
+        let (status, reason, stale) =
+            classify_bridge_file(kind, present, old, world_paused, world_fresh);
 
         files.push(BridgeFile {
             name: name.to_owned(),

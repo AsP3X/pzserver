@@ -5,7 +5,8 @@
 
 use serde::Serialize;
 
-const ENDPOINT: &str = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/";
+const ENDPOINT: &str =
+    "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkshopDetails {
@@ -115,7 +116,10 @@ mod tests {
 
     #[test]
     fn accepts_a_plain_id() {
-        assert_eq!(parse_workshop_id("3777446787").as_deref(), Some("3777446787"));
+        assert_eq!(
+            parse_workshop_id("3777446787").as_deref(),
+            Some("3777446787")
+        );
     }
 
     #[test]
@@ -131,7 +135,8 @@ mod tests {
 
     #[test]
     fn reads_mod_ids_from_a_description() {
-        let text = "Workshop ID: 1\nMod ID: KnoxRelay\nMod ID: KnoxRelayExtra\nMap Folder: RavenCreek";
+        let text =
+            "Workshop ID: 1\nMod ID: KnoxRelay\nMod ID: KnoxRelayExtra\nMap Folder: RavenCreek";
         assert_eq!(
             extract_labels(text, "Mod ID"),
             vec!["KnoxRelay", "KnoxRelayExtra"]

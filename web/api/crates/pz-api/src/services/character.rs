@@ -74,7 +74,10 @@ pub struct LastPosition {
     pub z: i32,
 }
 
-pub async fn last_position(db: &PgPool, username: &str) -> Result<Option<LastPosition>, sqlx::Error> {
+pub async fn last_position(
+    db: &PgPool,
+    username: &str,
+) -> Result<Option<LastPosition>, sqlx::Error> {
     sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<i32>)>(
         r#"
         SELECT x, y, z
