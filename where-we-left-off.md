@@ -379,7 +379,8 @@ rendered but never written), so a static `.jpg` count is normal and a static
 
 ```bash
 C=$(docker ps -q --filter "ancestor=pzserver-map-tiles:local")
-docker logs "$C" 2>&1 | tr '' '
+docker logs "$C" 2>&1 | tr '
+' '
 ' | grep -o "job: [0-9]*/[0-9]*.*" | tail -1
 docker stats --no-stream --format '{{.CPUPerc}}' "$C"
 ```
@@ -401,14 +402,29 @@ because each coarser tile is built by merging its four children. So level-22
 full-depth regardless. `omit_levels: 2` saves roughly 185 GB of disk and zero
 hours.
 
-### Tile sizes are running larger than the plan estimated
+### The documented 15 GB looks too low — confirm and correct at the end
 
-Early sample of 286 tiles: **median 1188 KB, mean 1093 KB**, against the plan's
-581 KB mean. Those are all level-20 — the deepest saved level and so the densest
-— and not a representative sample yet, but if it holds, ~27,000 tiles is nearer
-**27 GB than the documented 15 GB**. Re-measure when the run finishes and correct
-`docs/map-tiles.md` if it stands. Disk here is 190 GB free, so it is a
-documentation problem rather than an operational one.
+Measured at job 28141/347597 (8.1%): **1920 tiles, 2.7 GB** — about **1.44 MB
+per tile**, against the plan's 581 KB mean. Level distribution is a clean 4×
+quadtree progression, so nothing structural is wrong:
+
+| Level | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|
+| Tiles | 2 | 16 | 84 | 368 | 1450 |
+
+Two ways to project, both landing well above the doc:
+
+- Linear on jobs: `2.7 GB / 0.081` ≈ **33 GB**
+- Plan's ~27,000 tiles at the observed 1.44 MB ≈ **39 GB**
+
+Neither is reliable this early — the walk order is topological, not uniform — but
+both say the documented **~15 GB result / ~25 GB free** is understated, probably
+by 2–3×.
+
+**Action at the end of the run:** measure the real `tiles.sqlite` and tile count,
+then correct the sizing table and the free-space requirement in
+`docs/map-tiles.md`. Not urgent operationally — 185 GB free here — but an
+operator trusting "25 GB free" on a smaller box would run out mid-render.
 
 ---
 
