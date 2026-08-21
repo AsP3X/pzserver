@@ -647,6 +647,64 @@ between restore and pack, and the `--rm` container took its logs with it.
 **Next step: re-run with output captured** and find where it stops. Do not
 assume the feature works until a tile actually changes in the pack.
 
+## PAUSED 2026-08-22 mid-pack — read this first
+
+The map is **down**: `web-api` is stopped on purpose, and the new pack is still
+being written. Nothing is broken; this is a deliberate pause point.
+
+### State right now
+
+| | |
+|---|---|
+| Render | **complete and verified clean** — 21,726 tiles, cache peaked 5760 MB of 16384, nothing evicted |
+| Pack | **in progress**, ~16.4 GB of ~25 GB, ~7,000 loose tiles still to store |
+| `tiles.sqlite.old` | the previous pack (24.4 GB) — rollback, has the holes |
+| `web-api` | **stopped**, and must stay stopped until the pack finishes |
+| Working tree | clean, everything committed on `map-tiles-local` |
+
+**`web-api` must stay down until the pack is done.** It opens 8 file handles on
+`tiles.sqlite`, and on Windows those reserve the filename — the pack then fails
+with `unable to open database file` after hours of work. This bit twice.
+
+### The pack is safe to interrupt
+
+`pack.py` commits in batches of 500 and only unlinks a tile after its row is
+committed, so a kill loses nothing. Re-running resumes: stored tiles are
+skipped via `ON CONFLICT DO NOTHING`, and the loose tree still holds whatever
+has not been packed.
+
+### To resume
+
+If the pack container is gone but loose tiles remain, re-run it:
+
+```bash
+docker run --rm --shm-size=24g   -v "//c/Users/asp3x/Documents/development/pzserver/data/map-tiles:/out"   --entrypoint python pzserver-map-tiles:local /tools/pack.py   /out/html/map_data/base/layer0_files /out/tiles.sqlite   game_version=42.20.0 tile_size=2048 width=2318656 height=1019040   generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+```
+
+Then, in order:
+
+```bash
+# 1. loose tiles must be 0
+find data/map-tiles/html -name '*.jpg' | wc -l
+
+# 2. pyramid must be complete
+python web/tools/map-tiles/audit.py data/map-tiles/tiles.sqlite
+
+# 3. bring the map back
+docker compose -f docker-compose.yml -f docker-compose.amd64.yml -f docker-compose.web.yml up -d --no-build web-api
+curl -s http://127.0.0.1:8100/api/v1/map-tiles/meta      # expect generated:true, 0..20
+
+# 4. only after the map looks right in a browser
+rm data/map-tiles/tiles.sqlite.old
+```
+
+VACUUM runs at the end of the pack and takes over an hour on ~25 GB, writing a
+`tiles.sqlite-journal` that grows to roughly the database size. That is normal.
+It reclaims almost nothing here and is a good candidate for removal from the
+full-pack path — it is already skipped for regional re-renders.
+
+---
+
 ## Clean re-render, started 2026-08-21 ~18:35
 
 Chosen after the regional tool proved out but the pack turned out to be damaged
