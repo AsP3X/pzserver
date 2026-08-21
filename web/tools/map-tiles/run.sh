@@ -106,7 +106,17 @@ if [ -n "$REGION" ]; then
 else
     echo "==> render base (hours; ctrl-c is safe, re-run resumes)"
 fi
-python main.py -c "$CONF" render base
+# Keep the render's own output so the cache gate below can read it. Losing it
+# is how a run with 13,000 destroyed tiles got mistaken for a good one.
+RENDER_LOG=/tmp/render.log
+python main.py -c "$CONF" render base 2>&1 | tee "$RENDER_LOG"
+
+# Before anything is packed. A cache miss means a deep tile was evicted and
+# destroyed -- those levels are never written to disk -- leaving its parent
+# with a black quadrant. The render still exits 0 and still passes the
+# geometry gate, so this is the only thing that catches it.
+echo "==> verify nothing was evicted"
+python /tools/check_cache.py "$RENDER_LOG"
 
 echo "==> verify geometry"
 python /tools/verify.py "$TREE/map_info.json"

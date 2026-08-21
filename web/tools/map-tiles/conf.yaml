@@ -56,7 +56,23 @@ render_conf:
     #
     # Held well under the service's shm_size (8g in docker-compose.web.yml) so
     # the 16 workers' in-flight 16 MB buffers still have room above the cache.
-    cache_limit_mb: 4096
+    # Must be large enough that NOTHING is ever evicted. This is not a
+    # performance knob, it is a correctness one.
+    #
+    # omit_levels above means levels 21 and 22 are rendered but never written
+    # to disk -- they exist only in this cache, and level 20 is merged from
+    # them. Eviction calls save_tile, which returns 'skip' for exactly those
+    # levels (pzdzi.py:127), so an evicted deep tile is destroyed rather than
+    # spilled. Its level-20 parent then merges a missing quadrant as black.
+    #
+    # Measured: at 4096 MB the render reported `cache hit: 336376/349463 =
+    # 96.26%` and produced ~13,000 black holes across the map. At 0 (the
+    # default, meaning unbounded) nothing is evicted and nothing is lost, but
+    # /dev/shm runs out and the workers die silently instead.
+    #
+    # run.sh gates on the hit rate being 100%, which is the only way to know
+    # this number was big enough for a given map.
+    cache_limit_mb: 16384
 
     # jpg for the base layer is already the default; stated so a future default
     # change cannot silently break the client's .jpg URLs.
