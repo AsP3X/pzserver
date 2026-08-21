@@ -520,6 +520,43 @@ just `Vec<Mutex<Connection>>` + an `AtomicUsize`). A concurrency test now guards
 it — note that every other test in that file passes with a single connection,
 since serialisation is invisible to one-at-a-time assertions.
 
+### Second bug: zooming fast left half the map permanently blank
+
+Reported with a screenshot: zoom quickly and the top half of the viewport goes
+black and never fills in.
+
+**Cause:** `IsoTileCache.touch()` evicted by age **regardless of status**, so a
+burst of requests pushed still-loading entries out of the cache. Eviction does
+not cancel the request — the image still arrives, `settle()` finds
+`entries.get(key)` gone, and **throws the bytes away**. The next frame requests
+the same tile, which is evicted again. It never converges.
+
+**Why the top half specifically:** `visibleIsoTiles` emits rows top-down, so the
+top rows are requested first and are therefore first out of the LRU.
+
+**Why "zoom too fast" and not always:** a single viewport is only ~12–20 tiles,
+comfortably under the limit of 80. Zooming through several levels quickly
+stacks a fresh set per level plus `ancestor()` parents, and blows past 80.
+
+**Fix (`f1c6990`):** evict only *settled* entries. In-flight ones are
+self-limiting — the browser caps concurrent requests per origin — and they hold
+no decoded bitmap yet, so sparing them costs far less memory than keeping a
+ready tile. The limit was deliberately **not** raised: a 2048² tile is ~16 MB
+decoded, so 80 is already ~1.3 GB worst case and raising it trades one bug for
+an out-of-memory one.
+
+**Verified against the real module** through the Vite dev server (`web/ui` has no
+test runner, so this was the plan's own suggested approach):
+
+| State, with limit 4 | Entries |
+|---|---|
+| 12 requests all in flight | **12** — none dropped |
+| after all settle | 12 |
+| after the next touch | **4** — eviction resumes, still bounded |
+
+The second row is the one that matters: without it this fix would be an
+unbounded cache, i.e. a memory leak instead of a blank map.
+
 ### Still on the table, not done
 
 - **Move the pack to a Docker named volume.** Lives inside the VM's ext4 rather
