@@ -40,6 +40,24 @@ render_conf:
     # through IsoTileCache.ancestor().
     omit_levels: 2
 
+    # Bound the shared-memory tile cache. THIS IS NOT OPTIONAL.
+    #
+    # The cache holds rendered children in /dev/shm so a parent tile can be
+    # merged from them. pzmap2dzi defaults cache_limit_mb to 0, and
+    # scheduling.py gates eviction on `if self.cache_size:` -- 0 is falsy, so
+    # with the default the eviction loop NEVER RUNS and the cache grows without
+    # limit until shared memory is gone.
+    #
+    # What that looks like is not an error. Workers die on the allocation
+    # without raising, the parent waits on them forever, and the render sits at
+    # 0% CPU having written nothing. Twice observed: once against Docker's 64 MB
+    # /dev/shm default, then again at 3744 MB against a 4 GB ceiling. Raising
+    # shm_size alone only moves the wall.
+    #
+    # Held well under the service's shm_size (8g in docker-compose.web.yml) so
+    # the 16 workers' in-flight 16 MB buffers still have room above the cache.
+    cache_limit_mb: 4096
+
     # jpg for the base layer is already the default; stated so a future default
     # change cannot silently break the client's .jpg URLs.
     image_fmt_base_layer0: jpg

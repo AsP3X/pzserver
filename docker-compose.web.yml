@@ -235,8 +235,11 @@ services:
     # raising, the parent waits on them forever, and the render sits at 0% CPU
     # having written nothing. It does not crash, so nothing reports it.
     #
-    # tmpfs is allocated lazily, so this ceiling costs nothing until used.
-    shm_size: 4gb
+    # Sized to sit above conf.yaml's cache_limit_mb (4096) with room for the
+    # workers' in-flight buffers on top. The bound in conf.yaml is what actually
+    # prevents the stall; this is the headroom it needs to be a bound rather
+    # than a cliff. tmpfs is allocated lazily, so it costs nothing until used.
+    shm_size: 8gb
     volumes:
       # The game install, for the map cells and textures. Read-only: rendering
       # must never be able to damage the server's own files.
