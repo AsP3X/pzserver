@@ -40,34 +40,45 @@ class Geometry:
         half, quarter = self.sqr / 2, self.sqr / 4
         return (x - y) * half + self.x0, (x + y) * quarter + self.y0
 
-    def cell_rect_bounds(self, cx: int, cy: int, w: int, h: int) -> tuple[float, float, float, float]:
-        """DZI bounding box of a rectangle of cells.
-
-        Iso rotates the square, so the box comes from all four corners rather
-        than just two -- taking the diagonal alone loses half the width.
-        """
-        x_lo, y_lo = cx * self.cell_size, cy * self.cell_size
-        x_hi, y_hi = (cx + w) * self.cell_size, (cy + h) * self.cell_size
+    def square_rect_bounds(self, x: float, y: float, w: float, h: float) -> tuple[float, float, float, float]:
+        """DZI bounding box of a rectangle of world squares (pin coords)."""
+        x_hi, y_hi = x + w, y + h
         corners = [
-            self.world_to_dzi(x_lo, y_lo),
-            self.world_to_dzi(x_hi, y_lo),
-            self.world_to_dzi(x_lo, y_hi),
+            self.world_to_dzi(x, y),
+            self.world_to_dzi(x_hi, y),
+            self.world_to_dzi(x, y_hi),
             self.world_to_dzi(x_hi, y_hi),
         ]
         xs = [p[0] for p in corners]
         ys = [p[1] for p in corners]
         return min(xs), min(ys), max(xs), max(ys)
 
+    def cell_rect_bounds(self, cx: int, cy: int, w: int, h: int) -> tuple[float, float, float, float]:
+        """DZI bounding box of a rectangle of cells.
+
+        Iso rotates the square, so the box comes from all four corners rather
+        than just two -- taking the diagonal alone loses half the width.
+        """
+        return self.square_rect_bounds(
+            cx * self.cell_size, cy * self.cell_size, w * self.cell_size, h * self.cell_size
+        )
+
     def span(self, level: int) -> int:
         """Full-resolution DZI pixels one tile covers at this level."""
         return self.tile_size * 2 ** (self.max_level - level)
 
 
-def cell_rect_to_tiles(geo: Geometry, rects, levels) -> set:
-    """Every `(level, x, y)` tile touched by any of `rects`."""
+def cells_as_squares(geo: Geometry, rects) -> list:
+    """Cell `x,y,w,h` → square box `x*cell, y*cell, w*cell, h*cell`."""
+    s = geo.cell_size
+    return [(cx * s, cy * s, w * s, h * s) for cx, cy, w, h in rects]
+
+
+def square_rect_to_tiles(geo: Geometry, rects, levels) -> set:
+    """Every `(level, x, y)` tile touched by any world-square rect."""
     tiles = set()
-    for cx, cy, w, h in rects:
-        lo_x, lo_y, hi_x, hi_y = geo.cell_rect_bounds(cx, cy, w, h)
+    for x, y, w, h in rects:
+        lo_x, lo_y, hi_x, hi_y = geo.square_rect_bounds(x, y, w, h)
         for level in levels:
             span = geo.span(level)
             for tx in range(int(lo_x // span), int(hi_x // span) + 1):
@@ -75,6 +86,10 @@ def cell_rect_to_tiles(geo: Geometry, rects, levels) -> set:
                     if tx >= 0 and ty >= 0:
                         tiles.add((level, tx, ty))
     return tiles
+
+
+def cell_rect_to_tiles(geo: Geometry, rects, levels) -> set:
+    return square_rect_to_tiles(geo, cells_as_squares(geo, rects), levels)
 
 
 def parse_rects(text: str) -> list:

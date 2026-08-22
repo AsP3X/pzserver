@@ -112,3 +112,25 @@ def test_widening_covers_the_tiles_it_claims_to():
     # every target tile must be fully inside the widened cell area
     widened_tiles = cell_rect_to_tiles(GEO, widened, levels=[20])
     assert target_tiles <= widened_tiles
+
+
+def test_a_square_rect_maps_to_tiles_that_cover_it():
+    from cells import square_rect_to_tiles
+
+    tiles = square_rect_to_tiles(GEO, [(8704, 7680, 256, 256)], levels=[20])
+    assert tiles
+    span = GEO.span(20)
+    lo_x, lo_y, hi_x, hi_y = GEO.square_rect_bounds(8704, 7680, 256, 256)
+    for z, tx, ty in tiles:
+        assert z == 20
+        assert tx * span <= hi_x and (tx + 1) * span >= lo_x
+        assert ty * span <= hi_y and (ty + 1) * span >= lo_y
+
+
+def test_a_cell_rect_is_the_same_as_its_square_box():
+    from cells import cells_as_squares, cell_rect_to_tiles, square_rect_to_tiles
+
+    cells = [(34, 30, 1, 1)]
+    from_cells = cell_rect_to_tiles(GEO, cells, levels=[20])
+    from_squares = square_rect_to_tiles(GEO, cells_as_squares(GEO, cells), levels=[20])
+    assert from_cells == from_squares
