@@ -99,6 +99,8 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/automations/{id}/runs", get(automation_runs))
         .route("/admin/audit", get(audit_log))
         .route("/admin/audit/actions", get(audit_actions))
+        .route("/admin/map-tiles/rerender", post(rerender_tiles))
+        .route("/admin/map-tiles/jobs/{id}", get(tile_job))
 }
 
 /// Download and import sit outside the 15s request ceiling.
@@ -1174,4 +1176,29 @@ async fn audit_actions(
     _staff: AdminUser,
 ) -> ApiResult<Json<Vec<String>>> {
     Ok(Json(audit::actions(&state.db).await?))
+}
+
+#[derive(Deserialize)]
+struct RerenderBody {
+    #[serde(default)]
+    squares: Vec<Vec<i32>>,
+    #[serde(default)]
+    cells: Vec<Vec<i32>>,
+}
+
+async fn rerender_tiles(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<RerenderBody>,
+) -> ApiResult<(StatusCode, Json<crate::services::map_tile_jobs::Job>)> {
+    let job = crate::services::map_tile_jobs::enqueue(&state, body.squares, body.cells).await?;
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+async fn tile_job(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<crate::services::map_tile_jobs::Job>> {
+    Ok(Json(crate::services::map_tile_jobs::get(&state.db, id).await?))
 }
