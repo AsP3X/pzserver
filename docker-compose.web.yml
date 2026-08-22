@@ -132,9 +132,9 @@ services:
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
       # World archives. Same host folder the PHP stack writes to.
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
-      # The packed isometric pyramid. Read-only: the API only ever reads it,
-      # and `make map-tiles` is what writes it.
-      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles:ro
+      # Writable because SQLite WAL readers write a slot in the -shm file. The
+      # API still opens the database read-only; the directory must allow shm.
+      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles
     tmpfs:
       - /tmp
     environment:
@@ -158,6 +158,11 @@ services:
       PZ_SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
       LUA_BRIDGE_PATH: /lua-bridge
       BACKUP_PATH: /backups
+      MAP_TILES_IMAGE: ${PZ_MAP_TILES_IMAGE:-pzserver-map-tiles:local}
+      PZ_SERVER_HOST: ${PZ_SERVER_HOST:-./data/server}
+      PZ_TEXTUREPACKS_HOST: ${PZ_TEXTUREPACKS_HOST:-./data/server/media/texturepacks}
+      PZ_MAP_TILES_HOST: ${PZ_MAP_TILES_HOST:-./data/map-tiles}
+      PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
       PZ_STEAM_BRANCH: ${PZ_STEAM_BRANCH:-}
 
       PZ_CONNECT_HOST: ${PZ_CONNECT_HOST:-}
