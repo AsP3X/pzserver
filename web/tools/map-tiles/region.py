@@ -1,8 +1,8 @@
 """Plan a regional re-render.
 
-Prints two files for run.sh: the tiles to hold back (so pzmap2dzi redraws
-them) and the tiles to restore from the pack (so the merges above them have
-all four children to work with).
+Prints dirty tiles (every packed ancestor of the leaf set) and the tiles to
+restore from the pack (so merges above them have all four children). Callers
+pass world squares; cell callers convert with `cells_as_squares` first.
 
 Kept separate from run.sh because the arithmetic is the part worth testing;
 see test_cells.py.
@@ -12,24 +12,24 @@ from pathlib import Path
 
 from cells import (
     Geometry,
-    cell_rect_to_tiles,
-    expand_to_whole_tiles,
+    covering_cells_for_tiles,
+    dirty_pyramid,
     merge_inputs,
     parse_rects,
+    square_rect_to_tiles,
 )
 
 
-def plan(geo: Geometry, rects, min_level: int, max_level: int):
-    """What to redraw, what to restore, and which cells to actually render.
+def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
+    """What to redraw, what to restore, which cells to render.
 
-    The render range is widened to whole tiles: render_cell_range paints only
-    the cells it is handed, so a tile straddling the edge of the request comes
-    back part-drawn and part-black.
+    `square_rects` are world squares. Cell callers convert with
+    `cells_as_squares` first.
     """
-    levels = list(range(min_level, max_level + 1))
-    render_cells = expand_to_whole_tiles(geo, rects, level=max_level)
-    targets = cell_rect_to_tiles(geo, render_cells, levels)
+    leaves = square_rect_to_tiles(geo, square_rects, [max_level])
+    targets = dirty_pyramid(leaves, max_level, min_level)
     restore = merge_inputs(targets, deepest=max_level)
+    render_cells = covering_cells_for_tiles(geo, leaves, max_level)
     return targets, restore, render_cells
 
 
@@ -40,22 +40,22 @@ def write(path: Path, tiles) -> None:
 if __name__ == "__main__":
     if len(sys.argv) != 6:
         print(
-            "usage: region.py <map_info.json> <cells> <min_level> <max_level> <out dir>",
+            "usage: region.py <map_info.json> <rects> <min_level> <max_level> <out dir>",
             file=sys.stderr,
         )
         raise SystemExit(2)
 
-    info, cells, lo, hi, out = sys.argv[1:]
+    info, rects, lo, hi, out = sys.argv[1:]
     geo = Geometry.from_map_info(Path(info))
-    targets, restore, render_cells = plan(geo, parse_rects(cells), int(lo), int(hi))
+    targets, restore, render_cells = plan(geo, parse_rects(rects), int(lo), int(hi))
 
     out = Path(out)
-    write(out / "skip.txt", targets)
+    write(out / "dirty.txt", targets)
     write(out / "restore.txt", restore)
     spec = ";".join(f"{x},{y},{w},{h}" for x, y, w, h in render_cells)
     (out / "render_cells.txt").write_text(spec, encoding="utf-8")
 
     print(
-        f"region {cells}: widened to cells {spec} to cover whole tiles; "
-        f"{len(targets)} tiles to redraw, {len(restore)} to restore as merge inputs"
+        f"region {rects}: widened to cells {spec} to cover whole tiles; "
+        f"{len(targets)} dirty tiles, {len(restore)} to restore as merge inputs"
     )

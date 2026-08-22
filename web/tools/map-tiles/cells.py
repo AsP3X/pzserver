@@ -132,6 +132,42 @@ def dzi_to_world(geo: Geometry, px: float, py: float) -> tuple[float, float]:
     return (a + b) / 2, (b - a) / 2
 
 
+def dirty_pyramid(leaves: set, max_level: int, min_level: int) -> set:
+    """Leaves at max_level plus every parent down to min_level."""
+    dirty = set()
+    for z, x, y in leaves:
+        cz, cx, cy = z, x, y
+        while cz >= min_level:
+            dirty.add((cz, cx, cy))
+            cz -= 1
+            cx >>= 1
+            cy >>= 1
+    return dirty
+
+
+def covering_cells_for_tiles(geo: Geometry, tiles, level: int) -> list:
+    """Cell box that fully covers every tile's footprint at `level`."""
+    if not tiles:
+        return []
+
+    import math
+
+    span = geo.span(level)
+    cells_x, cells_y = [], []
+    for _, tx, ty in tiles:
+        for px in (tx * span, (tx + 1) * span):
+            for py in (ty * span, (ty + 1) * span):
+                wx, wy = dzi_to_world(geo, px, py)
+                cells_x.append(wx / geo.cell_size)
+                cells_y.append(wy / geo.cell_size)
+
+    lo_x = max(0, math.floor(min(cells_x)))
+    hi_x = math.ceil(max(cells_x))
+    lo_y = max(0, math.floor(min(cells_y)))
+    hi_y = math.ceil(max(cells_y))
+    return [(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y)]
+
+
 def expand_to_whole_tiles(geo: Geometry, rects, level: int) -> list:
     """Widen a cell request until it covers every tile it touches, entirely.
 
@@ -148,20 +184,4 @@ def expand_to_whole_tiles(geo: Geometry, rects, level: int) -> list:
     tiles = cell_rect_to_tiles(geo, rects, [level])
     if not tiles:
         return list(rects)
-
-    span = geo.span(level)
-    cells_x, cells_y = [], []
-    for _, tx, ty in tiles:
-        for px in (tx * span, (tx + 1) * span):
-            for py in (ty * span, (ty + 1) * span):
-                wx, wy = dzi_to_world(geo, px, py)
-                cells_x.append(wx / geo.cell_size)
-                cells_y.append(wy / geo.cell_size)
-
-    import math
-
-    lo_x = max(0, math.floor(min(cells_x)))
-    hi_x = math.ceil(max(cells_x))
-    lo_y = max(0, math.floor(min(cells_y)))
-    hi_y = math.ceil(max(cells_y))
-    return [(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y)]
+    return covering_cells_for_tiles(geo, tiles, level)

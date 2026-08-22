@@ -134,3 +134,25 @@ def test_a_cell_rect_is_the_same_as_its_square_box():
     from_cells = cell_rect_to_tiles(GEO, cells, levels=[20])
     from_squares = square_rect_to_tiles(GEO, cells_as_squares(GEO, cells), levels=[20])
     assert from_cells == from_squares
+
+
+def test_dirty_set_includes_every_packed_ancestor():
+    from cells import dirty_pyramid
+
+    leaves = {(20, 8, 12)}
+    dirty = dirty_pyramid(leaves, max_level=20, min_level=0)
+    assert (20, 8, 12) in dirty
+    assert (19, 4, 6) in dirty
+    assert (0, 0, 0) in dirty
+    assert len([t for t in dirty if t[0] == 20]) == 1
+
+
+def test_plan_from_squares_dirties_every_packed_level():
+    from region import plan
+    from cells import cells_as_squares
+
+    squares = cells_as_squares(GEO, [(34, 30, 1, 1)])
+    targets, restore, render_cells = plan(GEO, squares, min_level=0, max_level=20)
+    assert {z for z, _, _ in targets} == set(range(0, 21))
+    assert restore
+    assert render_cells
