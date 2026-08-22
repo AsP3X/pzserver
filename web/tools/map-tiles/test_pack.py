@@ -115,6 +115,7 @@ def test_replace_only_updates_named_tiles(tmp_path):
     con = sqlite3.connect(db)
     assert con.execute("SELECT data FROM tiles WHERE z=20 AND x=3 AND y=4").fetchone()[0] == b"NEW"
     assert con.execute("SELECT data FROM tiles WHERE z=20 AND x=5 AND y=6").fetchone()[0] == b"ccc"
+    assert con.execute("SELECT data FROM tiles WHERE z=8 AND x=0 AND y=0").fetchone()[0] == b"a"
     assert con.execute("SELECT value FROM meta WHERE key='generated_at'").fetchone()[0] == "new"
     assert n == 1
     assert (tiles / "20" / "5_6.jpg").exists()
@@ -126,3 +127,6 @@ def test_region_pack_enables_wal(tmp_path):
     sql = _statements(lambda: pack(tree / "base" / "layer0_files", db, {}, replace=True, wal=True))
     joined = " ".join(sql).upper()
     assert "JOURNAL_MODE" in joined or "WAL" in joined
+
+    con = sqlite3.connect(db)
+    assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"

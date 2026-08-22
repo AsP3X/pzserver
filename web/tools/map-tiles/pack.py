@@ -37,7 +37,12 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False,
     """
     con = sqlite3.connect(db_path)
     if wal:
-        con.execute("PRAGMA journal_mode=WAL")
+        mode = con.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            con.close()
+            raise RuntimeError(
+                f"failed to enable WAL journal_mode (got {mode!r})"
+            )
     con.executescript(SCHEMA)
 
     added = 0
@@ -79,7 +84,12 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False,
     con.commit()
 
     if wal:
-        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        try:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as exc:
+            # Tiles are already committed; do not roll them back for a
+            # checkpoint failure (e.g. a concurrent reader holding the WAL).
+            print(f"wal_checkpoint failed: {exc}", file=sys.stderr)
 
     # Only after a full pack. VACUUM rebuilds the entire database into a
     # temporary copy beside it, so on a 24 GB pack it costs tens of minutes and
