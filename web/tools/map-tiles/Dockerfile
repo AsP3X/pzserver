@@ -27,7 +27,7 @@ WORKDIR /opt/pzmap2dzi
 # to sit beside vanilla.txt, default_b42.txt and mod/ — putting it anywhere else
 # makes the render fail looking for map descriptions that are not there.
 COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
-COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py check_cache.py audit.py run.sh patch_scheduler.py /tools/
+COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py run.sh patch_scheduler.py /tools/
 # region.py and set_render_range.py import cells.py by name.
 ENV PYTHONPATH=/tools
 # omit_levels + cache eviction paints black holes; pin children until merged.

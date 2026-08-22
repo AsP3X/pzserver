@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-detail map-tiles-recompress map-tiles-import restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -134,8 +134,9 @@ rebuild-game:
 	$(COMPOSE) build --pull game-server
 	$(COMPOSE) up -d game-server
 
-# Renders the isometric basemap from the game files into data/map-tiles.
-# Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
+# Scratch (html tree, texture cache) stays in data/map-tiles. The packed
+# tiles.sqlite lives in the pz-map-tiles-sqlite volume so tile reads are not
+# taxed by a Windows Docker bind. Takes hours and about 15 GB. Safe to interrupt.
 map-tiles:
 	@# Docker cannot create a mountpoint inside a read-only bind mount, and /pz
 	@# is one. Without this the run dies on "read-only file system" before it
@@ -154,7 +155,29 @@ map-tiles-region:
 	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-region SQUARES=\"8704,7680,256,256\""; exit 1; }
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_DETAIL=21 map-tiles
+
+# Paint z21 for a region without redrawing z20…0. Minutes per cell, not hours.
+# Missing z21 tiles 404 and the client upscales from z20 until this lands.
+map-tiles-detail:
+	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-detail CELLS=\"34,30\""; exit 1; }
+	@mkdir -p data/server/media/texturepacks
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_DETAIL_ONLY=1 -e PZ_MAP_DETAIL=21 map-tiles
+
+# Re-encode packed JPEGs at quality 70 in place (WAL). Does not VACUUM.
+map-tiles-recompress:
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm --entrypoint python map-tiles /tools/recompress.py /pack/tiles.sqlite
+
+# Copy an existing host pack into the named volume. Run with web-api down, or
+# against an empty volume — overwriting a live open sqlite is the Windows
+# filename-reservation trap again.
+map-tiles-import:
+	@test -f data/map-tiles/tiles.sqlite || { echo "no data/map-tiles/tiles.sqlite to import"; exit 1; }
+	docker volume create pz-map-tiles-sqlite
+	docker run --rm -v pz-map-tiles-sqlite:/pack -v "$(CURDIR)/data/map-tiles:/src:ro" alpine:3.20 \
+		sh -c 'cp /src/tiles.sqlite /pack/tiles.sqlite && chown 10001:10001 /pack /pack/tiles.sqlite && chmod 775 /pack && chmod 664 /pack/tiles.sqlite && ls -lh /pack/tiles.sqlite'
 
 # SVC limits these to named services, e.g. make logs SVC="game-server web-api"
 restart:
@@ -464,6 +487,9 @@ help:
 	@echo "    rebuild-game   - Rebuild game-server only"
 	@echo "    map-tiles      - Render the isometric basemap locally (hours, ~15 GB)"
 	@echo "    map-tiles-region CELLS=\"x,y,w,h\" or SQUARES=\"x,y,w,h\" - Redraw that region (minutes)"
+	@echo "    map-tiles-detail CELLS=\"x,y,w,h\" - Paint z21 for those cells (minutes)"
+	@echo "    map-tiles-recompress - Re-encode packed JPEGs at quality 70"
+	@echo "    map-tiles-import - Copy data/map-tiles/tiles.sqlite into the named volume"
 	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
 	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""

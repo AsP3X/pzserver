@@ -74,7 +74,19 @@ make map-tiles
 That builds the render image and runs it once. Both wrap a build and a
 `--profile tools run --rm map-tiles`. The service lives in
 `docker-compose.web.yml` behind the `tools` profile, so a normal `make up` never
-starts it.
+starts it. The packed `tiles.sqlite` is written to the `pz-map-tiles-sqlite`
+volume, not `./data/map-tiles`. To move an existing host pack onto the volume:
+
+```bash
+make map-tiles-import
+```
+
+```powershell
+.\make.ps1 map-tiles-import
+```
+
+Do that with `web-api` down, or against an empty volume. Overwriting a pack
+the API already has open is the Windows filename-reservation trap.
 
 ### Regional / tile jobs
 
@@ -84,9 +96,14 @@ pyramid:
 ```
 make map-tiles-region SQUARES="8704,7680,256,256"
 make map-tiles-region CELLS="34,30,4,4"
+make map-tiles-detail CELLS="34,30"          # z21 only; leaves z20 in place
 POST /api/v1/admin/map-tiles/rerender  {"cells":[[34,30,4,4]]}
 GET  /api/v1/admin/map-tiles/jobs/{id}
 ```
+
+A full county of z21 is ~60–80 GB, so it is never part of `make map-tiles`.
+Regional jobs (and the admin rerender endpoint) write z21 for just those cells.
+Until a cell has z21, the client asks for it, gets 404, and upscales z20.
 
 #### Do
 
@@ -152,17 +169,32 @@ GET  /api/v1/admin/map-tiles/jobs/{id}
 
 | Fact | Value |
 |---|---|
-| Levels rendered | 8–20 |
-| Tiles | ~27,000 |
-| Result on disk | ~15 GB |
+| Levels rendered (full run) | 0–20 |
+| Tiles | ~22,000 |
+| Result on disk | ~24 GB at JPEG quality 85; ~14–18 GB after a quality-70 recompress |
 | Free space needed | **~25 GB**, for the loose tree ahead of the packer |
 | Runtime | Hours |
+| Level 21 (close-up) | Filled region by region, not in the full run. ~100 MB per cell. A full county of z21 is ~60–80 GB. |
 
-Depth is the whole cost. Levels 21 and 22 would take the pyramid to ~360,000
-tiles and ~200 GB, so `omit_levels: 2` in `web/tools/map-tiles/conf.yaml` drops
-them. `DEFAULT_ISO_SCALE` resolves to level 20, so the view you get when
-centring on a survivor is still native resolution; zooming past it upscales from
-level 20 through `IsoTileCache.ancestor()`.
+Depth is the whole cost. A full county of levels 21 and 22 would be ~80 GB and
+~200 GB. `omit_levels: 2` on `make map-tiles` drops them. Street-level
+(`DEFAULT_ISO_SCALE`) is still native z20. Zooming closer requests z21; missing
+tiles 404 and the client upscales from z20 until a regional job writes them:
+
+```
+make map-tiles-detail CELLS="34,30"
+make map-tiles-region CELLS="34,30,4,4"   # also writes z21 for those cells
+```
+
+JPEG quality 85 is why the current pack is 24 GB (20 GB of that is z20). New
+tiles save at 70. To shrink the existing pack without re-rendering:
+
+```
+make map-tiles-recompress
+```
+
+That rewrites blobs in place (WAL) and does **not** VACUUM — free pages stay
+in the file for later z21 rows. VACUUM would copy the whole 24 GB beside itself.
 
 Check there is room first:
 
@@ -186,7 +218,8 @@ mid-render costs nothing but the time already spent.
    `/out/html/map_data/base/layer0_files/{z}/{x}_{y}.jpg` (hours)
 3. **verify** — `verify.py` checks the geometry, and **stops here on a
    mismatch** (see below)
-4. **pack** — `pack.py` folds every tile into `/out/tiles.sqlite`, deleting each
+4. **pack** — `pack.py` folds every tile into `/pack/tiles.sqlite` (the named
+   volume the API reads), deleting each
    file as it stores it
 
 Step 4 deletes as it walks deliberately. Holding the whole loose tree and the
@@ -239,12 +272,24 @@ reads it and tells staff the tiles have not been generated yet.
 
 ## On-disk layout
 
-Host bind (default): `./data/map-tiles/` → container `/out` for the renderer,
-`/map-tiles` for the API (writable — WAL readers write a slot in the `-shm`
-file). The API still opens the database `SQLITE_OPEN_READ_ONLY`.
+Two mounts, on purpose:
+
+| Mount | Where | Holds |
+|---|---|---|
+| Host bind `./data/map-tiles/` → `/out` | Renderer only | Scratch: html tree, texture cache |
+| Named volume `pz-map-tiles-sqlite` → `/pack` (renderer) and `/map-tiles` (API) | Both | Live `tiles.sqlite` |
+
+The pack is a 24 GB random-read SQLite file. On Windows a bind of that file
+through Docker Desktop's 9p is ~600 ms TTFB per JPEG; the named volume sits on
+the VM's own ext4 and the same read is tens of milliseconds. Linux servers can
+bind-mount natively and would not need the volume, but sharing one layout keeps
+region jobs and the API on the same file everywhere.
+
+The API still opens the database `SQLITE_OPEN_READ_ONLY`. The directory is
+writable because WAL readers write a slot in the `-shm` file.
 
 ```
-data/map-tiles/
+volume pz-map-tiles-sqlite/
 └── tiles.sqlite              # the whole basemap, one file
 ```
 
@@ -307,14 +352,17 @@ The cache header is deliberately **not** `immutable`. Tile URLs carry
 `?v=generated_at`, so a re-render gets a new query string and the browser
 fetches the new bytes. A week of caching is then safe for that revision.
 
-`rusqlite::Connection` is `!Sync`, so the store holds one mutex-guarded read-only
-connection and reads it inside `spawn_blocking`.
+`rusqlite::Connection` is `!Sync`, so the store holds a pool of eight
+mutex-guarded read-only connections and reads them inside `spawn_blocking`.
+Each connection sets `mmap_size` (256 MiB) and `cache_size` (64 MiB) so a
+viewport of JPEG blobs stays in RAM on the named volume.
 
 ## Configuration
 
 | Env | Default | Meaning |
 |-----|---------|---------|
-| `PZ_MAP_TILES_HOST` | `./data/map-tiles` | Host bind mount |
+| `PZ_MAP_TILES_HOST` | `./data/map-tiles` | Host bind for render scratch (`/out`) |
+| `MAP_TILES_VOLUME` | `pz-map-tiles-sqlite` | Named volume holding `tiles.sqlite` |
 | `MAP_TILES_PATH` | `/map-tiles/tiles.sqlite` | Path inside the API container |
 | `PZ_SERVER_HOST` | `./data/server` | Game install the render reads (mounted read-only) |
 | `PZ_TEXTUREPACKS_HOST` | `./data/server/media/texturepacks` | Texture packs for the render (see above) |

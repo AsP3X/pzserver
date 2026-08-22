@@ -9,8 +9,18 @@ set -euo pipefail
 CONF=conf/conf.yaml
 OUT=/out
 TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segment
-PACK="$OUT/tiles.sqlite"
+# Live pack lives on the named volume, not the host bind. /out is still the
+# render scratch (html tree, texture cache). Regional jobs update this same
+# file the API is serving.
+PACK=/pack/tiles.sqlite
 PACK_ARGS=""
+MAP_INFO_BAK=
+restore_map_info() {
+    if [ -n "$MAP_INFO_BAK" ] && [ -f "$MAP_INFO_BAK" ]; then
+        cp "$MAP_INFO_BAK" "$TREE/map_info.json"
+    fi
+}
+trap restore_map_info EXIT
 
 cd /opt/pzmap2dzi
 
@@ -31,6 +41,12 @@ if [ -z "$(ls -A "$TEXTURES"/*.pack 2>/dev/null)" ]; then
     exit 1
 fi
 echo "==> textures: $(ls "$TEXTURES"/*.pack | wc -l) packs found"
+
+if [ ! -d /pack ]; then
+    echo "FAIL: /pack is not mounted. tiles.sqlite lives on the pz-map-tiles-sqlite volume," >&2
+    echo "shared with web-api, not on the host bind at /out." >&2
+    exit 1
+fi
 
 # An interrupted run leaves a .pending marker beside a tile it was part way
 # through drawing. The .jpg is a complete, valid file -- it is just only partly
@@ -98,7 +114,23 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
 
     echo "==> planning regional re-render: $SQUARES"
     read -r MIN_LEVEL MAX_LEVEL < <(python /tools/levels.py "$PACK")
-    python /tools/region.py "$TREE/map_info.json" "$SQUARES" "$MIN_LEVEL" "$MAX_LEVEL" /tmp
+    # z21 is omitted from a full county run (~80 GB). A region can write it
+    # for just these cells: either a world-change redraw (dirty 0–21) or a
+    # detail-only fill (paint z21, restore z20…0 so they skip).
+    DETAIL="${PZ_MAP_DETAIL:-}"
+    DETAIL_ONLY="${PZ_MAP_DETAIL_ONLY:-}"
+    if [ -n "$DETAIL_ONLY" ]; then
+        DETAIL="${DETAIL:-21}"
+        echo "==> detail-only fill: level $DETAIL"
+        python /tools/set_omit_levels.py "$CONF" 1
+        python /tools/region.py "$TREE/map_info.json" "$SQUARES" "$MIN_LEVEL" "$DETAIL" /tmp --detail-only
+    elif [ -n "$DETAIL" ]; then
+        echo "==> regional redraw including detail level $DETAIL"
+        python /tools/set_omit_levels.py "$CONF" 1
+        python /tools/region.py "$TREE/map_info.json" "$SQUARES" "$MIN_LEVEL" "$DETAIL" /tmp
+    else
+        python /tools/region.py "$TREE/map_info.json" "$SQUARES" "$MIN_LEVEL" "$MAX_LEVEL" /tmp
+    fi
 
     # Only the siblings the merges need. The target tiles are deliberately NOT
     # restored: pzmap2dzi treats a tile already on disk as done, so the hole is
@@ -123,6 +155,16 @@ python main.py -c "$CONF" deploy
 
 echo "==> unpack"
 python main.py -c "$CONF" unpack
+
+# omit_levels: 1 writes z21, but the tree's map_info is from the omit 2 pack.
+# pzmap2dzi stops rather than mix skip values. Rescale w/h for this run, then
+# put the original file back so the next omit-2 job still matches.
+MAP_INFO_BAK=
+if [ -n "${DETAIL:-}${DETAIL_ONLY:-}" ] && [ -f "$TREE/map_info.json" ]; then
+    MAP_INFO_BAK=/tmp/map_info.orig.json
+    cp "$TREE/map_info.json" "$MAP_INFO_BAK"
+    python /tools/align_map_info_skip.py "$TREE/map_info.json" 1
+fi
 
 if [ -n "$REGION" ]; then
     echo "==> render region"
@@ -157,3 +199,10 @@ python /tools/pack.py "$TREE/layer0_files" "$PACK" \
 
 echo "==> done"
 ls -lh "$PACK"
+restore_map_info
+MAP_INFO_BAK=
+# web-api reads as uid 10001; WAL readers write -shm in this directory. The
+# packer runs as root, so without this the next tile request can 500.
+chown 10001:10001 "$PACK" "$(dirname "$PACK")" 2>/dev/null || true
+chmod 664 "$PACK" 2>/dev/null || true
+chmod 775 "$(dirname "$PACK")" 2>/dev/null || true

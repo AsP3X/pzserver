@@ -39,8 +39,9 @@ pub struct Config {
     /// Directory the KnoxRelay mod writes its JSON exports into.
     pub lua_bridge_path: PathBuf,
     pub backup_path: PathBuf,
-    /// Packed isometric tile pyramid. `/map-tiles` in the container; the host
-    /// side is PZ_MAP_TILES_HOST.
+    /// Packed isometric tile pyramid. `/map-tiles` in the container, from the
+    /// `pz-map-tiles-sqlite` volume — not the host bind. Render scratch still
+    /// uses `map_tiles_host`.
     pub map_tiles_path: PathBuf,
     /// Image used to spawn a one-shot `pz-map-tiles` renderer.
     pub map_tiles_image: String,
@@ -48,6 +49,9 @@ pub struct Config {
     pub pz_server_host: String,
     pub pz_texturepacks_host: String,
     pub map_tiles_host: String,
+    /// Docker volume that holds `tiles.sqlite`. API and renderer share it so a
+    /// region job updates the same pack the site is serving.
+    pub map_tiles_volume: String,
     pub pz_game_version: String,
     pub steam_branch: Option<String>,
     /// Path to the live `server.ini`.
@@ -146,6 +150,7 @@ impl Config {
                 "./data/server/media/texturepacks",
             ),
             map_tiles_host: string("PZ_MAP_TILES_HOST", "./data/map-tiles"),
+            map_tiles_volume: string("MAP_TILES_VOLUME", "pz-map-tiles-sqlite"),
             pz_game_version: string("PZ_GAME_VERSION", "42.20.0"),
             steam_branch: optional("PZ_STEAM_BRANCH"),
             server_ini_path,

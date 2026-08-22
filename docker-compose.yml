@@ -133,12 +133,13 @@ networks:
     internal: true
 
 # -----------------------------------------------------------------------------
-# All persistent data is bind-mounted under ./data/ (no named Docker volumes).
+# Persistent data is bind-mounted under ./data/, with one exception:
+# pz-map-tiles-sqlite (the live tiles.sqlite pack). See docker-compose.web.yml.
 # -----------------------------------------------------------------------------
 #   ./data/zomboid           game saves, Server/*.ini, Lua bridge
 #   ./data/server            SteamCMD dedicated server install
 #   ./data/backups           panel backups
-#   ./data/map-tiles         map tiles (tiles.sqlite pack after generation; see docs/map-tiles.md)
+#   ./data/map-tiles         render scratch (html tree, texture cache); the pack is the volume
 #   ./data/postgres          PostgreSQL data
 #   ./data/redis             Redis AOF/data
 #   ./data/caddy-data        Caddy certificates / storage

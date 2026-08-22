@@ -53,6 +53,20 @@ def test_leaves_dzi_cell_range_alone(tmp_path):
     assert "dzi_cell_range: auto" in conf.read_text(encoding="utf-8")
 
 
+def test_set_omit_levels_rewrites_the_number(tmp_path):
+    conf = tmp_path / "conf.yaml"
+    conf.write_text("render_conf:\n    omit_levels: 2\n    tile_size: 2048\n", encoding="utf-8")
+
+    r = subprocess.run(
+        [sys.executable, str(HERE / "set_omit_levels.py"), str(conf), "1"],
+        capture_output=True, text=True, cwd=HERE,
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert "omit_levels: 1" in conf.read_text(encoding="utf-8")
+    assert "tile_size: 2048" in conf.read_text(encoding="utf-8")
+
+
 def test_multiple_rects(tmp_path):
     conf = tmp_path / "conf.yaml"
     conf.write_text("render_conf:\n    tile_size: 2048\n", encoding="utf-8")

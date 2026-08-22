@@ -157,3 +157,31 @@ def test_plan_from_squares_dirties_every_packed_level():
     assert restore
     assert restore.isdisjoint(targets)
     assert render_cells
+
+
+def test_plan_detail_dirties_only_the_new_level():
+    from region import plan_detail
+    from cells import cells_as_squares
+
+    squares = cells_as_squares(GEO, [(34, 30, 1, 1)])
+    targets, restore, render_cells = plan_detail(GEO, squares, detail_level=21)
+    assert {z for z, _, _ in targets} == {21}
+    assert targets
+    assert restore
+    assert 20 in {z for z, _, _ in restore}
+    assert 0 in {z for z, _, _ in restore}
+    assert restore.isdisjoint(targets)
+    assert render_cells
+
+
+def test_distant_towns_are_separate_cell_boxes_not_the_forest_between():
+    from region import plan_detail
+    from cells import cells_as_squares
+
+    squares = cells_as_squares(GEO, [(40, 36, 1, 1), (29, 43, 1, 1)])
+    targets, restore, render_cells = plan_detail(GEO, squares, detail_level=21)
+    assert len(render_cells) == 2
+    # A single AABB around both towns would be tens of cells on a side.
+    for _x, _y, w, h in render_cells:
+        assert w * h < 40, render_cells
+    assert {z for z, _, _ in targets} == {21}

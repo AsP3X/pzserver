@@ -34,10 +34,10 @@ render_conf:
     # for. Range is half-open: [0, 1] is layer 0 alone.
     layer_range: [0, 1]
 
-    # Discard the two deepest levels: 22 and 21. Leaves 8-20, about 27k tiles
-    # and 15 GB instead of 360k and 200 GB. DEFAULT_ISO_SCALE resolves to level
-    # 20, so the survivor-focus view is still native; deeper zoom upscales
-    # through IsoTileCache.ancestor().
+    # Discard the two deepest levels on a FULL county run: 22 and 21. Leaves
+    # 0-20, about 22k tiles and 24 GB instead of ~80 GB (z21) or ~200 GB (z22).
+    # Street-level (DEFAULT_ISO_SCALE) is still native z20. Regional jobs patch
+    # this to 1 so they can write z21 for just those cells — see run.sh.
     omit_levels: 2
 
     # Bound the shared-memory tile cache. THIS IS NOT OPTIONAL.
@@ -82,7 +82,11 @@ render_conf:
     # change cannot silently break the client's .jpg URLs.
     image_fmt_base_layer0: jpg
     image_save_options:
-        jpg: {quality: 85}
+        # 85 was the original pack: 24 GB, most of it z20. 70 is the usual
+        # map-tile quality and is what new regional / detail tiles (including
+        # z21) are saved at. Recompress the existing pack with
+        # `make map-tiles-recompress` if you want the same savings in-place.
+        jpg: {quality: 70, optimize: true}
 
 # Leave tile_align_levels and dzi_cell_range at their defaults on the first
 # run. They set the image bounds, and the defaults are what pzmap.org used.

@@ -11,6 +11,7 @@ import {
   fitIsoScale,
   isoMapping,
   isoTiles,
+  levelForScale,
   loadTileMeta,
   worldToDzi,
 } from '@/lib/iso-tiles'
@@ -23,6 +24,7 @@ import {
   hitTestPins,
   loadWorldmap,
   vectorMapping,
+  zoomOf,
   type MapPin,
   type MapRect,
   type MapZone,
@@ -168,6 +170,7 @@ export function WorldmapView({
   const [tileMeta, setTileMeta] = useState<TileMeta | null>(null)
   const [paintHover, setPaintHover] = useState<{ x: number; y: number } | null>(null)
   const [draftRect, setDraftRect] = useState<MapRect | null>(null)
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const rectStart = useRef<{ x: number; y: number } | null>(null)
 
   const viewRef = useRef<View | null>(null)
@@ -504,8 +507,10 @@ export function WorldmapView({
     const mapping = point ? mappingNow(point) : null
     if (!point || !mapping) {
       setHover(null)
+      setCursor(null)
       return
     }
+    setCursor(mapping.toWorld(point.x, point.y))
     const hit = hitTestPins(mapping, pins, point.x, point.y)
     setHover(
       hit?.label
@@ -558,6 +563,11 @@ export function WorldmapView({
   }
 
   const waitingForVector = mode === 'vector' && map === null
+  const zoomLevel = view
+    ? mode === 'iso'
+      ? levelForScale(view.scale)
+      : Math.round(zoomOf(view.scale))
+    : null
 
   return (
     <div className={cn('relative overflow-hidden border border-fence bg-ash', className)}>
@@ -589,6 +599,7 @@ export function WorldmapView({
             const mapping = point ? mappingNow(point) : null
             if (point && mapping) {
               const world = mapping.toWorld(point.x, point.y)
+              setCursor(world)
               setPaintHover(world)
               onBrush?.(world, paintMode === 'erase')
             }
@@ -598,6 +609,7 @@ export function WorldmapView({
             const mapping = point ? mappingNow(point) : null
             if (point && mapping) {
               const world = mapping.toWorld(point.x, point.y)
+              setCursor(world)
               rectStart.current = world
               setDraftRect({ x1: world.x, y1: world.y, x2: world.x, y2: world.y })
             }
@@ -628,6 +640,7 @@ export function WorldmapView({
             const mapping = point ? mappingNow(point) : null
             if (point && mapping) {
               const world = mapping.toWorld(point.x, point.y)
+              setCursor(world)
               setPaintHover(world)
               onBrush?.(world, paintMode === 'erase')
             }
@@ -641,6 +654,7 @@ export function WorldmapView({
             const mapping = point ? mappingNow(point) : null
             if (point && mapping) {
               const world = mapping.toWorld(point.x, point.y)
+              setCursor(world)
               setDraftRect({
                 x1: rectStart.current.x,
                 y1: rectStart.current.y,
@@ -716,11 +730,13 @@ export function WorldmapView({
           setDraftRect(null)
           setHover(null)
           setPaintHover(null)
+          setCursor(null)
         }}
         onPointerLeave={() => {
           if (!gesture.current) {
             setHover(null)
             setPaintHover(null)
+            setCursor(null)
           }
         }}
       >
@@ -762,7 +778,7 @@ export function WorldmapView({
 
       {ISO_BASEMAP ? (
         <div
-          className="absolute bottom-3 left-3 flex border border-fence-bright bg-void/85"
+          className="absolute bottom-3 left-3 z-20 flex border border-fence-bright bg-void/85"
           role="group"
           aria-label={t('map.modes')}
         >
@@ -780,13 +796,31 @@ export function WorldmapView({
         </div>
       ) : null}
 
-      <div className="absolute top-3 right-3 flex flex-col gap-1">
+      <div className="absolute top-3 right-3 z-20 flex flex-col items-end gap-1">
         <Control label={t('map.zoom_in')} onClick={() => zoomAt(1.5)} icon={Plus} />
+        {zoomLevel !== null ? (
+          <div
+            aria-live="polite"
+            aria-label={t('map.zoom_level', { level: zoomLevel })}
+            title={t('map.zoom_level', { level: zoomLevel })}
+            className="grid h-8 w-8 place-items-center border border-fence-bright bg-void/85 font-mono text-[0.6875rem] text-bone"
+          >
+            {zoomLevel}
+          </div>
+        ) : null}
         <Control label={t('map.zoom_out')} onClick={() => zoomAt(1 / 1.5)} icon={Minus} />
         <Control label={t('map.recentre')} onClick={reset} icon={Maximize2} />
+        {cursor ? (
+          <div
+            aria-label={t('map.coordinates')}
+            className="border border-fence-bright bg-void/85 px-2 py-1 font-mono text-[0.625rem] text-bone tabular-nums"
+          >
+            {Math.round(cursor.x)}, {Math.round(cursor.y)}
+          </div>
+        ) : null}
       </div>
 
-      <div className="pointer-events-none absolute right-3 bottom-3 max-w-[min(24rem,70%)] text-right font-mono text-[0.625rem] leading-snug">
+      <div className="pointer-events-none absolute right-3 bottom-3 z-20 max-w-[min(24rem,70%)] text-right font-mono text-[0.625rem] leading-snug">
         {isoFellBack ? (
           <p className="text-hazard">
             {tileMeta && !tileMeta.generated ? t('map.iso_not_generated') : t('map.iso_unavailable')}

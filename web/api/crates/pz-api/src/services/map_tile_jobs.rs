@@ -189,16 +189,16 @@ async fn spawn_and_wait(
             format!("PZ_MAP_SQUARES={}", format_rects(squares)),
             format!("PZ_MAP_CELLS={}", format_rects(cells)),
             format!("PZ_GAME_VERSION={}", state.config.pz_game_version),
+            // Regional jobs write z21 for these cells. A full county of z21
+            // is tens of GB; this is how it accumulates, one job at a time.
+            "PZ_MAP_DETAIL=21".to_owned(),
         ],
-        "HostConfig": {
-            "Binds": [
-                format!("{}:/pz:ro", state.config.pz_server_host),
-                format!("{}:/pz/media/texturepacks:ro", state.config.pz_texturepacks_host),
-                format!("{}:/out", state.config.map_tiles_host),
-            ],
-            "ShmSize": SHM_SIZE,
-            "AutoRemove": false,
-        },
+        "HostConfig": renderer_host_config(
+            &state.config.pz_server_host,
+            &state.config.pz_texturepacks_host,
+            &state.config.map_tiles_host,
+            &state.config.map_tiles_volume,
+        ),
     });
 
     let create = client
@@ -308,6 +308,31 @@ async fn fail(db: &PgPool, id: Uuid, error: String) {
     }
 }
 
+/// Scratch (`/out`) stays on the host bind; the live pack is the named volume
+/// at `/pack`, the same volume web-api reads. They have to be the same file
+/// or a region job updates a pack nobody is serving.
+fn renderer_host_config(
+    pz_server_host: &str,
+    pz_texturepacks_host: &str,
+    map_tiles_host: &str,
+    map_tiles_volume: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "Binds": [
+            format!("{pz_server_host}:/pz:ro"),
+            format!("{pz_texturepacks_host}:/pz/media/texturepacks:ro"),
+            format!("{map_tiles_host}:/out"),
+        ],
+        "Mounts": [{
+            "Type": "volume",
+            "Source": map_tiles_volume,
+            "Target": "/pack",
+        }],
+        "ShmSize": SHM_SIZE,
+        "AutoRemove": false,
+    })
+}
+
 fn http_client(timeout: Duration) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(timeout)
@@ -363,5 +388,19 @@ mod tests {
     #[test]
     fn job_service_entry_points_exist() {
         let _ = (enqueue, get);
+    }
+
+    #[test]
+    fn renderer_mounts_the_pack_volume_and_keeps_scratch_on_the_bind() {
+        let host = renderer_host_config(
+            "/data/server",
+            "/data/tex",
+            "/data/map-tiles",
+            "pz-map-tiles-sqlite",
+        );
+        assert_eq!(host["Binds"][2], "/data/map-tiles:/out");
+        assert_eq!(host["Mounts"][0]["Type"], "volume");
+        assert_eq!(host["Mounts"][0]["Source"], "pz-map-tiles-sqlite");
+        assert_eq!(host["Mounts"][0]["Target"], "/pack");
     }
 }

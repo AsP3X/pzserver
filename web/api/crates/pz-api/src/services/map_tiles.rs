@@ -43,10 +43,9 @@ impl TileMeta {
 /// tile read is one indexed blob fetch. Measurement disagreed. A tile read is
 /// not cheap when the pack sits on a Docker Desktop bind mount: ~180 ms there
 /// against ~6 ms on the host filesystem, because every read is random I/O into
-/// a 24 GB file. One connection serialises those, so a viewport of nine tiles
-/// cost ~2 s wall and concurrency bought nothing (measured 1.0x). Reading the
-/// same nine through independent connections is 3.4x faster, because the
-/// latency overlaps.
+/// a 24 GB file. The pack now lives on a named volume (ext4 inside the VM)
+/// and mmap covers a viewport, but a burst of nine tiles still overlaps
+/// better across independent connections than it does on one.
 ///
 /// Reads only, so there is nothing to coordinate between them beyond SQLite's
 /// own read locks.
@@ -89,6 +88,7 @@ impl MapTiles {
             };
         };
 
+        tune_reader(&con);
         let meta = read_meta(&con).unwrap_or_else(|_| TileMeta::absent());
 
         // The probe connection becomes the first pool member; the rest open
@@ -101,7 +101,10 @@ impl MapTiles {
                 path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             ) {
-                Ok(extra) => connections.push(Mutex::new(extra)),
+                Ok(extra) => {
+                    tune_reader(&extra);
+                    connections.push(Mutex::new(extra));
+                }
                 Err(error) => {
                     tracing::warn!(%error, "map tile pool opened short; serving with fewer readers");
                     break;
@@ -164,6 +167,23 @@ impl MapTiles {
         .map_err(|error| ApiError::Internal(format!("map tile read failed: {error}")))?;
 
         Ok(blob)
+    }
+}
+
+/// mmap + page cache for the 24 GB pack. On a Windows Docker bind those
+/// pragmas were a no-op — every read still crossed 9p. On the named volume
+/// (ext4 inside the VM) they let the kernel keep a viewport of JPEG blobs
+/// in RAM instead of hitting disk per tile.
+fn tune_reader(con: &Connection) {
+    if let Err(error) = con.pragma_update(None, "mmap_size", 256 * 1024 * 1024) {
+        tracing::warn!(%error, "map tile mmap_size pragma failed");
+    }
+    // Negative cache_size is kibibytes. 64 MiB holds a street-level viewport.
+    if let Err(error) = con.pragma_update(None, "cache_size", -65_536) {
+        tracing::warn!(%error, "map tile cache_size pragma failed");
+    }
+    if let Err(error) = con.busy_timeout(std::time::Duration::from_secs(5)) {
+        tracing::warn!(%error, "map tile busy_timeout failed");
     }
 }
 

@@ -78,7 +78,7 @@ services:
       - sh
       - -c
       - |
-        for dir in /backups /lua-bridge; do
+        for dir in /backups /lua-bridge /map-tiles; do
           chmod 0777 "$$dir" 2>/dev/null || true
           mode=$$(stat -c '%a' "$$dir" 2>/dev/null || echo '?')
           case "$$mode" in
@@ -95,6 +95,8 @@ services:
     volumes:
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
       - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
+      # Named volume: WAL readers (uid 10001) write -shm next to tiles.sqlite.
+      - pz-map-tiles-sqlite:/map-tiles
     # Nothing to talk to; staying off both networks keeps it out of the way.
     network_mode: none
 
@@ -132,9 +134,12 @@ services:
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
       # World archives. Same host folder the PHP stack writes to.
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
-      # Writable because SQLite WAL readers write a slot in the -shm file. The
-      # API still opens the database read-only; the directory must allow shm.
-      - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/map-tiles
+      # Named volume on the VM's ext4, not a Windows bind. Random reads into a
+      # 24 GB SQLite file through Docker Desktop's 9p bind were ~600 ms TTFB;
+      # the same bytes here are tens of milliseconds. Writable because WAL
+      # readers write a slot in the -shm file. The API still opens the
+      # database read-only; the directory must allow shm.
+      - pz-map-tiles-sqlite:/map-tiles
     tmpfs:
       - /tmp
     environment:
@@ -162,6 +167,7 @@ services:
       PZ_SERVER_HOST: ${PZ_SERVER_HOST:-./data/server}
       PZ_TEXTUREPACKS_HOST: ${PZ_TEXTUREPACKS_HOST:-./data/server/media/texturepacks}
       PZ_MAP_TILES_HOST: ${PZ_MAP_TILES_HOST:-./data/map-tiles}
+      MAP_TILES_VOLUME: pz-map-tiles-sqlite
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
       PZ_STEAM_BRANCH: ${PZ_STEAM_BRANCH:-}
 
@@ -264,6 +270,17 @@ services:
       # The make targets mkdir the default first, because Docker cannot create
       # a mountpoint inside a read-only bind mount.
       - ${PZ_TEXTUREPACKS_HOST:-./data/server/media/texturepacks}:/pz/media/texturepacks:ro
+      # Render scratch (html tree, texture cache). Stays on the host bind.
       - ${PZ_MAP_TILES_HOST:-./data/map-tiles}:/out
+      # Live pack. Same volume web-api reads, so a region job updates the
+      # file the site is serving.
+      - pz-map-tiles-sqlite:/pack
     environment:
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
+
+# The one named volume in this stack. tiles.sqlite is a 24 GB random-read
+# database; on Windows a bind of that file through Docker Desktop's 9p is
+# ~30× slower than the VM's own ext4. Render scratch stays under ./data.
+volumes:
+  pz-map-tiles-sqlite:
+    name: pz-map-tiles-sqlite

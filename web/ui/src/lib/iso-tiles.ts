@@ -29,6 +29,14 @@ export const ISO_DZI = {
   minLevel: 8,
 } as const
 
+/**
+ * Deepest level we actually ask for. 22 is native 1:1 but a full county of
+ * it is ~200 GB. 21 is one step past the complete pack (0–20): sharp enough
+ * at max zoom, and it can be filled region by region. Missing z21 tiles 404
+ * and the painter upscales from z20.
+ */
+export const ISO_DETAIL_MAX = 21
+
 /** CSS pixels per DZI pixel when focusing a survivor — about a street. */
 export const DEFAULT_ISO_SCALE = 0.35
 
@@ -90,11 +98,10 @@ export function fitIsoScale(width: number, height: number): number {
 }
 
 /**
- * Deepest level the local pack actually holds, from /api/v1/map-tiles/meta.
+ * Deepest *complete* level the local pack holds, from /api/v1/map-tiles/meta.
  *
- * The render stops short of the pyramid's true bottom to save disk, so asking
- * for a level past this can only ever 404. Defaults to the DZI maximum so the
- * module behaves correctly before meta has been read.
+ * The client also asks for `ISO_DETAIL_MAX` (21). Those tiles 404 until a
+ * regional job writes them; `IsoTileCache` then upscales from this level.
  */
 let renderedMaxLevel: number = ISO_DZI.maxLevel
 
@@ -144,7 +151,8 @@ export function loadTileMeta(): Promise<TileMeta> {
 /** DZI level whose native resolution is nearest the current screen scale. */
 export function levelForScale(isoScale: number): number {
   const raw = ISO_DZI.maxLevel + Math.log2(isoScale)
-  return Math.min(renderedMaxLevel, Math.max(ISO_DZI.minLevel, Math.round(raw)))
+  const cap = Math.min(ISO_DETAIL_MAX, Math.max(renderedMaxLevel, ISO_DETAIL_MAX))
+  return Math.min(cap, Math.max(ISO_DZI.minLevel, Math.round(raw)))
 }
 
 export function tileUrl(z: number, x: number, y: number): string {
@@ -203,19 +211,23 @@ export interface IsoTile {
 }
 
 /**
- * Tiles that cover the current canvas, plus a one-tile pad so a small pan
- * does not flash empty while the next ring loads.
+ * Tiles that cover the current canvas.
+ *
+ * `padTiles` (default 1) adds a one-tile ring so a small pan does not flash
+ * empty while the next ring loads. Pass 0 for the pixels actually on screen,
+ * which the painter requests first so the pad does not steal HTTP slots.
  */
 export function visibleTiles(
   center: IsoPoint,
   isoScale: number,
   width: number,
   height: number,
+  padTiles = 1,
 ): IsoTile[] {
   const level = levelForScale(isoScale)
   const span = tileSpan(level)
   const { cols, rows } = tilesOnLevel(level)
-  const pad = span
+  const pad = span * padTiles
 
   const left = center.x - width / 2 / isoScale - pad
   const right = center.x + width / 2 / isoScale + pad
@@ -381,7 +393,7 @@ export class IsoTileCache {
     return entry?.status === 'ready' ? entry.image : null
   }
 
-  request(tile: IsoTile) {
+  request(tile: IsoTile, priority: 'high' | 'low' | 'auto' = 'auto') {
     if (packRevision === undefined) {
       return
     }
@@ -395,6 +407,7 @@ export class IsoTileCache {
     const image = new Image()
     image.decoding = 'async'
     image.referrerPolicy = 'no-referrer'
+    image.fetchPriority = priority
     this.entries.set(key, { status: 'loading', image })
     this.touch(key)
     this.requested += 1
@@ -424,6 +437,16 @@ export class IsoTileCache {
       // have dropped it and a later request may already own the key.
       if (this.entries.get(key)?.status === 'loading') {
         this.entries.set(key, ok ? { status: 'ready', image } : { status: 'missing' })
+      }
+
+      // Sparse z21: a 404 is "not painted yet", not "the basemap is down".
+      // Walk to the parent so the painter has something sharper than the
+      // z-6 preview until that cell's detail job lands.
+      if (!ok && tile.z > ISO_DZI.minLevel) {
+        this.request(
+          { z: tile.z - 1, x: tile.x >> 1, y: tile.y >> 1 },
+          'high',
+        )
       }
 
       // Notify on failure as well as success, or nothing ever re-reads
@@ -489,6 +512,27 @@ export function setPackRevision(rev: string): void {
   isoTiles.invalidate()
 }
 
+/** Unique covering tiles at `level` for a set of finer tiles. */
+function coveringAt(tiles: IsoTile[], level: number): IsoTile[] {
+  const seen = new Set<string>()
+  const out: IsoTile[] = []
+  for (const tile of tiles) {
+    const drop = Math.max(0, tile.z - level)
+    const parent: IsoTile = {
+      z: tile.z - drop,
+      x: tile.x >> drop,
+      y: tile.y >> drop,
+    }
+    const key = `${parent.z}/${parent.x}_${parent.y}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    out.push(parent)
+  }
+  return out
+}
+
 /** Paint the visible window. Requests missing tiles as a side effect. */
 export function drawIsoTiles(
   ctx: CanvasRenderingContext2D,
@@ -499,10 +543,35 @@ export function drawIsoTiles(
   ctx.fillStyle = '#1c1a14'
   ctx.fillRect(0, 0, width, height)
 
-  const tiles = visibleTiles(mapping.center, mapping.isoScale, width, height)
+  const viewport = visibleTiles(mapping.center, mapping.isoScale, width, height, 0)
+  const padded = visibleTiles(mapping.center, mapping.isoScale, width, height, 1)
 
-  for (const tile of tiles) {
+  // Coarser ancestors first: one ~300 KB z14 JPEG covers a street-level
+  // viewport and paints immediately, then the 1 MB natives replace it.
+  // HTTP/1.1 only opens ~6 connections per origin, so pad tiles go last
+  // and with low priority so they cannot starve the pixels on screen.
+  const previewLevel = viewport[0]
+    ? Math.max(ISO_DZI.minLevel, viewport[0].z - 6)
+    : ISO_DZI.minLevel
+  for (const tile of coveringAt(viewport, previewLevel)) {
+    isoTiles.request(tile, 'high')
+  }
+  // When asking for sparse z21, pull the complete z20 covering first so a
+  // missing detail tile still paints native street resolution, not the
+  // county-wide preview.
+  if (viewport[0] && viewport[0].z > renderedMaxLevel) {
+    for (const tile of coveringAt(viewport, renderedMaxLevel)) {
+      isoTiles.request(tile, 'high')
+    }
+  }
+  for (const tile of viewport) {
     isoTiles.request(tile)
+  }
+  for (const tile of padded) {
+    isoTiles.request(tile, 'low')
+  }
+
+  for (const tile of padded) {
     const bounds = tileBounds(tile)
     if (bounds.w <= 0 || bounds.h <= 0) {
       continue
@@ -532,14 +601,5 @@ export function drawIsoTiles(
         destH,
       )
     }
-  }
-
-  // Coarser parent of the whole window, so the first frame is not black.
-  if (tiles[0] && tiles[0].z > ISO_DZI.minLevel) {
-    isoTiles.request({
-      z: tiles[0].z - 1,
-      x: Math.floor(tiles[0].x / 2),
-      y: Math.floor(tiles[0].y / 2),
-    })
   }
 }
