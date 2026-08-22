@@ -19,6 +19,10 @@ pub enum ApiError {
     #[error("you do not have access to this")]
     Forbidden,
 
+    /// The requested row does not exist.
+    #[error("not found")]
+    NotFound,
+
     /// Input failed a rule. The message is shown to the user, so it must read
     /// like a sentence and never leak internals.
     #[error("{0}")]
@@ -62,6 +66,7 @@ impl ApiError {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::NotFound => StatusCode::NOT_FOUND,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
@@ -74,6 +79,7 @@ impl ApiError {
         match self {
             Self::Unauthorized => "unauthorized",
             Self::Forbidden => "forbidden",
+            Self::NotFound => "not_found",
             Self::Validation(_) => "validation_failed",
             Self::Conflict { .. } => "conflict",
             Self::TooManyRequests => "too_many_requests",

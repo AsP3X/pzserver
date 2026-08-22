@@ -10,6 +10,7 @@ pub mod datadirs;
 pub mod economy;
 pub mod i18n;
 pub mod items;
+pub mod map_tile_jobs;
 pub mod map_tiles;
 pub mod news;
 pub mod obituary;

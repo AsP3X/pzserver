@@ -1503,6 +1503,7 @@ dependencies = [
  "getrandom 0.4.3",
  "pz-bridge",
  "pz-rcon",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
