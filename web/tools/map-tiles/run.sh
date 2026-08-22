@@ -2,8 +2,8 @@
 # Render, verify, pack. Re-running resumes: pzmap2dzi skips work it has already
 # done, and the packer skips tiles already stored.
 #
-# Set PZ_MAP_CELLS to redraw only part of the map instead of all of it -- see
-# "regional re-render" below.
+# Set PZ_MAP_SQUARES and/or PZ_MAP_CELLS to redraw only part of the map instead
+# of all of it -- see "regional re-render" below.
 set -euo pipefail
 
 CONF=conf/conf.yaml
@@ -50,32 +50,50 @@ fi
 # ---------------------------------------------------------------------------
 # Regional re-render
 #
-# Redraws only the cells named in PZ_MAP_CELLS and leaves the rest of the pack
-# alone. Use it when part of the world has changed -- a new build, a base
-# someone flattened -- instead of paying for the whole map again.
+# Redraws only the world squares (or cells converted to squares) named below
+# and leaves the rest of the pack alone. Use it when part of the world has
+# changed -- a new build, a base someone flattened -- instead of paying for
+# the whole map again.
 #
-#   PZ_MAP_CELLS="34,30,4,4"     x, y, width, height, in map cells
-#   PZ_MAP_CELLS="34,30"         a single cell
-#   PZ_MAP_CELLS="34,30;40,12"   several, semicolon-separated
+#   PZ_MAP_SQUARES="8704,7680,256,256"   x, y, width, height, in world squares
+#   PZ_MAP_CELLS="34,30,4,4"             x, y, width, height, in map cells
+#   PZ_MAP_CELLS="34,30"                 a single cell
+#   PZ_MAP_CELLS="34,30;40,12"           several, semicolon-separated
 # ---------------------------------------------------------------------------
-REGION="${PZ_MAP_CELLS:-}"
+SQUARES="${PZ_MAP_SQUARES:-}"
+CELLS="${PZ_MAP_CELLS:-}"
+REGION=
+if [ -n "$SQUARES" ] || [ -n "$CELLS" ]; then
+    REGION=1
+fi
 
 if [ -n "$REGION" ]; then
     if [ ! -f "$PACK" ]; then
-        echo "FAIL: PZ_MAP_CELLS asks for a regional re-render, but there is no" >&2
+        echo "FAIL: PZ_MAP_SQUARES/PZ_MAP_CELLS asks for a regional re-render, but there is no" >&2
         echo "pack at $PACK to update. Run a full render first." >&2
         exit 1
     fi
     if [ ! -f "$TREE/map_info.json" ]; then
-        echo "FAIL: $TREE/map_info.json is missing, so cell-to-tile geometry" >&2
+        echo "FAIL: $TREE/map_info.json is missing, so square/cell-to-tile geometry" >&2
         echo "cannot be read. The packer leaves it in place; if it is gone," >&2
         echo "run a full render." >&2
         exit 1
     fi
 
-    echo "==> planning regional re-render: $REGION"
+    if [ -n "$CELLS" ] && [ -z "$SQUARES" ]; then
+        printf '%s' "$CELLS" > /tmp/cells.txt
+        SQUARES=$(python -c "
+from cells import Geometry, cells_as_squares, parse_rects
+from pathlib import Path
+geo = Geometry.from_map_info(Path('$TREE/map_info.json'))
+rects = cells_as_squares(geo, parse_rects(Path('/tmp/cells.txt').read_text()))
+print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
+")
+    fi
+
+    echo "==> planning regional re-render: $SQUARES"
     read -r MIN_LEVEL MAX_LEVEL < <(python /tools/levels.py "$PACK")
-    python /tools/region.py "$TREE/map_info.json" "$REGION" "$MIN_LEVEL" "$MAX_LEVEL" /tmp
+    python /tools/region.py "$TREE/map_info.json" "$SQUARES" "$MIN_LEVEL" "$MAX_LEVEL" /tmp
 
     # Only the siblings the merges need. The target tiles are deliberately NOT
     # restored: pzmap2dzi treats a tile already on disk as done, so the hole is
@@ -91,8 +109,8 @@ if [ -n "$REGION" ]; then
     python /tools/set_render_range.py "$CONF" "$(cat /tmp/render_cells.txt)"
 
     # Without this the fresh bytes lose to the rows already in the pack and the
-    # whole run is a no-op.
-    PACK_ARGS="--replace"
+    # whole run is a no-op. Only dirty keys; WAL so a live reader can keep going.
+    PACK_ARGS="--replace --only /tmp/dirty.txt --wal"
 fi
 
 echo "==> deploy"

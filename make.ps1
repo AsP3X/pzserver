@@ -299,19 +299,23 @@ function Do-RebuildGame {
 # Renders the isometric basemap from the game files into data\map-tiles.
 # Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
 function Do-MapTiles {
-    param([string]$Cells = "")
+    param(
+        [string]$Cells = "",
+        [string]$Squares = ""
+    )
 
-    if ($Cells) {
-        Write-Host "Redrawing map cells $Cells (minutes; updates the existing pack)..." -ForegroundColor Cyan
+    if ($Squares -or $Cells) {
+        $what = if ($Squares) { "squares $Squares" } else { "cells $Cells" }
+        Write-Host "Redrawing map $what (minutes; updates the existing pack)..." -ForegroundColor Cyan
     } else {
         Write-Host "Rendering the isometric basemap from the game files (hours, ~15 GB)..." -ForegroundColor Cyan
     }
     # Docker cannot create a mountpoint inside a read-only bind mount, and /pz
     # is one. Without this the run dies on "read-only file system" before it
     # reaches the texture check.
-    New-Item -ItemType Directory -Force "data\server\media	exturepacks" | Out-Null
+    New-Item -ItemType Directory -Force "data\server\media\texturepacks" | Out-Null
     Invoke-Compose @("--profile", "tools", "build", "map-tiles")
-    Invoke-Compose @("--profile", "tools", "run", "--rm", "-e", "PZ_MAP_CELLS=$Cells", "map-tiles")
+    Invoke-Compose @("--profile", "tools", "run", "--rm", "-e", "PZ_MAP_CELLS=$Cells", "-e", "PZ_MAP_SQUARES=$Squares", "map-tiles")
 }
 
 function Do-Stop {
@@ -677,7 +681,7 @@ function Do-Help {
     Write-Host "    .\make.ps1 rebuild          Rebuild images from upstream bases, then start"
     Write-Host "    .\make.ps1 rebuild-game     Rebuild game-server only"
     Write-Host "    .\make.ps1 map-tiles        Render the isometric basemap locally (hours, ~15 GB)"
-    Write-Host "    .\make.ps1 map-tiles-region x,y,w,h   Redraw only those map cells (minutes)"
+    Write-Host "    .\make.ps1 map-tiles-region x,y,w,h   Redraw cells (or squares=x,y,w,h) (minutes)"
     Write-Host "    .\make.ps1 stop             Stop without removing containers"
     Write-Host "    .\make.ps1 logs [svc...]    Follow logs (all services, or the named ones)"
     Write-Host "    .\make.ps1 ps               List running containers"
@@ -725,7 +729,14 @@ switch ($Command) {
     "rebuild"        { Do-Rebuild }
     "rebuild-game"   { Do-RebuildGame }
     "map-tiles"      { Do-MapTiles }
-    "map-tiles-region" { Do-MapTiles -Cells ($Args -join ";") }
+    "map-tiles-region" {
+        $joined = $Args -join ";"
+        if ($joined -match '^squares=') {
+            Do-MapTiles -Squares ($joined -replace '^squares=','')
+        } else {
+            Do-MapTiles -Cells $joined
+        }
+    }
     "stop"           { Do-Stop }
     "logs"           { Do-Logs }
     "ps"             { Do-Ps }
