@@ -10,6 +10,7 @@ web/ui/src/lib/iso-tiles.ts -- worldToDzi() -- and it must stay that way. See
 verify.py, which gates the render on the same constants.
 """
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,16 +151,19 @@ def covering_cells_for_tiles(geo: Geometry, tiles, level: int) -> list:
     if not tiles:
         return []
 
-    import math
-
     span = geo.span(level)
     cells_x, cells_y = [], []
-    for _, tx, ty in tiles:
+    for z, tx, ty in tiles:
+        if z != level:
+            continue
         for px in (tx * span, (tx + 1) * span):
             for py in (ty * span, (ty + 1) * span):
                 wx, wy = dzi_to_world(geo, px, py)
                 cells_x.append(wx / geo.cell_size)
                 cells_y.append(wy / geo.cell_size)
+
+    if not cells_x:
+        return []
 
     lo_x = max(0, math.floor(min(cells_x)))
     hi_x = math.ceil(max(cells_x))

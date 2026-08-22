@@ -155,4 +155,5 @@ def test_plan_from_squares_dirties_every_packed_level():
     targets, restore, render_cells = plan(GEO, squares, min_level=0, max_level=20)
     assert {z for z, _, _ in targets} == set(range(0, 21))
     assert restore
+    assert restore.isdisjoint(targets)
     assert render_cells
