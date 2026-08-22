@@ -76,6 +76,78 @@ That builds the render image and runs it once. Both wrap a build and a
 `docker-compose.web.yml` behind the `tools` profile, so a normal `make up` never
 starts it.
 
+### Regional / tile jobs
+
+After a full pack exists, re-render a region without rebuilding the whole
+pyramid:
+
+```
+make map-tiles-region SQUARES="8704,7680,256,256"
+make map-tiles-region CELLS="34,30,4,4"
+POST /api/v1/admin/map-tiles/rerender  {"cells":[[34,30,4,4]]}
+GET  /api/v1/admin/map-tiles/jobs/{id}
+```
+
+#### Do
+
+1. **Speak squares (or cells as a helper).** Public contract is a game-world
+   rectangle in squares — the same coords as pins. A cell is
+   `x*256, y*256, 256, 256`. Both become DZI tiles internally.
+2. **Expand to whole tiles before rendering.** `render_cell_range` paints only
+   the cells it is handed. A tile that straddles the edge comes back
+   part-drawn and part-black. `expand_to_whole_tiles` is mandatory. Measured:
+   tile `20/134_59` went from 12.5% black to 62.4% when this was skipped.
+3. **Dirty every packed ancestor.** A level-20 change without rebuilding
+   19…0 leaves zoom-out stale or black. Dirty set is the covering tiles at
+   max packed level plus every parent down to 0.
+4. **Restore merge siblings, never dirty tiles.** Parents merge four children
+   from disk. Missing siblings → three-quarters black. Dirty tiles must stay
+   *absent* so pzmap2dzi does not skip them.
+5. **Pack only dirty keys.** `--replace --only dirty.txt`. Restored siblings
+   are already correct; rewriting them is wasted I/O and can unlink files the
+   next merge still needs if a run is interrupted.
+6. **Update the live pack in place.** WAL, then `wal_checkpoint(TRUNCATE)`.
+   web-api stays up. Bump `generated_at` so `?v=` cache-busts.
+7. **Keep the map-tiles volume writable for web-api.** WAL readers write a
+   slot in the `-shm` file. A `:ro` mount breaks in-place updates. The API
+   still opens the database `SQLITE_OPEN_READ_ONLY`; only the directory needs
+   write.
+8. **One job at a time.** The container name is `pz-map-tiles`. A second CLI
+   or API run while it exists is a conflict, not a queue.
+9. **Fail before paint** when there is no pack, no `map_info.json`, no
+   texture packs, a geometry mismatch, or a cache peak within 5% of the limit.
+10. **Leave an interrupted region re-runnable.** `.pending` is deleted with
+    its half-drawn `.jpg`. Mid-pack kills leave a mix of old and new dirty
+    rows; the same job planned again overwrites them.
+
+#### Do not
+
+1. **Do not stop `web-api` for a region.** That takes the whole site down
+   (nginx resolves `web-api` at start and crash-loops). The old “stop because
+   Windows locks the filename” rule applied to *renaming* the pack, which we
+   no longer do.
+2. **Do not rename `tiles.sqlite` while it is open.** That is the Windows
+   filename reservation trap. In-place UPDATE only.
+3. **Do not VACUUM a region.** VACUUM rebuilds the 24 GB file beside itself.
+   It is for a full first pack only.
+4. **Do not restore dirty tiles.** pzmap2dzi treats an existing `.jpg` as
+   done. Restoring the hole makes the run a no-op.
+5. **Do not pack restored siblings.** They are merge inputs, not outputs.
+6. **Do not change `dzi_cell_range` on a region.** Pyramid geometry and every
+   client tile index are fixed by the first full render. `verify.py` still
+   gates on `ISO_DZI`.
+7. **Do not treat a region as a first render.** No pack / no `map_info.json`
+   → exit 1 / job `failed`. Run `make map-tiles` first.
+8. **Do not evict skip-level children whose parent is still pending.**
+   `omit_levels: 2` plus LRU eviction paints black quadrants. The image-build
+   pin (`patch_scheduler.py`) stays; `check_cache.py` still fails a run that
+   grazes the ceiling.
+9. **Do not wait on HTTP for the render.** A region takes minutes. `POST`
+   returns `202` + job id.
+10. **Do not detect player buildings or game patches in this sitting.** Those
+    later emit squares into this pipeline. Do not invent a second render path
+    for them.
+
 ### What it costs
 
 | Fact | Value |
