@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -133,6 +133,28 @@ rebuild: ensure-data-dirs ensure-networks
 rebuild-game:
 	$(COMPOSE) build --pull game-server
 	$(COMPOSE) up -d game-server
+
+# Renders the isometric basemap from the game files into data/map-tiles.
+# Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
+map-tiles:
+	@# Docker cannot create a mountpoint inside a read-only bind mount, and /pz
+	@# is one. Without this the run dies on "read-only file system" before it
+	@# reaches the texture check.
+	@mkdir -p data/server/media/texturepacks
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" map-tiles
+
+# Redraw part of the map instead of all of it, for when the world has changed:
+#   make map-tiles-region SQUARES="8704,7680,256,256"  x, y, width, height in world squares
+#   make map-tiles-region CELLS="34,30,4,4"            x, y, width, height in cells
+#   make map-tiles-region CELLS="34,30"                one cell
+#   make map-tiles-region CELLS="34,30;40,12"          several
+# Minutes rather than hours, and it updates the existing pack in place.
+map-tiles-region:
+	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-region SQUARES=\"8704,7680,256,256\""; exit 1; }
+	@mkdir -p data/server/media/texturepacks
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" map-tiles
 
 # SVC limits these to named services, e.g. make logs SVC="game-server web-api"
 restart:
@@ -440,6 +462,8 @@ help:
 	@echo "    test           - Run tests in the app container"
 	@echo "    rebuild        - Rebuild images from upstream bases, then start"
 	@echo "    rebuild-game   - Rebuild game-server only"
+	@echo "    map-tiles      - Render the isometric basemap locally (hours, ~15 GB)"
+	@echo "    map-tiles-region CELLS=\"x,y,w,h\" or SQUARES=\"x,y,w,h\" - Redraw that region (minutes)"
 	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
 	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""

@@ -1,0 +1,91 @@
+# Paths inside the container. The game install is mounted read-only; the render
+# writes only to /out.
+pz_root: /pz
+output_root: /out
+mod_root: /pz/steamapps/workshop/content/108600
+custom_root: .
+save_game_root: /dev/null
+
+output_entry: default
+output_route: map_data/
+
+# B42, matching the server build.
+map_conf_default: default_b42.txt
+map_conf:
+    - vanilla.txt
+    - mod/
+
+# Vanilla Knox County. Matches Map=Muldraugh, KY in server.ini.
+base_map: default
+mod_maps: []
+save_games: []
+
+render_conf:
+    verbose: true
+    worker_count: auto
+
+    # 2048, NOT the shipped default of 1024. ISO_DZI.tileSize in
+    # web/ui/src/lib/iso-tiles.ts is 2048 and the client's tileSpan() maths is
+    # built on it. verify.py enforces this.
+    tile_size: 2048
+
+    # Only building layer 0. The client requests layer0_files exclusively, and
+    # rendering the upper floors would multiply the work for tiles nothing asks
+    # for. Range is half-open: [0, 1] is layer 0 alone.
+    layer_range: [0, 1]
+
+    # Discard the two deepest levels: 22 and 21. Leaves 8-20, about 27k tiles
+    # and 15 GB instead of 360k and 200 GB. DEFAULT_ISO_SCALE resolves to level
+    # 20, so the survivor-focus view is still native; deeper zoom upscales
+    # through IsoTileCache.ancestor().
+    omit_levels: 2
+
+    # Bound the shared-memory tile cache. THIS IS NOT OPTIONAL.
+    #
+    # The cache holds rendered children in /dev/shm so a parent tile can be
+    # merged from them. pzmap2dzi defaults cache_limit_mb to 0, and
+    # scheduling.py gates eviction on `if self.cache_size:` -- 0 is falsy, so
+    # with the default the eviction loop NEVER RUNS and the cache grows without
+    # limit until shared memory is gone.
+    #
+    # What that looks like is not an error. Workers die on the allocation
+    # without raising, the parent waits on them forever, and the render sits at
+    # 0% CPU having written nothing. Twice observed: once against Docker's 64 MB
+    # /dev/shm default, then again at 3744 MB against a 4 GB ceiling. Raising
+    # shm_size alone only moves the wall.
+    #
+    # Held well under the service's shm_size (8g in docker-compose.web.yml) so
+    # the 16 workers' in-flight 16 MB buffers still have room above the cache.
+    # Must be large enough that NOTHING is ever evicted. This is not a
+    # performance knob, it is a correctness one.
+    #
+    # omit_levels above means levels 21 and 22 are rendered but never written
+    # to disk -- they exist only in this cache, and level 20 is merged from
+    # them. Eviction calls save_tile, which returns 'skip' for exactly those
+    # levels (pzdzi.py:127), so an evicted deep tile is destroyed rather than
+    # spilled. Its level-20 parent then merges a missing quadrant as black.
+    #
+    # Measured: at 4096 MB the render reported `cache hit: 336376/349463 =
+    # 96.26%` and produced ~13,000 black holes across the map. At 0 (the
+    # default, meaning unbounded) nothing is evicted and nothing is lost, but
+    # /dev/shm runs out and the workers die silently instead.
+    #
+    # run.sh gates on the hit rate being 100%, which is the only way to know
+    # this number was big enough for a given map.
+    cache_limit_mb: 16384
+
+    # jpg for the base layer is already the default; stated so a future default
+    # change cannot silently break the client's .jpg URLs.
+    image_fmt_base_layer0: jpg
+    image_save_options:
+        jpg: {quality: 85}
+
+# Leave tile_align_levels and dzi_cell_range at their defaults on the first
+# run. They set the image bounds, and the defaults are what pzmap.org used.
+# The Task 1 geometry gate (verify.py) is what tests that assumption.
+#
+# Verified output layout (differs from the obvious guess — no `default` segment,
+# despite output_entry/output_route above reading as though there would be one):
+#   /out/html/map_data/base/layer0.dzi
+#   /out/html/map_data/base/map_info.json      <- geometry, checked by verify.py
+#   /out/html/map_data/base/layer0_files/{z}/{x}_{y}.jpg

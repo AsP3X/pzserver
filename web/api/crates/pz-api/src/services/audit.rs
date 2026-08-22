@@ -81,13 +81,12 @@ pub async fn list(db: &PgPool, filter: &AuditFilter) -> Result<Vec<AuditEntry>, 
 }
 
 pub async fn actions(db: &PgPool) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar(
-        r#"SELECT DISTINCT action FROM audit_logs ORDER BY action"#,
-    )
-    .fetch_all(db)
-    .await
+    sqlx::query_scalar(r#"SELECT DISTINCT action FROM audit_logs ORDER BY action"#)
+        .fetch_all(db)
+        .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn record(
     db: &PgPool,
     actor_id: Option<Uuid>,
@@ -303,7 +302,10 @@ fn redact(value: Value) -> Value {
         Value::Object(map) => {
             let mut out = Map::new();
             for (key, child) in map {
-                if SECRET_KEYS.iter().any(|secret| key.eq_ignore_ascii_case(secret)) {
+                if SECRET_KEYS
+                    .iter()
+                    .any(|secret| key.eq_ignore_ascii_case(secret))
+                {
                     out.insert(key, Value::String("[redacted]".into()));
                 } else {
                     out.insert(key, redact(child));

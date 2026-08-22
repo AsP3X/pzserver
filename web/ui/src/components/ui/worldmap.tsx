@@ -11,8 +11,10 @@ import {
   fitIsoScale,
   isoMapping,
   isoTiles,
+  loadTileMeta,
   worldToDzi,
 } from '@/lib/iso-tiles'
+import type { TileMeta } from '@/lib/iso-tiles'
 import {
   clampView,
   drawMapOverlays,
@@ -80,11 +82,11 @@ const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
 /**
  * Whether to offer the isometric basemap at all.
  *
- * Its tiles come from a host we do not run, which has already moved once: The
- * Indie Stone took the map off their servers on 7 August 2026 and it now
- * lives at tiles.pzmap.org. Turn this off to withdraw the mode entirely if
- * that source goes away for good — the vector basemap needs nothing external
- * and is what everyone falls back to meanwhile.
+ * Its tiles now come from this server's own render, so there is no third-party
+ * host left to go away. Kept as a switch anyway: a server that has never run
+ * `make map-tiles` has no tiles to serve, and turning this off withdraws the
+ * mode outright rather than offering one that can only fall back. The vector
+ * basemap needs nothing external and is what everyone falls back to meanwhile.
  */
 const ISO_BASEMAP: boolean = true
 
@@ -163,6 +165,7 @@ export function WorldmapView({
   } | null>(null)
   const [isoTick, setIsoTick] = useState(0)
   const [isoFellBack, setIsoFellBack] = useState(false)
+  const [tileMeta, setTileMeta] = useState<TileMeta | null>(null)
   const [paintHover, setPaintHover] = useState<{ x: number; y: number } | null>(null)
   const [draftRect, setDraftRect] = useState<MapRect | null>(null)
   const rectStart = useRef<{ x: number; y: number } | null>(null)
@@ -196,6 +199,23 @@ export function WorldmapView({
   }, [])
 
   useEffect(() => isoTiles.subscribe(() => setIsoTick((tick) => tick + 1)), [])
+
+  /**
+   * Read the pyramid's meta once, which also clamps `levelForScale` to the
+   * deepest level actually rendered. Without it every deep zoom asks for
+   * levels that can only 404.
+   */
+  useEffect(() => {
+    let live = true
+    loadTileMeta().then((meta) => {
+      if (live) {
+        setTileMeta(meta)
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   /**
    * Leave iso the moment its tiles stop arriving.
@@ -767,7 +787,11 @@ export function WorldmapView({
       </div>
 
       <div className="pointer-events-none absolute right-3 bottom-3 max-w-[min(24rem,70%)] text-right font-mono text-[0.625rem] leading-snug">
-        {isoFellBack ? <p className="text-hazard">{t('map.iso_unavailable')}</p> : null}
+        {isoFellBack ? (
+          <p className="text-hazard">
+            {tileMeta && !tileMeta.generated ? t('map.iso_not_generated') : t('map.iso_unavailable')}
+          </p>
+        ) : null}
         <p className="text-dust">
           {mode === 'iso' ? t('map.attribution_iso') : t('map.attribution')}
         </p>

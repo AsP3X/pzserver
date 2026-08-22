@@ -65,7 +65,11 @@ pub async fn view(state: &AppState) -> ApiResult<RespawnView> {
         .collect();
 
     // Longest wait first: that is the player most likely to be asking about it.
-    timers.sort_by(|a, b| b.minutes_left.cmp(&a.minutes_left).then(a.username.cmp(&b.username)));
+    timers.sort_by(|a, b| {
+        b.minutes_left
+            .cmp(&a.minutes_left)
+            .then(a.username.cmp(&b.username))
+    });
 
     Ok(RespawnView {
         enabled: config.enabled,
@@ -79,7 +83,7 @@ pub async fn configure(
     enabled: bool,
     delay_minutes: i64,
 ) -> ApiResult<RespawnView> {
-    if delay_minutes < 1 || delay_minutes > MAX_DELAY_MINUTES {
+    if !(1..=MAX_DELAY_MINUTES).contains(&delay_minutes) {
         return Err(ApiError::Validation(format!(
             "Cooldown must be between 1 and {MAX_DELAY_MINUTES} minutes."
         )));
@@ -169,7 +173,7 @@ mod tests {
 
     #[test]
     fn a_cooldown_longer_than_a_week_is_refused() {
-        assert!(MAX_DELAY_MINUTES == 10_080);
+        assert_eq!(MAX_DELAY_MINUTES, 10_080);
     }
 
     /// Partial minutes round up, so "1 minute left" never displays as 0 while
@@ -182,6 +186,10 @@ mod tests {
         assert_eq!(round(60), 1);
         assert_eq!(round(61), 2);
         assert_eq!(round(0), 0);
-        assert_eq!(round(-30), 0, "an elapsed cooldown reads as zero, not negative");
+        assert_eq!(
+            round(-30),
+            0,
+            "an elapsed cooldown reads as zero, not negative"
+        );
     }
 }

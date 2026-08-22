@@ -112,7 +112,10 @@ pub async fn list_all(db: &PgPool) -> Result<ReportQueue, sqlx::Error> {
     .fetch_one(db)
     .await?;
 
-    Ok(ReportQueue { reports, open_count })
+    Ok(ReportQueue {
+        reports,
+        open_count,
+    })
 }
 
 pub async fn list_mine(db: &PgPool, user_id: Uuid) -> Result<Vec<Report>, sqlx::Error> {
@@ -173,9 +176,7 @@ pub async fn create(
 ) -> ApiResult<Report> {
     let kind = kind.trim();
     if !KINDS.contains(&kind) {
-        return Err(ApiError::Validation(
-            "Choose report or support.".to_owned(),
-        ));
+        return Err(ApiError::Validation("Choose report or support.".to_owned()));
     }
 
     let subject = subject.trim();
@@ -197,14 +198,17 @@ pub async fn create(
 
     let accused = accused.map(str::trim).filter(|value| !value.is_empty());
     if kind == "report" && accused.is_none() {
-        return Err(ApiError::Validation("Say who you are reporting.".to_owned()));
+        return Err(ApiError::Validation(
+            "Say who you are reporting.".to_owned(),
+        ));
     }
-    if let Some(name) = accused {
-        if !accused_name(name) {
-            return Err(ApiError::Validation(
-                "That name can only contain letters, numbers, spaces, underscores and hyphens.".to_owned(),
-            ));
-        }
+    if let Some(name) = accused
+        && !accused_name(name)
+    {
+        return Err(ApiError::Validation(
+            "That name can only contain letters, numbers, spaces, underscores and hyphens."
+                .to_owned(),
+        ));
     }
 
     let author = sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1")
@@ -453,10 +457,11 @@ pub async fn file_from_game(
         raw.chars().take(SUBJECT_MAX).collect::<String>()
     };
 
-    let user_id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE lower(username) = lower($1)")
-        .bind(author)
-        .fetch_optional(db)
-        .await?;
+    let user_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(author)
+            .fetch_optional(db)
+            .await?;
 
     let id = sqlx::query_scalar::<_, i64>(
         r#"
@@ -487,12 +492,11 @@ pub async fn create_from_desk(
     body: &str,
     accused: Option<&str>,
 ) -> ApiResult<Report> {
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users WHERE lower(username) = lower($1)",
-    )
-    .bind(username)
-    .fetch_optional(db)
-    .await?;
+    let user_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(username)
+            .fetch_optional(db)
+            .await?;
 
     if let Some(user_id) = user_id {
         return create(db, user_id, kind, subject, body, accused).await;
@@ -500,9 +504,7 @@ pub async fn create_from_desk(
 
     let kind = kind.trim();
     if !KINDS.contains(&kind) {
-        return Err(ApiError::Validation(
-            "Choose report or support.".to_owned(),
-        ));
+        return Err(ApiError::Validation("Choose report or support.".to_owned()));
     }
 
     let subject = subject.trim();
@@ -524,14 +526,17 @@ pub async fn create_from_desk(
 
     let accused = accused.map(str::trim).filter(|value| !value.is_empty());
     if kind == "report" && accused.is_none() {
-        return Err(ApiError::Validation("Say who you are reporting.".to_owned()));
+        return Err(ApiError::Validation(
+            "Say who you are reporting.".to_owned(),
+        ));
     }
-    if let Some(name) = accused {
-        if !accused_name(name) {
-            return Err(ApiError::Validation(
-                "That name can only contain letters, numbers, spaces, underscores and hyphens.".to_owned(),
-            ));
-        }
+    if let Some(name) = accused
+        && !accused_name(name)
+    {
+        return Err(ApiError::Validation(
+            "That name can only contain letters, numbers, spaces, underscores and hyphens."
+                .to_owned(),
+        ));
     }
 
     let id = sqlx::query_scalar::<_, i64>(
@@ -562,12 +567,11 @@ pub async fn add_player_message_from_game(
     report_id: i64,
     body: &str,
 ) -> ApiResult<Report> {
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users WHERE lower(username) = lower($1)",
-    )
-    .bind(username)
-    .fetch_optional(db)
-    .await?;
+    let user_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(username)
+            .fetch_optional(db)
+            .await?;
 
     if let Some(user_id) = user_id {
         return add_player_message(db, user_id, report_id, body).await;
@@ -707,9 +711,9 @@ async fn load(db: &PgPool, id: i64) -> Result<Option<Report>, sqlx::Error> {
         WHERE r.id = $1
         "#,
     )
-        .bind(id)
-        .fetch_optional(db)
-        .await?;
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -774,13 +778,8 @@ async fn attach_messages(db: &PgPool, rows: Vec<ReportRow>) -> Result<Vec<Report
                 created_at: row.created_at,
                 handled_at: row.handled_at,
                 unread,
-                last_message_preview: last.map(|message| {
-                    message
-                        .body
-                        .chars()
-                        .take(140)
-                        .collect::<String>()
-                }),
+                last_message_preview: last
+                    .map(|message| message.body.chars().take(140).collect::<String>()),
                 last_message_at: last.map(|message| message.created_at),
                 messages: thread,
             }

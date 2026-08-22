@@ -101,10 +101,7 @@ impl SteamClient {
     }
 
     /// Ask Steam whether it really signed this assertion, and for whom.
-    pub async fn verify(
-        &self,
-        params: &BTreeMap<String, String>,
-    ) -> Result<String, SteamError> {
+    pub async fn verify(&self, params: &BTreeMap<String, String>) -> Result<String, SteamError> {
         verify(&self.http, params).await
     }
 }
@@ -185,7 +182,10 @@ mod tests {
 
     #[test]
     fn the_authenticate_url_carries_the_openid_handshake() {
-        let url = authenticate_url("https://knox.example", "https://knox.example/api/v1/auth/steam/callback");
+        let url = authenticate_url(
+            "https://knox.example",
+            "https://knox.example/api/v1/auth/steam/callback",
+        );
 
         assert!(url.starts_with(OPENID_ENDPOINT));
         assert!(url.contains("openid.mode=checkid_setup"));
@@ -195,7 +195,10 @@ mod tests {
 
     #[test]
     fn urlencoding_escapes_everything_outside_the_unreserved_set() {
-        assert_eq!(urlencode("https://a.example/b?c=d&e"), "https%3A%2F%2Fa.example%2Fb%3Fc%3Dd%26e");
+        assert_eq!(
+            urlencode("https://a.example/b?c=d&e"),
+            "https%3A%2F%2Fa.example%2Fb%3Fc%3Dd%26e"
+        );
         assert_eq!(urlencode("plain-Text_1.0~"), "plain-Text_1.0~");
         assert_eq!(urlencode("a b"), "a%20b");
     }
@@ -221,19 +224,27 @@ mod tests {
             "https://steamcommunity.com/openid/id/",
             "76561197960287930",
         ] {
-            assert_eq!(steam_id_from(hostile), None, "{hostile} must not be accepted");
+            assert_eq!(
+                steam_id_from(hostile),
+                None,
+                "{hostile} must not be accepted"
+            );
         }
     }
 
     #[test]
     fn only_an_exact_is_valid_line_counts_as_approval() {
-        assert!(is_valid("ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"));
+        assert!(is_valid(
+            "ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"
+        ));
         assert!(is_valid("is_valid:true"));
 
         assert!(!is_valid("is_valid:false"));
         assert!(!is_valid(""));
         // A rejection that happens to mention the string must not pass.
-        assert!(!is_valid("error:is_valid:true is not what happened\nis_valid:false"));
+        assert!(!is_valid(
+            "error:is_valid:true is not what happened\nis_valid:false"
+        ));
         assert!(!is_valid("is_valid:truex"));
     }
 }

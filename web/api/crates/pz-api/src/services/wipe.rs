@@ -65,14 +65,14 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
         let _ = admin::broadcast(state, message).await;
     }
 
-    let backup = match backups::create_now(state, "pre_rollback", Some("Pre-wipe safety backup")).await
-    {
-        Ok(()) => Some("pre-wipe backup written".to_owned()),
-        Err(error) => {
-            tracing::warn!(error, "pre-wipe backup failed; continuing");
-            None
-        }
-    };
+    let backup =
+        match backups::create_now(state, "pre_rollback", Some("Pre-wipe safety backup")).await {
+            Ok(()) => Some("pre-wipe backup written".to_owned()),
+            Err(error) => {
+                tracing::warn!(error, "pre-wipe backup failed; continuing");
+                None
+            }
+        };
 
     let running = state
         .docker
@@ -104,15 +104,10 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
     let players_deleted = wipe_website(&state.db, request.include_config).await?;
 
     if let Some(admin) = state.config.admin_bootstrap.as_ref() {
-        match auth::ensure_admin(
-            &state.db,
-            &admin.username,
-            &admin.email,
-            &admin.password,
-        )
-        .await
-        {
-            Ok(true) => tracing::info!(username = %admin.username, "recreated the first administrator after wipe"),
+        match auth::ensure_admin(&state.db, &admin.username, &admin.email, &admin.password).await {
+            Ok(true) => {
+                tracing::info!(username = %admin.username, "recreated the first administrator after wipe")
+            }
             Ok(false) => {}
             Err(error) => {
                 filesystem_errors.push(format!(
@@ -128,7 +123,9 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
     }
 
     if let Err(error) = admin::start(state).await {
-        filesystem_errors.push(format!("The world was wiped but the server did not start: {error}"));
+        filesystem_errors.push(format!(
+            "The world was wiped but the server did not start: {error}"
+        ));
     }
 
     let message = if request.include_config {
@@ -183,25 +180,20 @@ fi
     Ok(())
 }
 
-async fn wipe_save_tree(
-    data: &Path,
-    server_name: &str,
-    lua: &Path,
-    errors: &mut Vec<String>,
-) {
+async fn wipe_save_tree(data: &Path, server_name: &str, lua: &Path, errors: &mut Vec<String>) {
     let multiplayer = data.join("Saves").join("Multiplayer");
     if multiplayer.is_dir() {
         remove_children(&multiplayer, errors).await;
     }
     let saves = data.join("Saves");
-    if saves.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&saves) {
-            for entry in entries.flatten() {
-                if entry.file_name() == "Multiplayer" {
-                    continue;
-                }
-                force_remove(&entry.path(), errors).await;
+    if saves.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&saves)
+    {
+        for entry in entries.flatten() {
+            if entry.file_name() == "Multiplayer" {
+                continue;
             }
+            force_remove(&entry.path(), errors).await;
         }
     }
 
@@ -225,28 +217,28 @@ async fn wipe_save_tree(
         }
     }
 
-    if lua.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(lua) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if name == ".gitkeep" {
-                    continue;
-                }
-                let path = entry.path();
-                if path.is_dir() && PER_PLAYER_DIRS.contains(&name.as_ref()) {
-                    remove_children(&path, errors).await;
-                    continue;
-                }
-                if path.is_file() && name.ends_with(".json") {
-                    if let Err(error) = std::fs::write(&path, "") {
-                        errors.push(format!("clear {}: {error}", path.display()));
-                    }
-                }
+    if lua.is_dir()
+        && let Ok(entries) = std::fs::read_dir(lua)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == ".gitkeep" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() && PER_PLAYER_DIRS.contains(&name.as_ref()) {
+                remove_children(&path, errors).await;
+                continue;
+            }
+            if path.is_file()
+                && name.ends_with(".json")
+                && let Err(error) = std::fs::write(&path, "")
+            {
+                errors.push(format!("clear {}: {error}", path.display()));
             }
         }
     }
-
 }
 
 async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
@@ -292,9 +284,7 @@ async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
         sqlx::query("DELETE FROM automations")
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM quests")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query("DELETE FROM quests").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM player_groups")
             .execute(&mut *tx)
             .await?;

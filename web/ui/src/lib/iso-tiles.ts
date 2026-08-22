@@ -1,21 +1,22 @@
 /**
- * Official isometric DZI tiles, now served by the community pzmap.
+ * Isometric DZI tiles, served by this server from its own render.
  *
- * Same pyramid the public map serves: pzmap2dzi paints Knox County once,
- * Deep Zoom slices it into 2048px JPEGs, the browser only fetches the
- * window you can see. Overlays stay in game coordinates on top.
+ * pzmap2dzi paints Knox County once from the game files the dedicated server
+ * already has, Deep Zoom slices it into 2048px JPEGs, the browser only fetches
+ * the window you can see. Overlays stay in game coordinates on top.
  *
- * The Indie Stone took the map off their servers on 7 August 2026 and
- * map.projectzomboid.com now 308s to the community successor. The render is
- * the same one — same `42.20.0` build, same `base/layer0_files/{z}/{x}_{y}`
- * shape — so the geometry below still holds; only the host and the dropped
- * `/maps` path segment changed. `IsoTileCache` watches for that assumption
- * breaking rather than trusting it: see `unreachable`.
+ * Tiles come from this origin, out of the pyramid `make map-tiles` renders.
+ * Nothing leaves the origin, so the map works with no internet at all and does
+ * not lean on a volunteer CDN that has already moved once. The geometry below
+ * is the same pyramid pzmap.org served — `web/tools/map-tiles/verify.py` gates
+ * the render on it matching, because a mismatch puts every pin in the wrong
+ * place while the tiles still look plausible.
+ *
+ * Levels above the rendered maximum answer 404 by design; `IsoTileCache`
+ * upscales from the deepest level actually held. See `docs/map-tiles.md`.
  */
 
-export const ISO_TILE_HOST = 'https://tiles.pzmap.org'
-/** Vanilla ground layer for the build the server runs (B42.20). */
-export const ISO_TILE_URL = `${ISO_TILE_HOST}/42.20.0/base/layer0_files/{z}/{x}_{y}.jpg`
+export const ISO_TILE_URL = '/api/v1/map-tiles/{z}/{x}_{y}.jpg'
 
 export const ISO_DZI = {
   width: 2_318_656,
@@ -88,14 +89,70 @@ export function fitIsoScale(width: number, height: number): number {
   return Math.min(width / dziW, height / dziH) * 0.92
 }
 
+/**
+ * Deepest level the local pack actually holds, from /api/v1/map-tiles/meta.
+ *
+ * The render stops short of the pyramid's true bottom to save disk, so asking
+ * for a level past this can only ever 404. Defaults to the DZI maximum so the
+ * module behaves correctly before meta has been read.
+ */
+let renderedMaxLevel: number = ISO_DZI.maxLevel
+
+export function setRenderedMaxLevel(level: number): void {
+  renderedMaxLevel = Math.min(ISO_DZI.maxLevel, Math.max(ISO_DZI.minLevel, level))
+}
+
+/** Query string for tile URLs; `undefined` until meta has been read. */
+let packRevision: string | undefined
+
+export interface TileMeta {
+  generated: boolean
+  min_level: number | null
+  max_level: number | null
+  game_version: string | null
+  generated_at: string | null
+}
+
+let metaRequest: Promise<TileMeta> | null = null
+
+/** Read once per page; the answer only changes when someone re-renders. */
+export function loadTileMeta(): Promise<TileMeta> {
+  metaRequest ??= fetch('/api/v1/map-tiles/meta')
+    .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+    .then((meta: TileMeta) => {
+      if (meta.max_level !== null) {
+        setRenderedMaxLevel(meta.max_level)
+      }
+      setPackRevision(meta.generated_at ?? meta.game_version ?? '')
+      return meta
+    })
+    .catch(() => {
+      metaRequest = null
+      setPackRevision('')
+      return {
+        generated: false,
+        min_level: null,
+        max_level: null,
+        game_version: null,
+        generated_at: null,
+      }
+    })
+
+  return metaRequest
+}
+
 /** DZI level whose native resolution is nearest the current screen scale. */
 export function levelForScale(isoScale: number): number {
   const raw = ISO_DZI.maxLevel + Math.log2(isoScale)
-  return Math.min(ISO_DZI.maxLevel, Math.max(ISO_DZI.minLevel, Math.round(raw)))
+  return Math.min(renderedMaxLevel, Math.max(ISO_DZI.minLevel, Math.round(raw)))
 }
 
 export function tileUrl(z: number, x: number, y: number): string {
-  return ISO_TILE_URL.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
+  const url = ISO_TILE_URL.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
+  if (packRevision) {
+    return `${url}?v=${encodeURIComponent(packRevision)}`
+  }
+  return url
 }
 
 /** How many full-res DZI pixels one tile covers at this level. */
@@ -280,12 +337,43 @@ export class IsoTileCache {
       this.order.splice(index, 1)
     }
     this.order.push(key)
-    while (this.order.length > this.limit) {
-      const oldest = this.order.shift()
-      if (oldest) {
-        this.entries.delete(oldest)
+
+    if (this.order.length <= this.limit) {
+      return
+    }
+
+    /**
+     * Evict the oldest *settled* entries, and never an in-flight one.
+     *
+     * Dropping a request that is still loading does not cancel it. The image
+     * still arrives, `settle` finds its entry gone and discards the bytes, the
+     * next frame asks for the same tile again, and it is evicted again. The
+     * view never converges — which looked like "zoom too fast and half the map
+     * stops loading", and it was the top half, because `visibleIsoTiles` emits
+     * rows top-down so the top rows are requested first and evicted first.
+     *
+     * In-flight entries are self-limiting: the browser caps concurrent
+     * requests per origin, and they hold no decoded bitmap yet, so sparing
+     * them costs far less memory than a ready tile does.
+     */
+    let over = this.order.length - this.limit
+    const keep: string[] = []
+    for (const candidate of this.order) {
+      if (over > 0 && this.entries.get(candidate)?.status !== 'loading') {
+        this.entries.delete(candidate)
+        over -= 1
+      } else {
+        keep.push(candidate)
       }
     }
+    this.order.length = 0
+    this.order.push(...keep)
+  }
+
+  invalidate(): void {
+    this.entries.clear()
+    this.order.length = 0
+    this.notify()
   }
 
   get(tile: IsoTile): HTMLImageElement | null {
@@ -294,6 +382,10 @@ export class IsoTileCache {
   }
 
   request(tile: IsoTile) {
+    if (packRevision === undefined) {
+      return
+    }
+
     const key = this.key(tile)
     if (this.entries.has(key)) {
       this.touch(key)
@@ -391,6 +483,11 @@ export class IsoTileCache {
 }
 
 export const isoTiles = new IsoTileCache()
+
+export function setPackRevision(rev: string): void {
+  packRevision = rev
+  isoTiles.invalidate()
+}
 
 /** Paint the visible window. Requests missing tiles as a side effect. */
 export function drawIsoTiles(

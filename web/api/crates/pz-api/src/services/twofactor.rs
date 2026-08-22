@@ -144,7 +144,10 @@ pub async fn begin(
     .execute(db)
     .await?;
 
-    Ok(Enrolment { secret: base32, uri })
+    Ok(Enrolment {
+        secret: base32,
+        uri,
+    })
 }
 
 /// Step two: prove the app works, switch 2FA on, and hand back recovery codes.
@@ -165,9 +168,7 @@ pub async fn confirm(
     .await?;
 
     if row.two_factor_confirmed_at.is_some() {
-        return Err(ApiError::Validation(
-            "Two-factor is already on.".to_owned(),
-        ));
+        return Err(ApiError::Validation("Two-factor is already on.".to_owned()));
     }
 
     let Some(secret) = row.two_factor_secret else {
@@ -202,13 +203,11 @@ pub async fn confirm(
         .await?;
 
     for code in &codes {
-        sqlx::query(
-            "INSERT INTO two_factor_recovery_codes (user_id, code_hash) VALUES ($1, $2)",
-        )
-        .bind(user_id)
-        .bind(digest(code))
-        .execute(&mut *transaction)
-        .await?;
+        sqlx::query("INSERT INTO two_factor_recovery_codes (user_id, code_hash) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(digest(code))
+            .execute(&mut *transaction)
+            .await?;
     }
 
     transaction.commit().await?;
@@ -314,7 +313,10 @@ pub async fn answer_challenge(
                 .execute(db)
                 .await?;
 
-            tracing::warn!(username, "two-factor challenge burned after too many wrong codes");
+            tracing::warn!(
+                username,
+                "two-factor challenge burned after too many wrong codes"
+            );
 
             return Err(ApiError::TooManyRequests);
         }
@@ -325,9 +327,7 @@ pub async fn answer_challenge(
             .execute(db)
             .await?;
 
-        return Err(ApiError::Validation(
-            "That code is not right.".to_owned(),
-        ));
+        return Err(ApiError::Validation("That code is not right.".to_owned()));
     }
 
     sqlx::query("DELETE FROM two_factor_challenges WHERE token_hash = $1")
@@ -369,9 +369,9 @@ pub async fn secret_for(db: &PgPool, user_id: Uuid) -> Result<(String, String), 
     .fetch_one(db)
     .await?;
 
-    let secret = row
-        .1
-        .ok_or_else(|| ApiError::Internal("two-factor challenge for an account with no secret".to_owned()))?;
+    let secret = row.1.ok_or_else(|| {
+        ApiError::Internal("two-factor challenge for an account with no secret".to_owned())
+    })?;
 
     Ok((row.0, secret))
 }
@@ -568,7 +568,11 @@ mod tests {
         for _ in 0..50 {
             let code = recovery_code().expect("code");
 
-            assert_eq!(code.len(), RECOVERY_CODE_LENGTH + 1, "ten chars plus a dash");
+            assert_eq!(
+                code.len(),
+                RECOVERY_CODE_LENGTH + 1,
+                "ten chars plus a dash"
+            );
             assert_eq!(code.chars().filter(|c| *c == '-').count(), 1);
             assert!(
                 !code.contains(['I', 'L', 'O', '0', '1']),

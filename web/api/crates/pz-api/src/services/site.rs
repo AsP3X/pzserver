@@ -175,7 +175,11 @@ pub async fn update(db: &PgPool, patch: SitePatch) -> Result<SiteSettings, sqlx:
 fn empty_to_none(value: Option<String>) -> Option<String> {
     value.and_then(|text| {
         let trimmed = text.trim().to_owned();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
     })
 }
 

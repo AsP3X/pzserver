@@ -203,7 +203,11 @@ pub async fn admin_view(db: &PgPool) -> ApiResult<AdminVault> {
 
 pub async fn update_settings(db: &PgPool, patch: SettingsPatch) -> ApiResult<Settings> {
     let current = settings(db).await?;
-    let default_slots = bound_slots(patch.default_slots.unwrap_or(current.default_slots), 1, 2_000)?;
+    let default_slots = bound_slots(
+        patch.default_slots.unwrap_or(current.default_slots),
+        1,
+        2_000,
+    )?;
     let max_slots = bound_slots(patch.max_slots.unwrap_or(current.max_slots), 1, 2_000)?;
     if max_slots < default_slots {
         return Err(ApiError::Validation(
@@ -217,17 +221,13 @@ pub async fn update_settings(db: &PgPool, patch: SettingsPatch) -> ApiResult<Set
         1,
         200,
     )?;
-    let upgrade_cost = patch
-        .slot_upgrade_cost
-        .unwrap_or(current.slot_upgrade_cost);
+    let upgrade_cost = patch.slot_upgrade_cost.unwrap_or(current.slot_upgrade_cost);
     if upgrade_cost < 1 {
         return Err(ApiError::Validation(
             "Upgrade cost must be at least 1 coin.".to_owned(),
         ));
     }
-    let flat = patch
-        .withdraw_fee_flat
-        .unwrap_or(current.withdraw_fee_flat);
+    let flat = patch.withdraw_fee_flat.unwrap_or(current.withdraw_fee_flat);
     let per_item = patch
         .withdraw_fee_per_item
         .unwrap_or(current.withdraw_fee_per_item);
@@ -274,7 +274,8 @@ pub async fn store(
     if !(1..=100).contains(&quantity) {
         return Err(ApiError::Validation("Store between 1 and 100.".to_owned()));
     }
-    let (cargo, cargo_count) = pack_from_inventory(state, username, &item_type, body.container_id.as_deref()).await?;
+    let (cargo, cargo_count) =
+        pack_from_inventory(state, username, &item_type, body.container_id.as_deref()).await?;
     if cargo_count > 0 {
         quantity = 1;
     }
@@ -309,7 +310,15 @@ pub async fn store(
 
     let mut tx = state.db.begin().await?;
     let capacity = ensure_vault_tx(&mut tx, user_id, settings.default_slots).await?;
-    if !has_room_tx(&mut tx, user_id, capacity, &item_type, condition_bp, cargo_count > 0).await?
+    if !has_room_tx(
+        &mut tx,
+        user_id,
+        capacity,
+        &item_type,
+        condition_bp,
+        cargo_count > 0,
+    )
+    .await?
     {
         return Err(ApiError::Validation(
             "The vault is full. Buy more slots, or retrieve something first.".to_owned(),
@@ -365,7 +374,9 @@ pub async fn retrieve(
     let settings = require_enabled(&state.db).await?;
     let mut quantity = body.quantity.unwrap_or(1);
     if !(1..=100).contains(&quantity) {
-        return Err(ApiError::Validation("Retrieve between 1 and 100.".to_owned()));
+        return Err(ApiError::Validation(
+            "Retrieve between 1 and 100.".to_owned(),
+        ));
     }
 
     let mut tx = state.db.begin().await?;
@@ -683,16 +694,18 @@ pub async fn pending_holds(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(item_type, item_name, quantity, direction)| inventory::InventoryHold {
-            item_type,
-            item_name,
-            quantity,
-            kind: if direction == "store" {
-                "vault_store".to_owned()
-            } else {
-                "vault_give".to_owned()
+        .map(
+            |(item_type, item_name, quantity, direction)| inventory::InventoryHold {
+                item_type,
+                item_name,
+                quantity,
+                kind: if direction == "store" {
+                    "vault_store".to_owned()
+                } else {
+                    "vault_give".to_owned()
+                },
             },
-        })
+        )
         .collect())
 }
 
@@ -815,12 +828,11 @@ async fn has_room_tx(
     packed: bool,
 ) -> Result<bool, sqlx::Error> {
     if packed {
-        let used: i32 = sqlx::query_scalar(
-            "SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1",
-        )
-        .bind(user_id)
-        .fetch_one(&mut **tx)
-        .await?;
+        let used: i32 =
+            sqlx::query_scalar("SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1")
+                .bind(user_id)
+                .fetch_one(&mut **tx)
+                .await?;
         let reserved: i32 = sqlx::query_scalar(
             r#"SELECT COUNT(*)::int FROM (
                    SELECT m.id
@@ -867,12 +879,10 @@ async fn has_room_tx(
     if existing {
         return Ok(true);
     }
-    let used: i32 = sqlx::query_scalar(
-        "SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    let used: i32 = sqlx::query_scalar("SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await?;
     let reserved: i32 = sqlx::query_scalar(
         r#"SELECT COUNT(*)::int FROM (
                SELECT m.id
@@ -923,6 +933,7 @@ async fn take_item_tx(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn restore_item(
     db: &PgPool,
     user_id: Uuid,
@@ -981,10 +992,11 @@ async fn restore_item(
 }
 
 async fn cargo_of_move(db: &PgPool, move_id: Uuid) -> Result<Vec<CargoPiece>, sqlx::Error> {
-    let value: serde_json::Value = sqlx::query_scalar("SELECT cargo FROM vault_moves WHERE id = $1")
-        .bind(move_id)
-        .fetch_one(db)
-        .await?;
+    let value: serde_json::Value =
+        sqlx::query_scalar("SELECT cargo FROM vault_moves WHERE id = $1")
+            .bind(move_id)
+            .fetch_one(db)
+            .await?;
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
@@ -999,18 +1011,16 @@ async fn pack_from_inventory(
         return Ok((Vec::new(), 0));
     };
     let items = &file.data.items;
-    let bag_id = container_id
-        .map(str::to_owned)
-        .or_else(|| {
-            items
-                .iter()
-                .find(|item| {
-                    (item.full_type == item_type
-                        || item.full_type.rsplit('.').next() == item_type.rsplit('.').next())
-                        && item.contains.is_some()
-                })
-                .and_then(|item| item.contains.clone())
-        });
+    let bag_id = container_id.map(str::to_owned).or_else(|| {
+        items
+            .iter()
+            .find(|item| {
+                (item.full_type == item_type
+                    || item.full_type.rsplit('.').next() == item_type.rsplit('.').next())
+                    && item.contains.is_some()
+            })
+            .and_then(|item| item.contains.clone())
+    });
     let Some(bag_id) = bag_id else {
         return Ok((Vec::new(), 0));
     };
@@ -1019,9 +1029,15 @@ async fn pack_from_inventory(
     Ok((cargo, count))
 }
 
-fn pack_container(items: &[pz_bridge::inventory::InventoryItem], container_id: &str) -> Vec<CargoPiece> {
+fn pack_container(
+    items: &[pz_bridge::inventory::InventoryItem],
+    container_id: &str,
+) -> Vec<CargoPiece> {
     let mut stacks: Vec<CargoPiece> = Vec::new();
-    for item in items.iter().filter(|item| item.container_id == container_id) {
+    for item in items
+        .iter()
+        .filter(|item| item.container_id == container_id)
+    {
         let nested = item
             .contains
             .as_deref()

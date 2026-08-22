@@ -296,11 +296,14 @@ mod tests {
         channel.queue_reset("pike").await.expect("reset");
         channel.queue_reset("rook").await.expect("reset");
 
-        let body =
-            std::fs::read_to_string(channel.dir.join(RESETS_FILE)).expect("read");
+        let body = std::fs::read_to_string(channel.dir.join(RESETS_FILE)).expect("read");
         let file: ResetsFile = serde_json::from_str(&body).expect("parse");
 
-        assert_eq!(file.resets, vec!["rook", "pike"], "no duplicates, none lost");
+        assert_eq!(
+            file.resets,
+            vec!["rook", "pike"],
+            "no duplicates, none lost"
+        );
     }
 
     #[tokio::test]

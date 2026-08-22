@@ -5,6 +5,7 @@ mod auth;
 mod economy;
 mod health;
 mod i18n;
+mod map_tiles;
 mod me;
 mod news;
 mod obituary;
@@ -52,6 +53,7 @@ fn v1(state: AppState) -> Router<AppState> {
         .merge(economy::routes())
         .merge(i18n::routes())
         .merge(me::routes())
+        .merge(map_tiles::routes())
         .merge(news::routes())
         .merge(obituary::routes())
         .merge(safezones::routes())

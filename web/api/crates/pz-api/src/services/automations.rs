@@ -259,9 +259,10 @@ pub async fn tick(state: &AppState) {
         // Cycle does its own backup → warn → restart so the archive exists
         // before anyone is told the world is coming down.
         if automation.warn_seconds > 0 && automation.action != "cycle" {
-            let warning = automation.warn_message.clone().unwrap_or_else(|| {
-                default_warning(&automation.action, automation.warn_seconds)
-            });
+            let warning = automation
+                .warn_message
+                .clone()
+                .unwrap_or_else(|| default_warning(&automation.action, automation.warn_seconds));
             let _ = admin::broadcast(state, &warning).await;
             let when = now + chrono::Duration::seconds(automation.warn_seconds.into());
             let _ = sqlx::query("UPDATE automations SET pending_at = $2 WHERE id = $1")
@@ -273,7 +274,10 @@ pub async fn tick(state: &AppState) {
                 &state.db,
                 automation.id,
                 "warned",
-                Some(&format!("Warning sent; fires in {}s", automation.warn_seconds)),
+                Some(&format!(
+                    "Warning sent; fires in {}s",
+                    automation.warn_seconds
+                )),
             )
             .await;
             continue;
@@ -326,11 +330,7 @@ async fn fire(state: &AppState, automation: &Automation) {
     finish(state, automation, result).await;
 }
 
-async fn finish(
-    state: &AppState,
-    automation: &Automation,
-    result: Result<String, String>,
-) {
+async fn finish(state: &AppState, automation: &Automation, result: Result<String, String>) {
     let (status, detail) = match &result {
         Ok(detail) => ("ok", Some(detail.as_str())),
         Err(error) => ("error", Some(error.as_str())),
@@ -417,7 +417,10 @@ async fn execute(state: &AppState, automation: &Automation) -> Result<String, St
 
 async fn set_open(state: &AppState, open: bool) -> Result<String, String> {
     let mut updates = BTreeMap::new();
-    updates.insert("Open".to_owned(), if open { "true" } else { "false" }.to_owned());
+    updates.insert(
+        "Open".to_owned(),
+        if open { "true" } else { "false" }.to_owned(),
+    );
     admin::write_config(state, updates)
         .await
         .map_err(|error| error.to_string())?;
@@ -506,9 +509,10 @@ async fn cycle(state: &AppState, automation: &Automation) -> Result<String, Stri
     backups::create_now(state, "scheduled", Some(notes)).await?;
 
     if automation.warn_seconds > 0 {
-        let warning = automation.warn_message.clone().unwrap_or_else(|| {
-            default_warning("restart", automation.warn_seconds)
-        });
+        let warning = automation
+            .warn_message
+            .clone()
+            .unwrap_or_else(|| default_warning("restart", automation.warn_seconds));
         let _ = admin::broadcast(state, &warning).await;
         tokio::time::sleep(Duration::from_secs(automation.warn_seconds as u64)).await;
     }
@@ -593,7 +597,9 @@ fn normalised(patch: AutomationPatch, current: Option<&Automation>) -> ApiResult
         .or_else(|| current.map(|row| row.action.clone()))
         .unwrap_or_else(|| "restart".to_owned());
     if !ACTIONS.contains(&action.as_str()) {
-        return Err(ApiError::Validation("That action is not available.".to_owned()));
+        return Err(ApiError::Validation(
+            "That action is not available.".to_owned(),
+        ));
     }
 
     let schedule_kind = patch
@@ -612,7 +618,9 @@ fn normalised(patch: AutomationPatch, current: Option<&Automation>) -> ApiResult
             .or_else(|| current.map(|row| row.times.clone()))
             .unwrap_or_default(),
     )?;
-    let every_minutes = patch.every_minutes.or(current.and_then(|row| row.every_minutes));
+    let every_minutes = patch
+        .every_minutes
+        .or(current.and_then(|row| row.every_minutes));
 
     if schedule_kind == "times" && times.is_empty() {
         return Err(ApiError::Validation(
@@ -641,7 +649,9 @@ fn normalised(patch: AutomationPatch, current: Option<&Automation>) -> ApiResult
     }
 
     let message = optional_text(
-        patch.message.or_else(|| current.and_then(|row| row.message.clone())),
+        patch
+            .message
+            .or_else(|| current.and_then(|row| row.message.clone())),
         500,
         "Message",
     )?;
@@ -676,7 +686,10 @@ fn normalised(patch: AutomationPatch, current: Option<&Automation>) -> ApiResult
 
     Ok(Draft {
         name,
-        enabled: patch.enabled.or(current.map(|row| row.enabled)).unwrap_or(true),
+        enabled: patch
+            .enabled
+            .or(current.map(|row| row.enabled))
+            .unwrap_or(true),
         action,
         message,
         warn_seconds,
@@ -687,11 +700,7 @@ fn normalised(patch: AutomationPatch, current: Option<&Automation>) -> ApiResult
     })
 }
 
-fn optional_text(
-    value: Option<String>,
-    max: usize,
-    label: &str,
-) -> ApiResult<Option<String>> {
+fn optional_text(value: Option<String>, max: usize, label: &str) -> ApiResult<Option<String>> {
     let Some(raw) = value else {
         return Ok(None);
     };
@@ -789,9 +798,7 @@ fn next_run(automation: &Automation) -> Option<DateTime<Utc>> {
         "every" => {
             let minutes = automation.every_minutes?;
             Some(
-                automation
-                    .last_run_at
-                    .unwrap_or_else(Utc::now)
+                automation.last_run_at.unwrap_or_else(Utc::now)
                     + chrono::Duration::minutes(i64::from(minutes)),
             )
         }

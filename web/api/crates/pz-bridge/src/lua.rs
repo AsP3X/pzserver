@@ -217,7 +217,10 @@ impl LuaBridge {
             .and_then(|meta| meta.modified().ok())
     }
 
-    async fn read_export<T>(&self, file: &str) -> Result<Option<BridgeRead<T>>, BridgeError>
+    pub(crate) async fn read_export<T>(
+        &self,
+        file: &str,
+    ) -> Result<Option<BridgeRead<T>>, BridgeError>
     where
         T: serde::de::DeserializeOwned,
     {

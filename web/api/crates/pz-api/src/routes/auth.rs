@@ -301,7 +301,10 @@ async fn answer_two_factor(
     let token = body
         .challenge
         .clone()
-        .or_else(|| jar.get(CHALLENGE_COOKIE).map(|cookie| cookie.value().to_owned()))
+        .or_else(|| {
+            jar.get(CHALLENGE_COOKIE)
+                .map(|cookie| cookie.value().to_owned())
+        })
         .ok_or_else(|| ApiError::Validation("That sign-in has expired. Start again.".to_owned()))?;
 
     let user_id = twofactor::answer_challenge(
@@ -399,12 +402,14 @@ async fn steam_callback(
         // a query parameter would land in browser history, in any proxy log on
         // the way, and in the Referer of whatever the page loads next.
         return Ok((
-            jar.add(challenge_cookie(
-                challenge.token,
-                challenge.expires_at,
-                state.config.session_cookie_secure,
-            )
-            .map_err(|_| failed("bad challenge expiry"))?),
+            jar.add(
+                challenge_cookie(
+                    challenge.token,
+                    challenge.expires_at,
+                    state.config.session_cookie_secure,
+                )
+                .map_err(|_| failed("bad challenge expiry"))?,
+            ),
             Redirect::to(&format!("{}/login?verify=1", state.config.public_url)),
         ));
     }

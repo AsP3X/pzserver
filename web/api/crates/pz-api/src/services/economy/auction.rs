@@ -43,6 +43,10 @@ pub struct ListingView {
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
+#[allow(
+    dead_code,
+    reason = "row mapping for auction_bids; no query reads it back yet"
+)]
 pub struct Bid {
     pub id: Uuid,
     pub listing_id: Uuid,
@@ -175,7 +179,9 @@ pub async fn list_item(
     }
     let hours = body.hours.unwrap_or(24);
     if !DURATIONS.contains(&hours) {
-        return Err(ApiError::Validation("Duration must be 12, 24 or 48 hours.".to_owned()));
+        return Err(ApiError::Validation(
+            "Duration must be 12, 24 or 48 hours.".to_owned(),
+        ));
     }
     let condition = crate::services::economy::inventory::wear_fraction(body.condition);
     let name = body
@@ -192,12 +198,7 @@ pub async fn list_item(
         .iter()
         .any(|name| name == username);
     crate::services::economy::inventory::ensure_available(
-        state,
-        seller_id,
-        username,
-        &item_type,
-        quantity,
-        online,
+        state, seller_id, username, &item_type, quantity, online,
     )
     .await?;
 
@@ -250,7 +251,9 @@ pub async fn bid(
         return Err(ApiError::Validation("That auction is not open.".to_owned()));
     }
     if listing.seller_id == bidder_id {
-        return Err(ApiError::Validation("You cannot bid on your own listing.".to_owned()));
+        return Err(ApiError::Validation(
+            "You cannot bid on your own listing.".to_owned(),
+        ));
     }
     if listing.ends_at <= Utc::now() {
         return Err(ApiError::Validation("That auction has ended.".to_owned()));
@@ -333,7 +336,8 @@ pub async fn bid(
         ends_at = Utc::now() + Duration::seconds(SNIPE_WINDOW);
     }
 
-    let buyout_hit = listing.buyout_price == Some(amount) || listing.buyout_price.is_some_and(|buy| amount >= buy);
+    let buyout_hit = listing.buyout_price == Some(amount)
+        || listing.buyout_price.is_some_and(|buy| amount >= buy);
 
     sqlx::query(
         r#"UPDATE auction_listings SET
@@ -377,7 +381,9 @@ pub async fn cancel(state: &AppState, listing_id: Uuid, actor: Uuid, admin: bool
         return Err(ApiError::Forbidden);
     }
     if listing.status != "live" && listing.status != "collecting" {
-        return Err(ApiError::Validation("That auction cannot be cancelled.".to_owned()));
+        return Err(ApiError::Validation(
+            "That auction cannot be cancelled.".to_owned(),
+        ));
     }
     if listing.current_bidder_id.is_some() && !admin {
         return Err(ApiError::Validation(
@@ -588,7 +594,11 @@ async fn lock_listing(
     .ok_or_else(|| ApiError::Validation("That auction is gone.".to_owned()))
 }
 
-async fn view(db: &PgPool, listing: Listing, viewer: Option<Uuid>) -> Result<ListingView, sqlx::Error> {
+async fn view(
+    db: &PgPool,
+    listing: Listing,
+    viewer: Option<Uuid>,
+) -> Result<ListingView, sqlx::Error> {
     let seller = username_of(db, listing.seller_id)
         .await?
         .unwrap_or_else(|| "unknown".to_owned());
@@ -596,10 +606,11 @@ async fn view(db: &PgPool, listing: Listing, viewer: Option<Uuid>) -> Result<Lis
         Some(id) => username_of(db, id).await?,
         None => None,
     };
-    let bid_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auction_bids WHERE listing_id = $1")
-        .bind(listing.id)
-        .fetch_one(db)
-        .await?;
+    let bid_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM auction_bids WHERE listing_id = $1")
+            .bind(listing.id)
+            .fetch_one(db)
+            .await?;
     let mine = viewer == Some(listing.seller_id);
     Ok(ListingView {
         next_bid: next_bid(&listing),

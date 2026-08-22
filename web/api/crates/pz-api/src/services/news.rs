@@ -92,8 +92,8 @@ pub async fn list_admin(db: &PgPool) -> Result<Vec<NewsPost>, sqlx::Error> {
 pub async fn create(db: &PgPool, author_id: Uuid, patch: NewsPatch) -> ApiResult<NewsPost> {
     let title = require_title(patch.title.as_deref())?;
     let body = require_body(patch.body.as_deref())?;
-    let excerpt = clean_excerpt(patch.excerpt.flatten().as_deref(), &body);
-    let slug = unique_slug(db, &title, None).await?;
+    let excerpt = clean_excerpt(patch.excerpt.flatten().as_deref(), body);
+    let slug = unique_slug(db, title, None).await?;
     let published_at = if patch.published.unwrap_or(false) {
         Some(Utc::now())
     } else {
@@ -178,7 +178,11 @@ async fn get_admin(db: &PgPool, id: Uuid) -> ApiResult<NewsPost> {
         .ok_or_else(|| ApiError::Validation("That post is gone.".to_owned()))
 }
 
-async fn unique_slug(db: &PgPool, title: &str, ignore: Option<Uuid>) -> Result<String, sqlx::Error> {
+async fn unique_slug(
+    db: &PgPool,
+    title: &str,
+    ignore: Option<Uuid>,
+) -> Result<String, sqlx::Error> {
     let base = slugify(title);
     let mut slug = base.clone();
     let mut n = 2;
@@ -219,19 +223,23 @@ fn slugify(title: &str) -> String {
 }
 
 fn require_title(raw: Option<&str>) -> ApiResult<&str> {
-    let title = raw.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
-        ApiError::Validation("Give the post a title.".to_owned())
-    })?;
+    let title = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::Validation("Give the post a title.".to_owned()))?;
     if title.len() > 160 {
-        return Err(ApiError::Validation("Title must be at most 160 characters.".to_owned()));
+        return Err(ApiError::Validation(
+            "Title must be at most 160 characters.".to_owned(),
+        ));
     }
     Ok(title)
 }
 
 fn require_body(raw: Option<&str>) -> ApiResult<&str> {
-    let body = raw.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
-        ApiError::Validation("Write the post.".to_owned())
-    })?;
+    let body = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::Validation("Write the post.".to_owned()))?;
     if body.len() > 40_000 {
         return Err(ApiError::Validation("The post is too long.".to_owned()));
     }

@@ -18,10 +18,7 @@ pub fn routes() -> Router<AppState> {
         .route("/site", get(settings))
         .route("/site/logo", get(logo))
         .route("/site/favicon", get(favicon))
-        .route(
-            "/admin/site/logo",
-            post(upload_logo).delete(delete_logo),
-        )
+        .route("/admin/site/logo", post(upload_logo).delete(delete_logo))
         .route(
             "/admin/site/favicon",
             post(upload_favicon).delete(delete_favicon),
@@ -142,19 +139,13 @@ async fn upload(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_logo(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-) -> ApiResult<StatusCode> {
+async fn delete_logo(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<StatusCode> {
     site::clear_image(&state.db, site::Branding::Logo).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_favicon(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-) -> ApiResult<StatusCode> {
+async fn delete_favicon(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<StatusCode> {
     site::clear_image(&state.db, site::Branding::Favicon).await?;
 
     Ok(StatusCode::NO_CONTENT)

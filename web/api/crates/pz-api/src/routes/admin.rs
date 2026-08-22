@@ -44,8 +44,14 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/server/stop", post(stop))
         .route("/admin/server/restart", post(restart))
         .route("/admin/server/save", post(save))
-        .route("/admin/server/update", get(update_status).post(update_server))
-        .route("/admin/players/{username}/password", post(set_player_password))
+        .route(
+            "/admin/server/update",
+            get(update_status).post(update_server),
+        )
+        .route(
+            "/admin/players/{username}/password",
+            post(set_player_password),
+        )
         .route("/admin/whitelist/{username}/toggle", post(whitelist_toggle))
         .route("/admin/whitelist/sync", post(whitelist_sync))
         .route("/admin/broadcast", post(broadcast))
@@ -57,21 +63,34 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/mods/import", post(import_mods))
         .route("/admin/mods/{workshop_id}", delete(remove_mod))
         .route("/admin/whitelist", patch(whitelist_settings))
-        .route("/admin/whitelist/{username}", post(whitelist_add).delete(whitelist_remove))
+        .route(
+            "/admin/whitelist/{username}",
+            post(whitelist_add).delete(whitelist_remove),
+        )
         .route("/admin/bridge", get(bridge))
+        .route("/admin/items", get(items))
         .route("/admin/logs", get(logs))
         .route("/admin/events", get(events))
         .route("/admin/reports", get(report_queue))
         .route("/admin/reports/{id}", get(show_report).patch(update_report))
         .route("/admin/site", get(site).patch(update_site))
-        .route("/admin/backups", get(backups).post(create_backup).delete(delete_backups))
+        .route(
+            "/admin/backups",
+            get(backups).post(create_backup).delete(delete_backups),
+        )
         .route("/admin/backups/status", get(backup_status))
-        .route("/admin/backups/schedule", get(backup_schedule).patch(update_backup_schedule))
+        .route(
+            "/admin/backups/schedule",
+            get(backup_schedule).patch(update_backup_schedule),
+        )
         .route("/admin/backups/{id}", delete(delete_backup))
         .route("/admin/backups/{id}/contents", get(backup_contents))
         .route("/admin/backups/{id}/file", get(backup_file))
         .route("/admin/backups/{id}/rollback", post(rollback_backup))
-        .route("/admin/automations", get(automations).post(create_automation))
+        .route(
+            "/admin/automations",
+            get(automations).post(create_automation),
+        )
         .route(
             "/admin/automations/{id}",
             patch(update_automation).delete(delete_automation),
@@ -80,6 +99,8 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/automations/{id}/runs", get(automation_runs))
         .route("/admin/audit", get(audit_log))
         .route("/admin/audit/actions", get(audit_actions))
+        .route("/admin/map-tiles/rerender", post(rerender_tiles))
+        .route("/admin/map-tiles/jobs/{id}", get(tile_job))
 }
 
 /// Download and import sit outside the 15s request ceiling.
@@ -105,7 +126,10 @@ struct CommandReply {
 
 // ── Players ─────────────────────────────────────────────────────────
 
-async fn players(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<Json<Vec<admin::AdminPlayer>>> {
+async fn players(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<Vec<admin::AdminPlayer>>> {
     Ok(Json(admin::list_players(&state).await?))
 }
 
@@ -282,7 +306,10 @@ async fn give_item(
         staff.id,
     )
     .await?;
-    let queued = matches!(outcome, crate::services::economy::delivery::GiveOutcome::Queued(_));
+    let queued = matches!(
+        outcome,
+        crate::services::economy::delivery::GiveOutcome::Queued
+    );
     Ok(Json(serde_json::json!({
         "message": if queued {
             "Queued. They receive it the next time they are in the world."
@@ -594,7 +621,10 @@ async fn update_status(
 ) -> ApiResult<Json<UpdateStatus>> {
     Ok(Json(UpdateStatus {
         branch: admin::steam_branch(&state).await,
-        branches: admin::STEAM_BRANCHES.iter().map(|s| (*s).to_owned()).collect(),
+        branches: admin::STEAM_BRANCHES
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
         report: admin::update_report(&state).await,
     }))
 }
@@ -627,6 +657,29 @@ async fn bridge(
     _staff: AdminUser,
 ) -> ApiResult<Json<admin::BridgeHealth>> {
     Ok(Json(admin::bridge_health(&state).await?))
+}
+
+#[derive(Serialize)]
+struct ItemCatalogResponse {
+    items: Vec<pz_bridge::ItemCatalogEntry>,
+}
+
+/// Every item the server has registered, modded ones included.
+///
+/// An absent catalogue answers `200` with an empty list rather than an error.
+/// The mod writes it at boot, so "not written yet" is the normal state of a
+/// server that has never started, and the picker renders an explanation for it.
+///
+/// The clone off the cached `Arc` is deliberate: `serde` only serialises `Arc`
+/// behind its `rc` feature, and this endpoint is hit about once per admin
+/// session — not worth widening a dependency's feature set over.
+async fn items(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<ItemCatalogResponse>> {
+    Ok(Json(ItemCatalogResponse {
+        items: state.item_catalog.items().await.to_vec(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -727,10 +780,7 @@ async fn events(
     ))
 }
 
-async fn site(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-) -> ApiResult<Json<SiteSettings>> {
+async fn site(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<Json<SiteSettings>> {
     Ok(Json(site::settings(&state.db, site::SOURCE_LOCALE).await?))
 }
 
@@ -785,7 +835,12 @@ async fn backups(
     _staff: AdminUser,
     Query(query): Query<BackupQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let items = backups::list(&state.db, &state.config.backup_path, query.r#type.as_deref()).await?;
+    let items = backups::list(
+        &state.db,
+        &state.config.backup_path,
+        query.r#type.as_deref(),
+    )
+    .await?;
     let slot = backups::slot(&state.backup_job).await;
     Ok(Json(serde_json::json!({
         "backups": items,
@@ -849,7 +904,9 @@ async fn delete_backup(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let filename = backups::delete(&state.db, id).await?;
-    Ok(Json(serde_json::json!({ "message": format!("Deleted {filename}") })))
+    Ok(Json(
+        serde_json::json!({ "message": format!("Deleted {filename}") }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -863,7 +920,9 @@ async fn delete_backups(
     Json(body): Json<BulkDeleteBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if body.ids.is_empty() {
-        return Err(ApiError::Validation("Select at least one backup.".to_owned()));
+        return Err(ApiError::Validation(
+            "Select at least one backup.".to_owned(),
+        ));
     }
     let outcome = backups::delete_many(&state.db, &body.ids).await?;
     Ok(Json(serde_json::json!({ "message": outcome.message() })))
@@ -883,7 +942,9 @@ async fn rollback_backup(
     Json(body): Json<RollbackBody>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     if !body.confirm {
-        return Err(ApiError::Validation("Confirm the rollback first.".to_owned()));
+        return Err(ApiError::Validation(
+            "Confirm the rollback first.".to_owned(),
+        ));
     }
     if let Some(seconds) = body.countdown.filter(|value| *value > 0) {
         if !(10..=3600).contains(&seconds) {
@@ -980,11 +1041,13 @@ async fn download_backup(
     let body = Body::from_stream(ReaderStream::new(file));
     let mut response = axum::response::Response::new(body);
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/gzip"));
-    if let Ok(value) = header::HeaderValue::from_str(&format!(
-        "attachment; filename=\"{}\"",
-        backup.filename
-    )) {
+    headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/gzip"),
+    );
+    if let Ok(value) =
+        header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", backup.filename))
+    {
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
     Ok(response)
@@ -1079,7 +1142,9 @@ async fn delete_automation(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     automations::delete(&state.db, id).await?;
-    Ok(Json(serde_json::json!({ "message": "Automation deleted." })))
+    Ok(Json(
+        serde_json::json!({ "message": "Automation deleted." }),
+    ))
 }
 
 async fn run_automation(
@@ -1111,4 +1176,29 @@ async fn audit_actions(
     _staff: AdminUser,
 ) -> ApiResult<Json<Vec<String>>> {
     Ok(Json(audit::actions(&state.db).await?))
+}
+
+#[derive(Deserialize)]
+struct RerenderBody {
+    #[serde(default)]
+    squares: Vec<Vec<i32>>,
+    #[serde(default)]
+    cells: Vec<Vec<i32>>,
+}
+
+async fn rerender_tiles(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<RerenderBody>,
+) -> ApiResult<(StatusCode, Json<crate::services::map_tile_jobs::Job>)> {
+    let job = crate::services::map_tile_jobs::enqueue(&state, body.squares, body.cells).await?;
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+async fn tile_job(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<crate::services::map_tile_jobs::Job>> {
+    Ok(Json(crate::services::map_tile_jobs::get(&state.db, id).await?))
 }

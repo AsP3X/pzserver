@@ -39,6 +39,16 @@ pub struct Config {
     /// Directory the KnoxRelay mod writes its JSON exports into.
     pub lua_bridge_path: PathBuf,
     pub backup_path: PathBuf,
+    /// Packed isometric tile pyramid. `/map-tiles` in the container; the host
+    /// side is PZ_MAP_TILES_HOST.
+    pub map_tiles_path: PathBuf,
+    /// Image used to spawn a one-shot `pz-map-tiles` renderer.
+    pub map_tiles_image: String,
+    /// Host paths for the renderer binds (Docker API `HostConfig.Binds`).
+    pub pz_server_host: String,
+    pub pz_texturepacks_host: String,
+    pub map_tiles_host: String,
+    pub pz_game_version: String,
     pub steam_branch: Option<String>,
     /// Path to the live `server.ini`.
     pub server_ini_path: PathBuf,
@@ -128,6 +138,15 @@ impl Config {
             server_name,
             lua_bridge_path,
             backup_path: PathBuf::from(string("BACKUP_PATH", "/backups")),
+            map_tiles_path: PathBuf::from(string("MAP_TILES_PATH", "/map-tiles/tiles.sqlite")),
+            map_tiles_image: string("MAP_TILES_IMAGE", "pzserver-map-tiles:local"),
+            pz_server_host: string("PZ_SERVER_HOST", "./data/server"),
+            pz_texturepacks_host: string(
+                "PZ_TEXTUREPACKS_HOST",
+                "./data/server/media/texturepacks",
+            ),
+            map_tiles_host: string("PZ_MAP_TILES_HOST", "./data/map-tiles"),
+            pz_game_version: string("PZ_GAME_VERSION", "42.20.0"),
             steam_branch: optional("PZ_STEAM_BRANCH"),
             server_ini_path,
             bridge_workshop_id: optional("PZ_BRIDGE_WORKSHOP_ID"),

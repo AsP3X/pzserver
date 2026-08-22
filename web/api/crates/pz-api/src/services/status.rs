@@ -15,8 +15,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use pz_bridge::{
-    ContainerState, ContainerStatus, DockerClient, LuaBridge, PublicUpdate, ServerIni,
-    UpdateReport,
+    ContainerState, ContainerStatus, DockerClient, LuaBridge, PublicUpdate, ServerIni, UpdateReport,
 };
 use pz_rcon::RconConnection;
 use serde::Serialize;

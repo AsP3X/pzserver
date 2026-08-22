@@ -190,7 +190,9 @@ pub async fn credit_tx(
     reference_id: Option<Uuid>,
 ) -> ApiResult<WalletTransaction> {
     if amount < 1 {
-        return Err(ApiError::Validation("Amount must be at least 1 coin.".to_owned()));
+        return Err(ApiError::Validation(
+            "Amount must be at least 1 coin.".to_owned(),
+        ));
     }
     ensure_wallet(tx, user_id).await?;
     sqlx::query(
@@ -227,7 +229,9 @@ pub async fn debit_tx(
     reference_id: Option<Uuid>,
 ) -> ApiResult<WalletTransaction> {
     if amount < 1 {
-        return Err(ApiError::Validation("Amount must be at least 1 coin.".to_owned()));
+        return Err(ApiError::Validation(
+            "Amount must be at least 1 coin.".to_owned(),
+        ));
     }
     ensure_wallet(tx, user_id).await?;
     let updated = sqlx::query(
@@ -261,12 +265,11 @@ pub async fn available_tx(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
-    let balance: i64 = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT balance FROM wallets WHERE user_id = $1), 0)",
-    )
-    .bind(user_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    let balance: i64 =
+        sqlx::query_scalar("SELECT COALESCE((SELECT balance FROM wallets WHERE user_id = $1), 0)")
+            .bind(user_id)
+            .fetch_one(&mut **tx)
+            .await?;
     let held: i64 = held_amount_tx(tx, user_id).await?;
     Ok((balance - held).max(0))
 }
@@ -332,6 +335,7 @@ async fn ensure_wallet(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_tx(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,

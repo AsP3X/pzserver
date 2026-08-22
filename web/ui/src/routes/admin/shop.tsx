@@ -1,15 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Search, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Field, FormError, TextAreaField } from '@/components/ui/field'
+import { ItemPickerDialog } from '@/components/ui/item-picker'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, ApiError, type StoreItem, type StoreItemInput } from '@/lib/api'
+import { api, ApiError, type CatalogItem, type StoreItem, type StoreItemInput } from '@/lib/api'
 import { cn } from '@/lib/cn'
-import { adminStorePurchasesQuery, adminStoreQuery } from '@/lib/queries'
+import { adminItemsQuery, adminStorePurchasesQuery, adminStoreQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -288,10 +289,28 @@ function ItemFields({
   function patch(next: Partial<StoreItemInput>) {
     onChange({ ...value, ...next })
   }
+
+  /**
+   * Setting the ID is unconditional; filling the name is not.
+   *
+   * On a new listing the name is empty, so picking Fire Axe saves a retype. On
+   * an edit it is whatever staff chose to call it — possibly deliberately not
+   * the vanilla name — and changing the item must not overwrite that.
+   */
+  function pick(item: CatalogItem) {
+    const named = (value.name ?? '').trim() === '' && item.name !== ''
+
+    onChange({
+      ...value,
+      item_type: item.full_type,
+      ...(named ? { name: item.name } : {}),
+    })
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <Field label={t('economy.item_name')} value={value.name ?? ''} onChange={(event) => patch({ name: event.target.value })} />
-      <Field label={t('economy.item_type')} value={value.item_type ?? ''} onChange={(event) => patch({ item_type: event.target.value })} />
+      <ItemTypeField value={value} onPick={pick} />
       <TextAreaField
         label={t('admin.automations_message')}
         value={value.description ?? ''}
@@ -372,6 +391,66 @@ function ItemFields({
         />
         {t('economy.featured')}
       </label>
+    </div>
+  )
+}
+
+/**
+ * The item ID, as a button rather than a text box.
+ *
+ * Typing `Base.Axe` by hand is fine; the other five thousand IDs are not, and
+ * a typo produces a listing that takes coins and delivers nothing, because
+ * `additem` fails silently on an ID the server does not know.
+ */
+function ItemTypeField({
+  value,
+  onPick,
+}: {
+  value: StoreItemInput
+  onPick: (item: CatalogItem) => void
+}) {
+  const { t } = useTranslation()
+  const [picking, setPicking] = useState(false)
+  const catalogue = useQuery(adminItemsQuery)
+
+  const itemType = value.item_type ?? ''
+  const known = catalogue.data?.items.find((item) => item.full_type === itemType) ?? null
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="font-mono text-[0.6875rem] tracking-widest text-smoke uppercase">
+        {t('economy.item_type')}
+      </span>
+
+      <button
+        type="button"
+        onClick={() => setPicking(true)}
+        className={cn(
+          'flex h-12 items-center justify-between gap-3 border border-fence-bright bg-void px-3 text-left',
+          'transition-colors hover:border-hazard',
+        )}
+      >
+        {itemType === '' ? (
+          <span className="text-sm text-dust">{t('economy.choose_item')}</span>
+        ) : (
+          <span className="min-w-0">
+            {known ? (
+              <span className="block truncate text-sm text-bone">{known.name}</span>
+            ) : null}
+            <span
+              className={cn(
+                'block truncate font-mono',
+                known ? 'text-xs text-smoke' : 'text-sm text-bone',
+              )}
+            >
+              {itemType}
+            </span>
+          </span>
+        )}
+        <Search aria-hidden="true" className="size-4 shrink-0 text-dust" />
+      </button>
+
+      <ItemPickerDialog open={picking} onSelect={onPick} onClose={() => setPicking(false)} />
     </div>
   )
 }
