@@ -102,11 +102,15 @@ export function setRenderedMaxLevel(level: number): void {
   renderedMaxLevel = Math.min(ISO_DZI.maxLevel, Math.max(ISO_DZI.minLevel, level))
 }
 
+/** Query string for tile URLs; `undefined` until meta has been read. */
+let packRevision: string | undefined
+
 export interface TileMeta {
   generated: boolean
   min_level: number | null
   max_level: number | null
   game_version: string | null
+  generated_at: string | null
 }
 
 let metaRequest: Promise<TileMeta> | null = null
@@ -119,11 +123,19 @@ export function loadTileMeta(): Promise<TileMeta> {
       if (meta.max_level !== null) {
         setRenderedMaxLevel(meta.max_level)
       }
+      setPackRevision(meta.generated_at ?? meta.game_version ?? '')
       return meta
     })
     .catch(() => {
       metaRequest = null
-      return { generated: false, min_level: null, max_level: null, game_version: null }
+      setPackRevision('')
+      return {
+        generated: false,
+        min_level: null,
+        max_level: null,
+        game_version: null,
+        generated_at: null,
+      }
     })
 
   return metaRequest
@@ -136,7 +148,11 @@ export function levelForScale(isoScale: number): number {
 }
 
 export function tileUrl(z: number, x: number, y: number): string {
-  return ISO_TILE_URL.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
+  const url = ISO_TILE_URL.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
+  if (packRevision) {
+    return `${url}?v=${encodeURIComponent(packRevision)}`
+  }
+  return url
 }
 
 /** How many full-res DZI pixels one tile covers at this level. */
@@ -354,12 +370,22 @@ export class IsoTileCache {
     this.order.push(...keep)
   }
 
+  invalidate(): void {
+    this.entries.clear()
+    this.order.length = 0
+    this.notify()
+  }
+
   get(tile: IsoTile): HTMLImageElement | null {
     const entry = this.entries.get(this.key(tile))
     return entry?.status === 'ready' ? entry.image : null
   }
 
   request(tile: IsoTile) {
+    if (packRevision === undefined) {
+      return
+    }
+
     const key = this.key(tile)
     if (this.entries.has(key)) {
       this.touch(key)
@@ -457,6 +483,11 @@ export class IsoTileCache {
 }
 
 export const isoTiles = new IsoTileCache()
+
+export function setPackRevision(rev: string): void {
+  packRevision = rev
+  isoTiles.invalidate()
+}
 
 /** Paint the visible window. Requests missing tiles as a side effect. */
 export function drawIsoTiles(

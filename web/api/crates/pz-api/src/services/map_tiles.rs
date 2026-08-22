@@ -20,6 +20,7 @@ pub struct TileMeta {
     pub min_level: Option<i64>,
     pub max_level: Option<i64>,
     pub game_version: Option<String>,
+    pub generated_at: Option<String>,
 }
 
 impl TileMeta {
@@ -29,6 +30,7 @@ impl TileMeta {
             min_level: None,
             max_level: None,
             game_version: None,
+            generated_at: None,
         }
     }
 }
@@ -124,8 +126,17 @@ impl MapTiles {
         }
     }
 
+    /// Live row from the pack, not the copy taken at open — a regional job
+    /// bumps `generated_at` in place and the client cache-busts from this.
     pub fn meta(&self) -> TileMeta {
-        self.meta.clone()
+        let Some(inner) = &self.inner else {
+            return self.meta.clone();
+        };
+        let con = inner
+            .checkout()
+            .lock()
+            .expect("map tile store mutex poisoned");
+        read_meta(&con).unwrap_or_else(|_| self.meta.clone())
     }
 
     /// One tile, or `None` when it was never rendered.
@@ -167,6 +178,7 @@ fn read_meta(con: &Connection) -> rusqlite::Result<TileMeta> {
         min_level: get("min_level")?.and_then(|v| v.parse().ok()),
         max_level: get("max_level")?.and_then(|v| v.parse().ok()),
         game_version: get("game_version")?,
+        generated_at: get("generated_at")?,
     })
 }
 
@@ -182,7 +194,7 @@ mod tests {
                  PRIMARY KEY (z, x, y)) WITHOUT ROWID;
              CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              INSERT INTO meta VALUES ('min_level','8'),('max_level','20'),
-                 ('game_version','42.20.0');",
+                 ('game_version','42.20.0'),('generated_at','2026-08-22T00:00:00Z');",
         )
         .unwrap();
         for (z, x, y, body) in tiles {
@@ -262,5 +274,19 @@ mod tests {
         assert_eq!(meta.min_level, Some(8));
         assert_eq!(meta.max_level, Some(20));
         assert_eq!(meta.game_version.as_deref(), Some("42.20.0"));
+        assert_eq!(meta.generated_at.as_deref(), Some("2026-08-22T00:00:00Z"));
+
+        let path = dir.path().join("tiles.sqlite");
+        let con = rusqlite::Connection::open(&path).unwrap();
+        con.execute(
+            "UPDATE meta SET value = '2026-08-22T12:00:00Z' WHERE key = 'generated_at'",
+            [],
+        )
+        .unwrap();
+        drop(con);
+        assert_eq!(
+            store.meta().generated_at.as_deref(),
+            Some("2026-08-22T12:00:00Z")
+        );
     }
 }

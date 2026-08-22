@@ -13,8 +13,7 @@ use axum::{Json, Router};
 use crate::services::map_tiles::TileMeta;
 use crate::state::AppState;
 
-/// A week. Not `immutable`: the URL carries no version, so a re-render for a
-/// new game build returns different bytes at the same path.
+/// A week. Not `immutable`: the client cache-busts with `?v=generated_at`.
 const TILE_CACHE: &str = "public, max-age=604800";
 
 pub fn routes() -> Router<AppState> {

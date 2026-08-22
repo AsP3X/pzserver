@@ -66,18 +66,58 @@ fn format_rects(rects: &[[i32; 4]]) -> String {
         .join(";")
 }
 
+/// Docker `HostConfig.Binds` sources are resolved on the host. Relative
+/// paths from the API container (`./data/server`) silently bind the wrong
+/// place, so enqueue refuses them.
+fn is_docker_bind_source(s: &str) -> bool {
+    if s.starts_with('/') {
+        return true;
+    }
+    let mut chars = s.chars();
+    matches!(
+        (chars.next(), chars.next(), chars.next()),
+        (Some(drive), Some(':'), Some('/' | '\\')) if drive.is_ascii_alphabetic()
+    )
+}
+
+fn require_absolute_binds(state: &AppState) -> ApiResult<()> {
+    if is_docker_bind_source(&state.config.pz_server_host)
+        && is_docker_bind_source(&state.config.pz_texturepacks_host)
+        && is_docker_bind_source(&state.config.map_tiles_host)
+    {
+        return Ok(());
+    }
+
+    Err(ApiError::Validation(
+        "PZ_SERVER_HOST, PZ_TEXTUREPACKS_HOST, and PZ_MAP_TILES_HOST must be absolute host paths for the API".to_owned(),
+    ))
+}
+
 pub async fn enqueue(
     state: &AppState,
     squares: Vec<Vec<i32>>,
     cells: Vec<Vec<i32>>,
 ) -> ApiResult<Job> {
     let (squares, cells) = normalize(&squares, &cells)?;
+    require_absolute_binds(state)?;
 
-    if container_present(&state.config.docker_proxy_url).await {
-        return Err(ApiError::Conflict {
-            field: "job",
-            message: "a map tile job is already running".to_owned(),
-        });
+    match inspect_container(&state.config.docker_proxy_url).await {
+        Some(200) => {
+            return Err(ApiError::Conflict {
+                field: "job",
+                message: "a map tile job is already running".to_owned(),
+            });
+        }
+        Some(404) => {
+            sqlx::query(
+                r#"UPDATE map_tile_jobs
+                   SET status = 'failed', error = 'container gone', finished_at = now()
+                   WHERE status IN ('queued', 'running')"#,
+            )
+            .execute(&state.db)
+            .await?;
+        }
+        _ => {}
     }
 
     let id: Uuid = sqlx::query_scalar(
@@ -107,14 +147,14 @@ pub async fn get(db: &PgPool, id: Uuid) -> ApiResult<Job> {
     .ok_or(ApiError::NotFound)
 }
 
-async fn container_present(proxy: &str) -> bool {
+async fn inspect_container(proxy: &str) -> Option<u16> {
     let url = format!(
         "{}/containers/{CONTAINER}/json",
         proxy.trim_end_matches('/')
     );
     match http_client(INSPECT_TIMEOUT).get(url).send().await {
-        Ok(response) => response.status().as_u16() == 200,
-        Err(_) => false,
+        Ok(response) => Some(response.status().as_u16()),
+        Err(_) => None,
     }
 }
 
@@ -157,7 +197,7 @@ async fn spawn_and_wait(
                 format!("{}:/out", state.config.map_tiles_host),
             ],
             "ShmSize": SHM_SIZE,
-            "AutoRemove": true,
+            "AutoRemove": false,
         },
     });
 
@@ -185,21 +225,15 @@ async fn spawn_and_wait(
     // 304: already running.
     if !start_status.is_success() && start_status.as_u16() != 304 {
         let text = start.text().await.unwrap_or_default();
+        remove_container(proxy).await;
         return Err(format!("docker start failed ({start_status}): {text}"));
     }
 
-    let wait = http_client(WAIT_TIMEOUT)
-        .post(format!("{proxy}/containers/{CONTAINER}/wait"))
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    if !wait.status().is_success() {
-        let status = wait.status();
-        let text = wait.text().await.unwrap_or_default();
-        return Err(format!("docker wait failed ({status}): {text}"));
-    }
+    let wait_outcome = wait_container(proxy).await;
+    let logs = container_logs(proxy).await;
+    remove_container(proxy).await;
 
-    let wait_body: WaitBody = wait.json().await.map_err(|error| error.to_string())?;
+    let wait_body = wait_outcome?;
     if wait_body.status_code == 0 {
         sqlx::query(
             r#"UPDATE map_tile_jobs
@@ -213,25 +247,49 @@ async fn spawn_and_wait(
         return Ok(());
     }
 
-    Err(exit_error(proxy, wait_body.status_code).await)
+    Err(exit_message(wait_body.status_code, &logs))
 }
 
-async fn exit_error(proxy: &str, code: i32) -> String {
+async fn wait_container(proxy: &str) -> Result<WaitBody, String> {
+    let wait = http_client(WAIT_TIMEOUT)
+        .post(format!("{proxy}/containers/{CONTAINER}/wait"))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !wait.status().is_success() {
+        let status = wait.status();
+        let text = wait.text().await.unwrap_or_default();
+        return Err(format!("docker wait failed ({status}): {text}"));
+    }
+    wait.json().await.map_err(|error| error.to_string())
+}
+
+async fn container_logs(proxy: &str) -> Vec<String> {
     let url = format!("{proxy}/containers/{CONTAINER}/logs?stdout=1&stderr=1&tail=50");
     let Ok(response) = http_client(INSPECT_TIMEOUT).get(url).send().await else {
-        return format!("map-tiles container exited {code}");
+        return Vec::new();
     };
     if !response.status().is_success() {
-        return format!("map-tiles container exited {code}");
+        return Vec::new();
     }
     let Ok(raw) = response.bytes().await else {
-        return format!("map-tiles container exited {code}");
+        return Vec::new();
     };
-    let lines = pz_bridge::parse_docker_logs(&raw);
-    if lines.is_empty() {
+    pz_bridge::parse_docker_logs(&raw)
+}
+
+async fn remove_container(proxy: &str) {
+    let url = format!("{proxy}/containers/{CONTAINER}?force=true");
+    if let Err(error) = http_client(INSPECT_TIMEOUT).delete(&url).send().await {
+        tracing::warn!(%error, "map-tiles container could not be removed");
+    }
+}
+
+fn exit_message(code: i32, logs: &[String]) -> String {
+    if logs.is_empty() {
         format!("map-tiles container exited {code}")
     } else {
-        lines.join("\n")
+        logs.join("\n")
     }
 }
 
@@ -287,6 +345,19 @@ mod tests {
             format_rects(&[[1, 2, 3, 4], [5, 6, 7, 8]]),
             "1,2,3,4;5,6,7,8"
         );
+    }
+
+    #[test]
+    fn docker_bind_source_must_be_absolute() {
+        assert!(is_docker_bind_source("/data/server"));
+        assert!(is_docker_bind_source("C:\\data\\server"));
+        assert!(is_docker_bind_source("C:/data/server"));
+        assert!(is_docker_bind_source("d:/map-tiles"));
+        assert!(is_docker_bind_source("//c/Users/asp3x/data"));
+        assert!(!is_docker_bind_source("./data/server"));
+        assert!(!is_docker_bind_source("data/server"));
+        assert!(!is_docker_bind_source("C:foo"));
+        assert!(!is_docker_bind_source(""));
     }
 
     #[test]

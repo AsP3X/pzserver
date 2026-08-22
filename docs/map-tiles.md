@@ -219,32 +219,29 @@ the contract.
 
 ## After a render
 
-The store is opened once at API start-up, so a render against a running stack
-needs a restart before the API sees it:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.amd64.yml -f docker-compose.web.yml restart web-api
-```
-
-Then:
+A pack updates `tiles.sqlite` in place (WAL, then `wal_checkpoint(TRUNCATE)`).
+web-api stays up; it does not need a restart. Tile reads go to the live file,
+`GET /map-tiles/meta` re-reads `generated_at`, and the client cache-busts JPEG
+URLs with `?v=generated_at` (falling back to `game_version`).
 
 ```bash
 curl -s http://127.0.0.1:8100/api/v1/map-tiles/meta
 ```
 
 ```json
-{"generated":true,"min_level":8,"max_level":20,"game_version":"42.20.0"}
+{"generated":true,"min_level":8,"max_level":20,"game_version":"42.20.0","generated_at":"2026-08-22T00:00:00Z"}
 ```
 
 Before any render the same endpoint answers
-`{"generated":false,"min_level":null,"max_level":null,"game_version":null}` and
-every tile is a `404`. That is the correct state, not a failure — the UI reads it
-and tells staff the tiles have not been generated yet.
+`{"generated":false,"min_level":null,"max_level":null,"game_version":null,"generated_at":null}`
+and every tile is a `404`. That is the correct state, not a failure — the UI
+reads it and tells staff the tiles have not been generated yet.
 
 ## On-disk layout
 
 Host bind (default): `./data/map-tiles/` → container `/out` for the renderer,
-`/map-tiles` read-only for the API.
+`/map-tiles` for the API (writable — WAL readers write a slot in the `-shm`
+file). The API still opens the database `SQLITE_OPEN_READ_ONLY`.
 
 ```
 data/map-tiles/
@@ -306,10 +303,9 @@ A missing row, a missing `tiles.sqlite`, or a tile name that does not parse all
 answer `404` with an empty body. Both routes are public, like the rest of the map
 surface — a tile is not a secret.
 
-The cache header is deliberately **not** `immutable`: the URL carries no version,
-so re-rendering for a new game build returns different bytes at the same path. A
-week of staleness after a re-render is the accepted cost of keeping the URL
-simple.
+The cache header is deliberately **not** `immutable`. Tile URLs carry
+`?v=generated_at`, so a re-render gets a new query string and the browser
+fetches the new bytes. A week of caching is then safe for that revision.
 
 `rusqlite::Connection` is `!Sync`, so the store holds one mutex-guarded read-only
 connection and reads it inside `spawn_blocking`.
@@ -358,8 +354,9 @@ changes those bounds, so `verify.py` and `ISO_DZI` have to move together.
 
 **The map is blank in 3D mode.** Check `/api/v1/map-tiles/meta`. If it says
 `generated: false`, no render has completed — the UI should already be showing
-the vector basemap and saying so. If it says `true`, check that `web-api` was
-restarted after the render.
+the vector basemap and saying so. If it says `true` but the picture is stale,
+reload so the client picks up the new `generated_at` (`?v=`). Do not restart
+web-api for a pack; the update is in place.
 
 **Pins are offset from the buildings.** Stop and re-render. This is the failure
 the geometry gate exists to prevent, so it should be unreachable; if it does

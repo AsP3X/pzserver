@@ -80,15 +80,20 @@ if [ -n "$REGION" ]; then
         exit 1
     fi
 
-    if [ -n "$CELLS" ] && [ -z "$SQUARES" ]; then
+    if [ -n "$CELLS" ]; then
         printf '%s' "$CELLS" > /tmp/cells.txt
-        SQUARES=$(python -c "
+        CELL_SQUARES=$(python -c "
 from cells import Geometry, cells_as_squares, parse_rects
 from pathlib import Path
 geo = Geometry.from_map_info(Path('$TREE/map_info.json'))
 rects = cells_as_squares(geo, parse_rects(Path('/tmp/cells.txt').read_text()))
 print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
 ")
+        if [ -n "$SQUARES" ]; then
+            SQUARES="${SQUARES};${CELL_SQUARES}"
+        else
+            SQUARES="$CELL_SQUARES"
+        fi
     fi
 
     echo "==> planning regional re-render: $SQUARES"
