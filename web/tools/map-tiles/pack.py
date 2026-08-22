@@ -24,14 +24,20 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 
-def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False) -> int:
+def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False,
+         only: set | None = None, wal: bool = False) -> int:
     """Store every tile under `tiles_dir`. Returns how many were newly added.
 
     `replace` is for a re-render: without it the fresh bytes lose to the row
     already there and the whole run is a no-op. The default stays skip-on-
     conflict, which is what makes an interrupted first pack resumable.
+    `only` limits a regional re-pack to named keys so merge siblings stay
+    untouched on disk and in the database. `wal` lets readers keep going
+    while the pack updates a live database.
     """
     con = sqlite3.connect(db_path)
+    if wal:
+        con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
 
     added = 0
@@ -41,6 +47,8 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False) -> i
         batch = []
         for tile in level_dir.glob("*.jpg"):
             x, _, y = tile.stem.partition("_")
+            if only is not None and (z, int(x), int(y)) not in only:
+                continue
             batch.append((z, int(x), int(y), tile.read_bytes(), tile))
 
             if len(batch) >= 500:
@@ -69,6 +77,9 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False) -> i
         list(meta.items()),
     )
     con.commit()
+
+    if wal:
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Only after a full pack. VACUUM rebuilds the entire database into a
     # temporary copy beside it, so on a 24 GB pack it costs tens of minutes and
@@ -116,13 +127,52 @@ def _flush(con, batch, replace: bool = False) -> int:
     return con.total_changes - before
 
 
+def _read_keys(path) -> set:
+    """Parse lines of `z/x_y` into (z, x, y) tuples."""
+    tiles = set()
+    for line in Path(path).read_text(encoding="utf-8").split():
+        z, _, rest = line.partition("/")
+        x, _, y = rest.partition("_")
+        tiles.add((int(z), int(x), int(y)))
+    return tiles
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("usage: pack.py <layer0_files dir> <tiles.sqlite> [k=v ...]", file=sys.stderr)
+        print(
+            "usage: pack.py <layer0_files dir> <tiles.sqlite> "
+            "[--replace] [--wal] [--only keys.txt] [k=v ...]",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
 
-    args = [a for a in sys.argv[3:] if a != "--replace"]
-    replace = "--replace" in sys.argv[3:]
-    extra = dict(pair.split("=", 1) for pair in args)
-    n = pack(Path(sys.argv[1]), Path(sys.argv[2]), extra, replace=replace)
+    replace = False
+    wal = False
+    only = None
+    meta_args = []
+    argv = sys.argv[3:]
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--replace":
+            replace = True
+            i += 1
+        elif argv[i] == "--wal":
+            wal = True
+            i += 1
+        elif argv[i] == "--only":
+            only = _read_keys(argv[i + 1])
+            i += 2
+        else:
+            meta_args.append(argv[i])
+            i += 1
+
+    extra = dict(pair.split("=", 1) for pair in meta_args)
+    n = pack(
+        Path(sys.argv[1]),
+        Path(sys.argv[2]),
+        extra,
+        replace=replace,
+        only=only,
+        wal=wal,
+    )
     print(f"packed {n} new tiles into {sys.argv[2]}")
