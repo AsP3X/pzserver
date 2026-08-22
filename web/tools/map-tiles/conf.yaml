@@ -61,17 +61,21 @@ render_conf:
     #
     # omit_levels above means levels 21 and 22 are rendered but never written
     # to disk -- they exist only in this cache, and level 20 is merged from
-    # them. Eviction calls save_tile, which returns 'skip' for exactly those
-    # levels (pzdzi.py:127), so an evicted deep tile is destroyed rather than
-    # spilled. Its level-20 parent then merges a missing quadrant as black.
+    # them. Upstream's own default is enable_cache: false (see their conf.yaml)
+    # and they added commit cfb29a55 so omit_levels works with the cache off.
+    # We keep the cache for speed. patch_scheduler.py (applied at image build)
+    # refuses to LRU-evict a tile whose parent is still pending, which is the
+    # combination that painted black rectangles: save_tile returns 'skip' for
+    # omitted levels, so an evicted child is destroyed and its parent merges a
+    # missing quadrant as black.
     #
-    # Measured: at 4096 MB the render reported `cache hit: 336376/349463 =
-    # 96.26%` and produced ~13,000 black holes across the map. At 0 (the
-    # default, meaning unbounded) nothing is evicted and nothing is lost, but
-    # /dev/shm runs out and the workers die silently instead.
+    # Measured without the pin: at 4096 MB the render reported `cache hit:
+    # 336376/349463 = 96.26%` and produced ~13,000 black holes. At 16384, peak
+    # 5760, nothing was evicted and those holes were gone — but the next run
+    # that hits the ceiling would paint them again. The pin is the actual fix;
+    # the high limit is still the cheaper working set.
     #
-    # run.sh gates on the hit rate being 100%, which is the only way to know
-    # this number was big enough for a given map.
+    # run.sh still fails the run if the peak comes within 5% of the limit.
     cache_limit_mb: 16384
 
     # jpg for the base layer is already the default; stated so a future default
