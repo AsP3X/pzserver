@@ -1,21 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
+  BookOpen,
+  Bug,
+  Car,
   ChevronDown,
+  ChevronRight,
+  Clock,
+  Cloud,
   Eye,
   EyeOff,
+  GraduationCap,
   Home,
   MessageSquare,
   MoreHorizontal,
   Package,
+  PawPrint,
+  Puzzle,
   RotateCcw,
   Save,
   Search,
   Shield,
   Swords,
+  User,
   Users,
   Wifi,
   X,
+  Zap,
   Globe,
   Map as MapIcon,
   Star,
@@ -34,29 +45,37 @@ import { cn } from '@/lib/cn'
 import {
   CONFIG_GROUPS,
   FEATURED_KEYS,
+  SANDBOX_FEATURED_KEYS,
+  SANDBOX_GROUPS,
+  featuredKeysFor,
+  groupByParentTable,
   groupLabelKey,
+  groupsFor,
   hasSettingHelp,
   hasSettingLabel,
   humanizeKey,
+  humanizeTable,
   isSensitive,
+  numberInputStep,
   parseBoolean,
   settingGroup,
   settingHelpKey,
   settingLabelKey,
   settingMeta,
   splitList,
-  type ConfigGroupId,
+  type ConfigSource,
   type SettingMeta,
 } from '@/lib/config-metadata'
 import { fuzzyMatch } from '@/lib/fuzzy'
-import { adminConfigQuery, serverStatusQuery } from '@/lib/queries'
+import { adminConfigQuery, adminSandboxQuery, serverStatusQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
 const LINE_BREAK_TAG = ' <LINE> '
 const FEATURED_KEY_SET = new Set<string>(FEATURED_KEYS)
+const SANDBOX_FEATURED_KEY_SET = new Set<string>(SANDBOX_FEATURED_KEYS)
 
-const GROUP_ICONS: Record<ConfigGroupId, LucideIcon> = {
+const GROUP_ICONS: Record<string, LucideIcon> = {
   featured: Star,
   general: Globe,
   players: Users,
@@ -67,14 +86,30 @@ const GROUP_ICONS: Record<ConfigGroupId, LucideIcon> = {
   chat: MessageSquare,
   saves: Save,
   security: Shield,
-  mods: Package,
+  mods: Puzzle,
   other: MoreHorizontal,
+  population: Bug,
+  lore: BookOpen,
+  time: Clock,
+  climate: Cloud,
+  utilities: Zap,
+  loot: Package,
+  vehicles: Car,
+  animals: PawPrint,
+  combat: Swords,
+  character: User,
+  skills: GraduationCap,
+  map: MapIcon,
+}
+
+function groupIcon(id: string): LucideIcon {
+  return GROUP_ICONS[id] ?? MoreHorizontal
 }
 
 type Row = {
   field: ConfigField
   meta?: SettingMeta
-  group: ConfigGroupId
+  group: string
 }
 
 /**
@@ -89,26 +124,48 @@ export function AdminConfigPage() {
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement>(null)
 
-  const { data, isPending, isError, refetch } = useQuery(adminConfigQuery)
+  const hash = readConfigHash()
+  const [source, setSource] = useState<ConfigSource>(hash.source)
+  const [group, setGroup] = useState<string>(hash.group)
+  const server = useQuery(adminConfigQuery)
+  const sandbox = useQuery(adminSandboxQuery)
   const status = useQuery(serverStatusQuery)
+  const active = source === 'sandbox' ? sandbox : server
+  const data = active.data
+  const isPending = active.isPending
+  const isError = active.isError
+  const refetch = active.refetch
 
-  const [group, setGroup] = useState<ConfigGroupId>(readGroupHash)
   const [query, setQuery] = useState('')
-  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [serverDraft, setServerDraft] = useState<Record<string, string>>({})
+  const [sandboxDraft, setSandboxDraft] = useState<Record<string, string>>({})
+  const draft = source === 'sandbox' ? sandboxDraft : serverDraft
+  const setDraft = source === 'sandbox' ? setSandboxDraft : setServerDraft
   const [notice, setNotice] = useState<string | null>(null)
   const [restarting, setRestarting] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    if (!data) {
+    if (!server.data) {
       return
     }
     const next: Record<string, string> = {}
-    for (const field of data.fields) {
+    for (const field of server.data.fields) {
       next[field.key] = field.value
     }
-    setDraft(next)
-  }, [data])
+    setServerDraft(next)
+  }, [server.data])
+
+  useEffect(() => {
+    if (!sandbox.data) {
+      return
+    }
+    const next: Record<string, string> = {}
+    for (const field of sandbox.data.fields) {
+      next[field.key] = field.value
+    }
+    setSandboxDraft(next)
+  }, [sandbox.data])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -127,9 +184,12 @@ export function AdminConfigPage() {
   }, [])
 
   const save = useMutation({
-    mutationFn: (updates: Record<string, string>) => api.adminUpdateConfig(updates),
+    mutationFn: (updates: Record<string, string>) =>
+      source === 'sandbox' ? api.adminUpdateSandbox(updates) : api.adminUpdateConfig(updates),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'config'] })
+      await queryClient.invalidateQueries({
+        queryKey: source === 'sandbox' ? ['admin', 'config', 'sandbox'] : ['admin', 'config'],
+      })
       setNotice(t('common.saved'))
     },
   })
@@ -144,13 +204,25 @@ export function AdminConfigPage() {
     onError: () => setRestarting(false),
   })
 
+  const featuredKeys = featuredKeysFor(source)
+  const sourceGroups = groupsFor(source)
+
   const rows = useMemo<Row[]>(() => {
-    return (data?.fields ?? []).map((field) => ({
-      field,
-      meta: settingMeta(field.key),
-      group: settingGroup(field.key),
-    }))
-  }, [data])
+    return (data?.fields ?? []).map((field) => {
+      if (source === 'sandbox') {
+        return {
+          field,
+          meta: sandboxSettingMeta(field),
+          group: field.group ?? 'other',
+        }
+      }
+      return {
+        field,
+        meta: settingMeta(field.key),
+        group: settingGroup(field.key),
+      }
+    })
+  }, [data, source])
 
   const originals = useMemo(() => {
     const map: Record<string, string> = {}
@@ -163,7 +235,7 @@ export function AdminConfigPage() {
   const dirtyKeys = useMemo(() => {
     const dirty: string[] = []
     for (const row of rows) {
-      if (row.meta?.readOnly) {
+      if (row.meta?.readOnly || row.field.read_only) {
         continue
       }
       const next = draft[row.field.key]
@@ -184,81 +256,110 @@ export function AdminConfigPage() {
   const searching = query.trim().length > 0
 
   const visible = useMemo(() => {
-    const source = searching
-      ? rows
-          .map((row) => {
-            const haystack = searchHaystack(row, t)
-            const hit = fuzzyMatch(query, haystack)
-            return hit ? { row, score: hit.score } : null
-          })
-          .filter((entry): entry is { row: Row; score: number } => entry !== null)
-          .sort((left, right) => right.score - left.score)
-          .map((entry) => entry.row)
-      : group === 'featured'
-        ? FEATURED_KEYS.map((key) => rows.find((row) => row.field.key === key)).filter(
-            (row): row is Row => Boolean(row),
-          )
-        : rows.filter((row) => row.group === group)
-
-    return source
-  }, [group, query, rows, searching, t])
+    if (searching) {
+      return rows
+        .map((row) => {
+          const haystack = searchHaystack(row, t)
+          const hit = fuzzyMatch(query, haystack)
+          return hit ? { row, score: hit.score } : null
+        })
+        .filter((entry): entry is { row: Row; score: number } => entry !== null)
+        .sort((left, right) => right.score - left.score)
+        .map((entry) => entry.row)
+    }
+    if (group === 'featured') {
+      return featuredKeys
+        .map((key) => rows.find((row) => row.field.key === key))
+        .filter((row): row is Row => Boolean(row))
+    }
+    return rows.filter((row) => row.group === group)
+  }, [featuredKeys, group, query, rows, searching, t])
 
   const groupedVisible = useMemo(() => {
-    const buckets = new Map<ConfigGroupId, Row[]>()
-    for (const id of CONFIG_GROUPS) {
+    const buckets = new Map<string, Row[]>()
+    for (const id of sourceGroups) {
       buckets.set(id, [])
     }
     for (const row of visible) {
       const id = searching ? row.group : group === 'featured' ? 'featured' : row.group
+      if (!buckets.has(id)) {
+        buckets.set(id, [])
+      }
       buckets.get(id)?.push(row)
     }
-    return CONFIG_GROUPS.map((id) => ({
-      id,
-      rows: buckets.get(id) ?? [],
-    })).filter((bucket) => bucket.rows.length > 0)
-  }, [group, searching, visible])
+    return sourceGroups
+      .map((id) => ({
+        id,
+        rows: buckets.get(id) ?? [],
+      }))
+      .filter((bucket) => bucket.rows.length > 0)
+  }, [group, searching, sourceGroups, visible])
+
+  const sections = useMemo(() => {
+    return groupedVisible.flatMap((bucket) => {
+      if (bucket.id !== 'mods') {
+        return [
+          {
+            id: bucket.id,
+            title: null as string | null,
+            group: bucket.id,
+            rows: bucket.rows,
+            collapsedByDefault: false,
+          },
+        ]
+      }
+      return groupByParentTable(bucket.rows, (row) => row.field.key).map((entry) => ({
+        id: `mods:${entry.table}`,
+        title: humanizeTable(entry.table),
+        group: 'mods',
+        rows: entry.items,
+        collapsedByDefault: true,
+      }))
+    })
+  }, [groupedVisible])
 
   const groupCounts = useMemo(() => {
-    const counts: Record<ConfigGroupId, number> = {
-      featured: 0,
-      general: 0,
-      players: 0,
-      pvp: 0,
-      world: 0,
-      safehouses: 0,
-      network: 0,
-      chat: 0,
-      saves: 0,
-      security: 0,
-      mods: 0,
-      other: 0,
+    const counts: Record<string, number> = {}
+    for (const id of sourceGroups) {
+      counts[id] = 0
     }
-    for (const key of FEATURED_KEYS) {
+    for (const key of featuredKeys) {
       if (rows.some((row) => row.field.key === key)) {
-        counts.featured += 1
+        counts.featured = (counts.featured ?? 0) + 1
       }
     }
     for (const row of rows) {
-      counts[row.group] += 1
+      counts[row.group] = (counts[row.group] ?? 0) + 1
     }
     return counts
-  }, [rows])
+  }, [featuredKeys, rows, sourceGroups])
 
   const dirtyByGroup = useMemo(() => {
-    const counts: Partial<Record<ConfigGroupId, number>> = {}
+    const counts: Record<string, number> = {}
+    const featured = source === 'sandbox' ? SANDBOX_FEATURED_KEY_SET : FEATURED_KEY_SET
     for (const key of dirtyKeys) {
-      const id = settingGroup(key)
+      const row = rows.find((entry) => entry.field.key === key)
+      const id = row?.group ?? settingGroup(key)
       counts[id] = (counts[id] ?? 0) + 1
-      if (FEATURED_KEY_SET.has(key)) {
+      if (featured.has(key)) {
         counts.featured = (counts.featured ?? 0) + 1
       }
     }
     return counts
-  }, [dirtyKeys])
+  }, [dirtyKeys, rows, source])
 
-  function selectGroup(next: ConfigGroupId) {
+  function selectGroup(next: string) {
     setGroup(next)
-    writeGroupHash(next)
+    writeConfigHash(source, next)
+  }
+
+  function selectSource(next: ConfigSource) {
+    setSource(next)
+    setQuery('')
+    const nextGroup = 'featured'
+    setGroup(nextGroup)
+    writeConfigHash(next, nextGroup)
+    setNotice(null)
   }
 
   function setValue(key: string, value: string) {
@@ -303,7 +404,7 @@ export function AdminConfigPage() {
         ? t('auth.unexpected_error')
         : null
 
-  const navGroups = CONFIG_GROUPS.filter((id) => id === 'featured' || groupCounts[id] > 0)
+  const navGroups = sourceGroups.filter((id) => id === 'featured' || (groupCounts[id] ?? 0) > 0)
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:p-5">
@@ -314,13 +415,32 @@ export function AdminConfigPage() {
             <span className="eyebrow">{t('nav.group.server')}</span>
           </div>
           <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('admin.config_title')}</h1>
-          <p className="mt-2 max-w-2xl text-sm text-smoke">{t('admin.config_description')}</p>
+          <p className="mt-2 max-w-2xl text-sm text-smoke">
+            {source === 'sandbox' ? t('admin.config_sandbox_description') : t('admin.config_description')}
+          </p>
+          <div className="mt-3 max-w-md">
+            <TabStrip
+              label={t('admin.config_title')}
+              items={[
+                { id: 'server', label: t('admin.config_source_server') },
+                {
+                  id: 'sandbox',
+                  label: t('admin.config_source_sandbox'),
+                  count: sandbox.data?.fields.length,
+                },
+              ]}
+              active={source}
+              onSelect={(id) => selectSource(id)}
+            />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-mono text-[0.6875rem] text-dust">
             {dirtyKeys.length > 0
               ? t('admin.config_unsaved', { count: dirtyKeys.length })
-              : t('admin.config_file')}
+              : source === 'sandbox'
+                ? t('admin.config_file_sandbox')
+                : t('admin.config_file')}
           </p>
           <Button size="sm" variant="outline" onClick={() => setRestarting(true)}>
             <RotateCcw aria-hidden="true" className="size-3.5" />
@@ -416,7 +536,7 @@ export function AdminConfigPage() {
               >
                 <ul className="flex flex-col p-2">
                   {navGroups.map((id) => {
-                    const Icon = GROUP_ICONS[id]
+                    const Icon = groupIcon(id)
                     const selected = !searching && group === id
                     const dirty = dirtyByGroup[id] ?? 0
 
@@ -453,37 +573,62 @@ export function AdminConfigPage() {
               </nav>
 
               <div className="min-h-0 overflow-y-auto">
-                {groupedVisible.length === 0 ? (
+                {sections.length === 0 ? (
                   <p className="p-5 text-sm text-dust">{t('admin.config_no_matches')}</p>
                 ) : (
-                  groupedVisible.map((bucket) => {
-                    const open = searching || !collapsed.has(bucket.id)
-                    const Icon = GROUP_ICONS[bucket.id]
+                  sections.map((section) => {
+                    const flipped = collapsed.has(section.id)
+                    const open = searching || (section.collapsedByDefault ? flipped : !flipped)
+                    const Icon = groupIcon(section.group)
+                    const dirtyCount = section.rows.filter((row) => dirtySet.has(row.field.key)).length
+                    const preview = section.rows.slice(0, 3).map((row) =>
+                      hasSettingLabel(row.field.key)
+                        ? t(settingLabelKey(row.field.key))
+                        : humanizeKey(row.field.key),
+                    )
+                    const extra = section.rows.length - preview.length
+                    const heading = section.title ?? t(groupLabelKey(section.group))
 
                     return (
-                      <section key={bucket.id} className="border-b border-fence last:border-b-0">
+                      <section key={section.id} className="border-b border-fence last:border-b-0">
                         <button
                           type="button"
-                          className="flex w-full items-center gap-2 px-4 py-3 text-left"
-                          onClick={() => toggleCollapsed(bucket.id)}
+                          className="flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-ash-raised"
+                          onClick={() => toggleCollapsed(section.id)}
                           aria-expanded={open}
+                          aria-label={`${heading}, ${t('admin.config_option_count', { count: section.rows.length })}`}
                         >
-                          <Icon aria-hidden="true" className="size-3.5 text-dust" />
-                          <span className="eyebrow">{t(groupLabelKey(bucket.id))}</span>
-                          <span className="font-mono text-[0.6875rem] text-dust tabular-nums">
-                            {bucket.rows.length}
-                          </span>
-                          <ChevronDown
-                            aria-hidden="true"
-                            className={cn(
-                              'ml-auto size-4 text-dust transition-transform',
-                              open && 'rotate-180',
+                          <span className="flex items-center gap-2">
+                            <Icon aria-hidden="true" className="size-3.5 shrink-0 text-dust" />
+                            <span className="eyebrow min-w-0 flex-1 truncate">{heading}</span>
+                            <span
+                              className={cn(
+                                'shrink-0 border px-1.5 py-0.5 font-mono text-[0.625rem] tracking-wide tabular-nums uppercase',
+                                dirtyCount > 0
+                                  ? 'border-hazard/50 text-hazard'
+                                  : 'border-fence-bright text-smoke',
+                              )}
+                            >
+                              {t('admin.config_option_count', { count: section.rows.length })}
+                            </span>
+                            {open ? (
+                              <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-smoke" />
+                            ) : (
+                              <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-smoke" />
                             )}
-                          />
+                          </span>
+                          {open ? null : (
+                            <span className="pl-6 text-xs leading-relaxed text-dust">
+                              {preview.join(', ')}
+                              {extra > 0
+                                ? ` · ${t('admin.config_section_more', { count: extra })}`
+                                : ''}
+                            </span>
+                          )}
                         </button>
                         {open ? (
                           <div className="divide-y divide-fence border-t border-fence">
-                            {bucket.rows.map((row) => (
+                            {section.rows.map((row) => (
                               <SettingRow
                                 key={row.field.key}
                                 row={row}
@@ -557,7 +702,11 @@ function SettingRow({
   const label = hasSettingLabel(row.field.key)
     ? t(settingLabelKey(row.field.key))
     : humanizeKey(row.field.key)
-  const help = hasSettingHelp(row.field.key) ? t(settingHelpKey(row.field.key)) : null
+  const help = row.field.help
+    ? row.field.help
+    : hasSettingHelp(row.field.key)
+      ? t(settingHelpKey(row.field.key))
+      : null
   const wide = meta?.type === 'text' || meta?.type === 'list'
 
   return (
@@ -688,7 +837,7 @@ function SettingControl({
         )}
         {meta.options.map((option) => (
           <option key={option.value} value={option.value}>
-            {t(option.label)}
+            {option.text ?? (option.label ? t(option.label) : option.value)}
           </option>
         ))}
       </select>
@@ -703,7 +852,7 @@ function SettingControl({
         value={value}
         min={meta.min}
         max={meta.max}
-        step={meta.step ?? (value.includes('.') ? 0.1 : 1)}
+        step={meta.step ?? numberInputStep(value, meta.min, meta.max)}
         onChange={(event) => onChange(event.target.value)}
         className={box}
       />
@@ -840,22 +989,53 @@ function searchHaystack(row: Row, t: (key: TranslationKey) => string): string {
   const label = hasSettingLabel(row.field.key)
     ? t(settingLabelKey(row.field.key))
     : humanizeKey(row.field.key)
-  const help = hasSettingHelp(row.field.key) ? t(settingHelpKey(row.field.key)) : ''
+  const help = row.field.help
+    ? row.field.help
+    : hasSettingHelp(row.field.key)
+      ? t(settingHelpKey(row.field.key))
+      : ''
   const value = isSensitive(row.field.key, row.meta, row.field.secret) ? '' : row.field.value
   return `${label} ${row.field.key} ${help} ${value}`
 }
 
-function readGroupHash(): ConfigGroupId {
-  if (typeof window === 'undefined') {
-    return 'featured'
+function sandboxSettingMeta(field: ConfigField): SettingMeta {
+  const kind = field.kind ?? 'string'
+  return {
+    type: kind,
+    group: field.group ?? 'other',
+    readOnly: field.read_only,
+    min: field.min ?? undefined,
+    max: field.max ?? undefined,
+    step: kind === 'number' ? numberInputStep(field.value, field.min ?? undefined, field.max ?? undefined) : undefined,
+    options: field.options?.map((option) => ({
+      value: option.value,
+      text: option.label,
+    })),
   }
-  const raw = window.location.hash.replace('#', '')
-  return (CONFIG_GROUPS as readonly string[]).includes(raw) ? (raw as ConfigGroupId) : 'featured'
 }
 
-function writeGroupHash(group: ConfigGroupId) {
+function readConfigHash(): { source: ConfigSource; group: string } {
+  if (typeof window === 'undefined') {
+    return { source: 'server', group: 'featured' }
+  }
+  const raw = window.location.hash.replace('#', '')
+  if (raw === 'sandbox' || raw.startsWith('sandbox/')) {
+    const group = raw.split('/')[1] || 'featured'
+    return {
+      source: 'sandbox',
+      group: (SANDBOX_GROUPS as readonly string[]).includes(group) ? group : 'featured',
+    }
+  }
+  return {
+    source: 'server',
+    group: (CONFIG_GROUPS as readonly string[]).includes(raw) ? raw : 'featured',
+  }
+}
+
+function writeConfigHash(source: ConfigSource, group: string) {
   if (typeof window === 'undefined') {
     return
   }
-  window.history.replaceState(null, '', `#${group}`)
+  const hash = source === 'sandbox' ? `sandbox/${group}` : group
+  window.history.replaceState(null, '', `#${hash}`)
 }

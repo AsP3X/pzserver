@@ -107,12 +107,15 @@ nuke:
 		exit 1; \
 	fi
 	$(COMPOSE) down --remove-orphans
-	@REMAINING=$$(docker volume ls -q --filter name=pz- 2>/dev/null); \
+	@REMAINING=$$(docker volume ls -q --filter name=pz- 2>/dev/null | grep -v map-tiles || true); \
 	if [ -n "$$REMAINING" ]; then \
 		echo "Removing leftover legacy volumes: $$REMAINING"; \
 		echo "$$REMAINING" | xargs docker volume rm 2>/dev/null || true; \
 	fi
-	@rm -rf data
+	@echo "Keeping data/map-tiles and pz-map-tiles-sqlite (website map). Delete those by hand."
+	@if [ -d data ]; then \
+		find data -mindepth 1 -maxdepth 1 ! -name map-tiles -exec rm -rf {} +; \
+	fi
 	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
 		data/postgres data/redis \
 		data/caddy-data data/caddy-config

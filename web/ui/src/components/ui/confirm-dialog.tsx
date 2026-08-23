@@ -10,6 +10,8 @@ interface ConfirmDialogProps {
   description: ReactNode
   /** Defaults to the common confirm label. */
   confirmLabel?: string
+  /** Defaults to the common cancel label. */
+  cancelLabel?: string
   /** Destructive actions use blood; everything else uses hazard. */
   tone?: 'primary' | 'danger'
   /** Form-heavy dialogs need more width than a one-line confirm. */
@@ -31,6 +33,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   tone = 'primary',
   size = 'md',
   busy = false,
@@ -92,7 +95,7 @@ export function ConfirmDialog({
 
       <div className="flex shrink-0 justify-end gap-2 border-t border-fence px-5 py-3">
         <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
-          {t('common.cancel')}
+          {cancelLabel ?? t('common.cancel')}
         </Button>
         <Button
           variant={tone === 'danger' ? 'outline' : 'primary'}

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use pz_bridge::docker::DockerClient;
+use pz_bridge::{ModState, write_intended_mod_lists};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
@@ -15,6 +16,10 @@ use crate::services::backups;
 use crate::state::AppState;
 
 const PER_PLAYER_DIRS: &[&str] = &["inventory", "vitals"];
+
+/// Fallback when `PZ_BRIDGE_WORKSHOP_ID` is unset. Same id the image seeds.
+const KNOX_RELAY_WORKSHOP_ID: &str = "3777446787";
+const KNOX_RELAY_MOD_ID: &str = "KnoxRelay";
 
 /// World-tied rows that are not owned by a `users` foreign key (or that
 /// survive `ON DELETE SET NULL`). User-owned wallets, vaults, sessions and
@@ -101,6 +106,16 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
     )
     .await;
 
+    if request.include_config {
+        reset_mod_list(
+            &state.config.server_ini_path,
+            state.config.bridge_workshop_id.as_deref(),
+            &state.config.bridge_mod_id,
+            &mut filesystem_errors,
+        )
+        .await;
+    }
+
     let players_deleted = wipe_website(&state.db, request.include_config).await?;
 
     if let Some(admin) = state.config.admin_bootstrap.as_ref() {
@@ -129,7 +144,7 @@ pub async fn run(state: &AppState, request: WipeRequest) -> ApiResult<WipeResult
     }
 
     let message = if request.include_config {
-        "World, accounts and website config have been wiped. Game server.ini, sandbox and Knox Relay were kept."
+        "World, accounts, website config and extra mods have been wiped. Sandbox, spawns and Knox Relay were kept."
             .to_owned()
     } else {
         "World and website accounts have been wiped. Server and site configuration were kept."
@@ -178,6 +193,42 @@ fi
         return Err(format!("in-container wipe exited {code}"));
     }
     Ok(())
+}
+
+fn knox_relay_only(workshop_id: Option<&str>, mod_id: &str) -> ModState {
+    let workshop = workshop_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .unwrap_or(KNOX_RELAY_WORKSHOP_ID);
+    let mod_id = {
+        let trimmed = mod_id.trim();
+        if trimmed.is_empty() {
+            KNOX_RELAY_MOD_ID
+        } else {
+            trimmed
+        }
+    };
+    ModState {
+        mods: vec![mod_id.to_owned()],
+        workshop_items: vec![workshop.to_owned()],
+    }
+}
+
+/// Drop every Workshop item except Knox Relay. Writes the INI and the panel
+/// sidecar together so the next boot cannot restore the old load list.
+async fn reset_mod_list(
+    ini_path: &Path,
+    workshop_id: Option<&str>,
+    mod_id: &str,
+    errors: &mut Vec<String>,
+) {
+    if let Err(error) =
+        write_intended_mod_lists(ini_path, &knox_relay_only(workshop_id, mod_id)).await
+    {
+        errors.push(format!(
+            "Could not reset the mod list to Knox Relay: {error}"
+        ));
+    }
 }
 
 async fn wipe_save_tree(data: &Path, server_name: &str, lua: &Path, errors: &mut Vec<String>) {
@@ -349,8 +400,23 @@ async fn remove_children(dir: &Path, errors: &mut Vec<String>) {
     }
 }
 
+/// The isometric website pack (`tiles.sqlite` on the `map-tiles` volume /
+/// host dir). Hours to generate; a world wipe must not take it. Delete it
+/// by hand, or with `make map-tiles` / volume rm, when you mean to.
+fn is_website_map(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        name == "tiles.sqlite"
+            || name == "tiles.sqlite.old"
+            || name == "tiles.sqlite-wal"
+            || name == "tiles.sqlite-shm"
+            || name == "tiles.sqlite-journal"
+    }) || path.components().any(|component| {
+        component.as_os_str() == "map-tiles" || component.as_os_str() == "pz-map-tiles-sqlite"
+    })
+}
+
 async fn force_remove(path: &Path, errors: &mut Vec<String>) {
-    if !path.exists() {
+    if !path.exists() || is_website_map(path) {
         return;
     }
     let _ = tokio::process::Command::new("chmod")
@@ -420,6 +486,103 @@ mod tests {
         assert!(
             !production.contains("role = 'player'"),
             "a role filter leaves staff logins standing after a world reset"
+        );
+    }
+
+    #[test]
+    fn knox_relay_only_drops_every_other_mod() {
+        let state = knox_relay_only(Some("3777446787"), "KnoxRelay");
+        assert_eq!(state.mods, vec!["KnoxRelay"]);
+        assert_eq!(state.workshop_items, vec!["3777446787"]);
+    }
+
+    #[test]
+    fn knox_relay_only_fills_in_the_known_ids() {
+        let state = knox_relay_only(None, "  ");
+        assert_eq!(state.mods, vec!["KnoxRelay"]);
+        assert_eq!(state.workshop_items, vec!["3777446787"]);
+    }
+
+    #[tokio::test]
+    async fn extended_wipe_rewrites_the_load_list_to_knox_relay() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ini = dir.path().join("ZomboidServer.ini");
+        fs::write(
+            &ini,
+            "PublicName=Knox\nMods=KnoxRelay;Brita\nWorkshopItems=3777446787;2822286426\n",
+        )
+        .expect("ini");
+
+        let mut errors = Vec::new();
+        reset_mod_list(&ini, Some("3777446787"), "KnoxRelay", &mut errors).await;
+
+        assert!(errors.is_empty(), "{errors:?}");
+        let intended = pz_bridge::read_intended_mod_lists(&ini)
+            .await
+            .expect("intended");
+        assert_eq!(intended.mods, vec!["KnoxRelay"]);
+        assert_eq!(intended.workshop_items, vec!["3777446787"]);
+
+        let body = fs::read_to_string(&ini).expect("ini after");
+        assert!(body.contains("Mods=KnoxRelay\n"), "{body}");
+        assert!(body.contains("WorkshopItems=3777446787\n"), "{body}");
+        assert!(!body.contains("Brita"), "{body}");
+    }
+
+    #[test]
+    fn website_map_paths_are_recognised() {
+        assert!(is_website_map(Path::new("/map-tiles/tiles.sqlite")));
+        assert!(is_website_map(Path::new("/pack/tiles.sqlite.old")));
+        assert!(is_website_map(Path::new("data/map-tiles/html")));
+        assert!(is_website_map(Path::new(
+            "/var/lib/docker/volumes/pz-map-tiles-sqlite/_data"
+        )));
+        assert!(!is_website_map(Path::new(
+            "/pz-data/Saves/Multiplayer/World"
+        )));
+        assert!(!is_website_map(Path::new("/pz-data/db/ZomboidServer.db")));
+    }
+
+    #[tokio::test]
+    async fn force_remove_leaves_the_website_map_pack() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack = dir.path().join("map-tiles");
+        fs::create_dir(&pack).expect("map-tiles");
+        let sqlite = pack.join("tiles.sqlite");
+        fs::write(&sqlite, b"pack").expect("tiles");
+
+        let mut errors = Vec::new();
+        force_remove(&sqlite, &mut errors).await;
+        force_remove(&pack, &mut errors).await;
+
+        assert!(sqlite.exists(), "tiles.sqlite must survive a wipe");
+        assert!(pack.exists(), "the map-tiles directory must survive a wipe");
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[tokio::test]
+    async fn wipe_save_tree_does_not_remove_a_map_pack_under_data() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let data = dir.path();
+        let world = data.join("Saves").join("Multiplayer").join("World");
+        fs::create_dir_all(&world).expect("save");
+        fs::write(world.join("map.bin"), b"cells").expect("cell");
+        let pack = data.join("map-tiles");
+        fs::create_dir(&pack).expect("map-tiles");
+        fs::write(pack.join("tiles.sqlite"), b"pack").expect("tiles");
+        let lua = data.join("Lua");
+        fs::create_dir(&lua).expect("lua");
+
+        let mut errors = Vec::new();
+        wipe_save_tree(data, "ZomboidServer", &lua, &mut errors).await;
+
+        assert!(
+            pack.join("tiles.sqlite").exists(),
+            "the website map pack is not world save data"
+        );
+        assert!(
+            !world.join("map.bin").exists() || errors.iter().any(|error| error.contains("World")),
+            "the multiplayer save still has to be targeted: {errors:?}"
         );
     }
 

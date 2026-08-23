@@ -126,6 +126,12 @@ export const adminConfigQuery = queryOptions({
   staleTime: 15_000,
 })
 
+export const adminSandboxQuery = queryOptions({
+  queryKey: ['admin', 'config', 'sandbox'],
+  queryFn: api.adminSandbox,
+  staleTime: 15_000,
+})
+
 export const adminModsQuery = queryOptions({
   queryKey: ['admin', 'mods'],
   queryFn: api.adminMods,

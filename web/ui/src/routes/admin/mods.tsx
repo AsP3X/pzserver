@@ -55,6 +55,7 @@ export function AdminModsPage() {
   const [removing, setRemoving] = useState<ModEntry | null>(null)
   const [restarting, setRestarting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [pendingDeps, setPendingDeps] = useState<WorkshopLookup[] | null>(null)
 
   const mods = data ?? []
   const searching = query.trim().length > 0
@@ -120,15 +121,41 @@ export function AdminModsPage() {
     await queryClient.invalidateQueries({ queryKey: ['admin', 'config'] })
   }
 
+  const finishAdd = async () => {
+    setWorkshopId('')
+    setModId('')
+    setMapFolder('')
+    setLookup({ status: 'idle' })
+    setPendingDeps(null)
+    setNotice(t('admin.mods_added'))
+    await invalidate()
+  }
+
   const add = useMutation({
     mutationFn: () => api.adminAddMod(workshopId.trim(), modId.trim(), mapFolder.trim() || undefined),
-    onSuccess: async () => {
-      setWorkshopId('')
-      setModId('')
-      setMapFolder('')
-      setLookup({ status: 'idle' })
-      setNotice(t('admin.mods_added'))
-      await invalidate()
+    onSuccess: finishAdd,
+  })
+
+  const addWithDeps = useMutation({
+    mutationFn: async (missing: WorkshopLookup[]) => {
+      await api.adminImportMods({
+        workshop_ids: missing.map((entry) => entry.workshop_id),
+        mod_ids: missing.flatMap((entry) => entry.mod_ids),
+        map_folders: missing.flatMap((entry) => entry.map_folders),
+      })
+      return api.adminAddMod(workshopId.trim(), modId.trim(), mapFolder.trim() || undefined)
+    },
+    onSuccess: finishAdd,
+  })
+
+  const checkDeps = useMutation({
+    mutationFn: () => api.adminModDependencies(workshopId.trim()),
+    onSuccess: (missing) => {
+      if (missing.length === 0) {
+        add.mutate()
+        return
+      }
+      setPendingDeps(missing)
     },
   })
 
@@ -207,13 +234,36 @@ export function AdminModsPage() {
     reorder.mutate(next)
   }
 
+  const adding = add.isPending || addWithDeps.isPending || checkDeps.isPending
+
   const error =
-    [add.error, remove.error, reorder.error, imported.error, restart.error].find(Boolean) instanceof
-    ApiError
-      ? ([add.error, remove.error, reorder.error, imported.error, restart.error].find(
-          Boolean,
-        ) as ApiError).message
-      : [add.error, remove.error, reorder.error, imported.error, restart.error].find(Boolean)
+    [
+      add.error,
+      addWithDeps.error,
+      checkDeps.error,
+      remove.error,
+      reorder.error,
+      imported.error,
+      restart.error,
+    ].find(Boolean) instanceof ApiError
+      ? ([
+          add.error,
+          addWithDeps.error,
+          checkDeps.error,
+          remove.error,
+          reorder.error,
+          imported.error,
+          restart.error,
+        ].find(Boolean) as ApiError).message
+      : [
+            add.error,
+            addWithDeps.error,
+            checkDeps.error,
+            remove.error,
+            reorder.error,
+            imported.error,
+            restart.error,
+          ].find(Boolean)
         ? t('auth.unexpected_error')
         : null
 
@@ -406,7 +456,7 @@ export function AdminModsPage() {
                 onSubmit={(event: FormEvent) => {
                   event.preventDefault()
                   setNotice(null)
-                  add.mutate()
+                  checkDeps.mutate()
                 }}
               >
                 <Field
@@ -439,9 +489,9 @@ export function AdminModsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={!workshopId.trim() || !modId.trim() || add.isPending}
+                  disabled={!workshopId.trim() || !modId.trim() || adding}
                 >
-                  {t('admin.mods_add')}
+                  {checkDeps.isPending ? t('admin.mods_deps_checking') : t('admin.mods_add')}
                 </Button>
               </form>
             </Panel>
@@ -496,6 +546,44 @@ export function AdminModsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDeps !== null}
+        title={t('admin.mods_deps_title')}
+        size="lg"
+        confirmLabel={t('admin.mods_deps_yes')}
+        cancelLabel={t('admin.mods_deps_no')}
+        busy={addWithDeps.isPending || add.isPending}
+        description={
+          <div className="flex flex-col gap-3">
+            <p>{t('admin.mods_deps_description')}</p>
+            <ul className="flex flex-col gap-2 border border-fence bg-void px-3 py-2">
+              {(pendingDeps ?? []).map((entry) => (
+                <li key={entry.workshop_id} className="text-sm">
+                  <span className="text-bone">
+                    {entry.title.trim() || t('admin.mods_lookup_untitled')}
+                  </span>
+                  <span className="mt-0.5 block font-mono text-[0.6875rem] text-dust">
+                    {entry.workshop_id}
+                    {entry.mod_ids.length > 0 ? ` · ${entry.mod_ids.join(', ')}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        }
+        onConfirm={() => pendingDeps && addWithDeps.mutate(pendingDeps)}
+        onClose={() => {
+          if (addWithDeps.isPending || add.isPending) {
+            return
+          }
+          const skip = pendingDeps
+          setPendingDeps(null)
+          if (skip) {
+            add.mutate()
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={removing !== null}

@@ -7,7 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
-use pz_bridge::{InventoryReader, ServerIni, UpdateReport};
+use pz_bridge::{
+    InventoryReader, ModState, SandboxError, SandboxKind, SandboxVars, ServerIni, UpdateReport,
+    WorkshopDetails, persist_config_state, read_intended_mod_lists, sandbox_path,
+    write_intended_mod_lists,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -805,7 +809,111 @@ pub async fn write_config(state: &AppState, updates: BTreeMap<String, String>) -
 
     ServerIni::write_updates(&state.config.server_ini_path, &updates)
         .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+    persist_config_state(&state.config.server_ini_path, &updates)
+        .await
         .map_err(|error| ApiError::Internal(error.to_string()))
+}
+
+#[derive(Debug, Serialize)]
+pub struct SandboxOption {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SandboxField {
+    pub key: String,
+    pub value: String,
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<SandboxOption>,
+    pub group: String,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SandboxConfig {
+    pub fields: Vec<SandboxField>,
+    pub missing: bool,
+}
+
+pub async fn read_sandbox(state: &AppState) -> ApiResult<SandboxConfig> {
+    let path = sandbox_path(&state.config.server_ini_path);
+    let vars = SandboxVars::read(&path)
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+
+    let Some(vars) = vars else {
+        return Ok(SandboxConfig {
+            fields: Vec::new(),
+            missing: true,
+        });
+    };
+
+    Ok(SandboxConfig {
+        fields: vars
+            .fields()
+            .iter()
+            .map(|field| SandboxField {
+                key: field.key.clone(),
+                value: field.value.clone(),
+                kind: match field.kind {
+                    SandboxKind::Boolean => "boolean",
+                    SandboxKind::Number => "number",
+                    SandboxKind::String => "string",
+                    SandboxKind::Enum => "enum",
+                },
+                help: field.help.clone(),
+                min: field.min,
+                max: field.max,
+                options: field
+                    .options
+                    .iter()
+                    .map(|option| SandboxOption {
+                        value: option.value.clone(),
+                        label: option.label.clone(),
+                    })
+                    .collect(),
+                group: field.group.to_owned(),
+                read_only: field.read_only,
+            })
+            .collect(),
+        missing: false,
+    })
+}
+
+pub async fn write_sandbox(state: &AppState, updates: BTreeMap<String, String>) -> ApiResult<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+
+    for key in updates.keys() {
+        if key.is_empty() || key.contains('=') || key.contains('\n') {
+            return Err(ApiError::Validation("Invalid setting name.".to_owned()));
+        }
+        if key == "VERSION" {
+            return Err(ApiError::Validation(
+                "That setting cannot be changed from here.".to_owned(),
+            ));
+        }
+    }
+
+    let path = sandbox_path(&state.config.server_ini_path);
+    SandboxVars::write_updates(&path, &updates)
+        .await
+        .map_err(|error| match error {
+            SandboxError::UnknownKey(key) => {
+                ApiError::Validation(format!("Unknown sandbox setting: {key}."))
+            }
+            other => ApiError::Internal(other.to_string()),
+        })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -817,13 +925,11 @@ pub struct ModEntry {
 }
 
 pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
-    let ini = ServerIni::read(&state.config.server_ini_path)
+    let intended = read_intended_mod_lists(&state.config.server_ini_path)
         .await
-        .map_err(|error| ApiError::Internal(error.to_string()))?
-        .unwrap_or_default();
-
-    let workshop = ini.get_list("WorkshopItems");
-    let mods = ini.get_list("Mods");
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+    let workshop = intended.workshop_items;
+    let mods = intended.mods;
     let len = workshop.len().max(mods.len());
 
     Ok((0..len)
@@ -855,6 +961,26 @@ fn valid_mod_id(value: &str) -> bool {
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
+}
+
+pub async fn missing_mod_dependencies(
+    state: &AppState,
+    workshop_id: &str,
+) -> ApiResult<Vec<WorkshopDetails>> {
+    let workshop_id = pz_bridge::parse_workshop_id(workshop_id).ok_or_else(|| {
+        ApiError::Validation("Paste a Workshop id, or a Steam Workshop URL.".to_owned())
+    })?;
+
+    let loaded: BTreeSet<String> = list_mods(state)
+        .await?
+        .into_iter()
+        .map(|entry| entry.workshop_id)
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    pz_bridge::missing_dependencies(&workshop_id, &loaded)
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))
 }
 
 pub async fn add_mod(
@@ -1023,10 +1149,15 @@ async fn append_map_folder(state: &AppState, folder: &str) -> ApiResult<()> {
 }
 
 async fn write_mod_lists(state: &AppState, workshop: &[String], mods: &[String]) -> ApiResult<()> {
-    let mut updates = BTreeMap::new();
-    updates.insert("WorkshopItems".to_owned(), workshop.join(";"));
-    updates.insert("Mods".to_owned(), mods.join(";"));
-    write_config(state, updates).await
+    write_intended_mod_lists(
+        &state.config.server_ini_path,
+        &ModState {
+            mods: mods.to_vec(),
+            workshop_items: workshop.to_vec(),
+        },
+    )
+    .await
+    .map_err(|error| ApiError::Internal(error.to_string()))
 }
 
 // ── Bridge / logs / inventory ───────────────────────────────────────

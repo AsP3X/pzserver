@@ -17,8 +17,10 @@ pub mod ini;
 pub mod inventory;
 pub mod links;
 pub mod lua;
+pub mod panel_state;
 pub mod player_file;
 pub mod respawn;
+pub mod sandbox;
 pub mod sanctuary;
 pub mod steam;
 pub mod steam_update;
@@ -42,8 +44,13 @@ pub use links::{LinkChannel, LinkRequest, LinkResult, LinkResults};
 pub use lua::{
     Death, DeathsExport, LivePlayer, LuaBridge, PlayerStatsExport, PlayersLiveExport, StatsPlayer,
 };
+pub use panel_state::{
+    ModState, PanelStateError, persist_config_state, read_intended_mod_lists,
+    write_intended_mod_lists,
+};
 pub use player_file::PlayerFile;
 pub use respawn::{RespawnChannel, RespawnConfig, RespawnError, RespawnKick};
+pub use sandbox::{SandboxError, SandboxField, SandboxKind, SandboxVars, sandbox_path};
 pub use steam::{SteamClient, SteamError};
 pub use steam_update::{PublicUpdate, UpdateReport, UpdateVerdict};
 pub use tickets::{
@@ -52,4 +59,4 @@ pub use tickets::{
 };
 pub use vitals::{PlayerVitals, VitalsReader};
 pub use whitelist::{WhitelistAccount, authenticate as authenticate_whitelist};
-pub use workshop::{WorkshopDetails, parse_workshop_id};
+pub use workshop::{WorkshopDetails, missing_dependencies, parse_workshop_id};

@@ -644,16 +644,30 @@ export interface ReportQueue {
   open_count: number
 }
 
+export interface ConfigOption {
+  value: string
+  label: string
+}
+
 export interface ConfigField {
   key: string
   value: string
   secret: boolean
+  kind?: 'boolean' | 'number' | 'string' | 'enum' | 'text' | 'list' | 'password'
+  help?: string | null
+  min?: number | null
+  max?: number | null
+  options?: ConfigOption[]
+  group?: string
+  read_only?: boolean
 }
 
 export interface ServerConfig {
   fields: ConfigField[]
   missing: boolean
 }
+
+export type SandboxConfig = ServerConfig
 
 export interface ModEntry {
   workshop_id: string
@@ -668,6 +682,7 @@ export interface WorkshopLookup {
   preview_url: string | null
   mod_ids: string[]
   map_folders: string[]
+  required_workshop_ids?: string[]
 }
 
 export type BridgeFileStatus = 'fresh' | 'idle' | 'stale' | 'absent'
@@ -1459,6 +1474,11 @@ export const api = {
   adminUpdateConfig: (updates: Record<string, string>) =>
     patch<ServerConfig>('/api/v1/admin/config', { updates }),
 
+  adminSandbox: () => request<SandboxConfig>('/api/v1/admin/config/sandbox'),
+
+  adminUpdateSandbox: (updates: Record<string, string>) =>
+    patch<SandboxConfig>('/api/v1/admin/config/sandbox', { updates }),
+
   adminMods: () => request<ModEntry[]>('/api/v1/admin/mods'),
 
   adminAddMod: (workshopId: string, modId: string, mapFolder?: string) =>
@@ -1470,6 +1490,9 @@ export const api = {
 
   adminLookupMod: (workshopId: string) =>
     post<WorkshopLookup>('/api/v1/admin/mods/lookup', { workshop_id: workshopId }),
+
+  adminModDependencies: (workshopId: string) =>
+    post<WorkshopLookup[]>('/api/v1/admin/mods/dependencies', { workshop_id: workshopId }),
 
   adminReorderMods: (mods: ModEntry[]) =>
     request<ModEntry[]>('/api/v1/admin/mods/order', {

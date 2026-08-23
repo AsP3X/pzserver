@@ -15,24 +15,48 @@ export const CONFIG_GROUPS = [
   'other',
 ] as const
 
-export type ConfigGroupId = (typeof CONFIG_GROUPS)[number]
+export const SANDBOX_GROUPS = [
+  'featured',
+  'population',
+  'lore',
+  'time',
+  'climate',
+  'utilities',
+  'loot',
+  'world',
+  'vehicles',
+  'animals',
+  'combat',
+  'character',
+  'skills',
+  'map',
+  'mods',
+  'other',
+] as const
+
+export type ServerGroupId = (typeof CONFIG_GROUPS)[number]
+export type SandboxGroupId = (typeof SANDBOX_GROUPS)[number]
+export type ConfigGroupId = ServerGroupId | SandboxGroupId
+export type ConfigSource = 'server' | 'sandbox'
 
 export type SettingType = 'boolean' | 'number' | 'string' | 'text' | 'enum' | 'list' | 'password'
 
 export interface SettingOption {
   value: string
-  label: TranslationKey
+  label?: TranslationKey
+  /** Raw label from SandboxVars comments — already in the game's wording. */
+  text?: string
 }
 
 export interface SettingMeta {
   type: SettingType
-  group: Exclude<ConfigGroupId, 'featured' | 'other'>
+  group: string
   sensitive?: boolean
   readOnly?: boolean
   options?: readonly SettingOption[]
   min?: number
   max?: number
-  step?: number
+  step?: number | 'any'
 }
 
 /** Settings an operator changes on purpose, pinned at the top of the nav. */
@@ -54,8 +78,23 @@ export const FEATURED_KEYS = [
   'VoiceEnable',
   'PlayerSafehouse',
   'Faction',
-  'NightLength',
+] as const
+
+/** Sandbox options an operator actually means to change. */
+export const SANDBOX_FEATURED_KEYS = [
+  'Zombies',
   'DayLength',
+  'NightLength',
+  'HoursForLootRespawn',
+  'ZombieLore.Speed',
+  'ZombieLore.Transmission',
+  'ZombieConfig.PopulationMultiplier',
+  'FoodLootNew',
+  'WaterShut',
+  'ElecShut',
+  'StarterKit',
+  'MultiHitZombies',
+  'CarSpawnRate',
 ] as const
 
 const VISIBILITY: readonly SettingOption[] = [
@@ -241,12 +280,20 @@ export function settingMeta(key: string): SettingMeta | undefined {
   return SERVER_INI_META[key]
 }
 
-export function settingGroup(key: string): ConfigGroupId {
+export function settingGroup(key: string): string {
   return SERVER_INI_META[key]?.group ?? 'other'
 }
 
-export function groupLabelKey(group: ConfigGroupId): TranslationKey {
+export function groupLabelKey(group: string): TranslationKey {
   return `admin.config_group_${group}` as TranslationKey
+}
+
+export function groupsFor(source: ConfigSource): readonly string[] {
+  return source === 'sandbox' ? SANDBOX_GROUPS : CONFIG_GROUPS
+}
+
+export function featuredKeysFor(source: ConfigSource): readonly string[] {
+  return source === 'sandbox' ? SANDBOX_FEATURED_KEYS : FEATURED_KEYS
 }
 
 export function settingLabelKey(key: string): TranslationKey {
@@ -265,12 +312,44 @@ export function hasSettingHelp(key: string): boolean {
   return settingHelpKey(key) in fallback
 }
 
-/** Split a raw INI key so an unknown setting is still readable. */
-export function humanizeKey(key: string): string {
+function expandCamel(key: string): string {
   return key
     .replaceAll('_', ' ')
     .replace(/([a-z\d])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+}
+
+/** Split a raw INI key so an unknown setting is still readable. */
+export function humanizeKey(key: string): string {
+  const leaf = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1) : key
+  return expandCamel(leaf)
+}
+
+/** Parent table of a dotted sandbox key (`CHStatusHUD.RestrictStats` → `CH Status HUD`). */
+export function humanizeTable(table: string): string {
+  return expandCamel(table)
+}
+
+/** Keep file order: one section per nested table. */
+export function groupByParentTable<T>(
+  items: readonly T[],
+  keyOf: (item: T) => string,
+): { table: string; items: T[] }[] {
+  const order: string[] = []
+  const buckets = new Map<string, T[]>()
+  for (const item of items) {
+    const key = keyOf(item)
+    const index = key.indexOf('.')
+    const table = index > 0 ? key.slice(0, index) : 'other'
+    let list = buckets.get(table)
+    if (!list) {
+      list = []
+      buckets.set(table, list)
+      order.push(table)
+    }
+    list.push(item)
+  }
+  return order.map((table) => ({ table, items: buckets.get(table) ?? [] }))
 }
 
 export function isSensitive(key: string, meta: SettingMeta | undefined, secret: boolean): boolean {
@@ -279,6 +358,43 @@ export function isSensitive(key: string, meta: SettingMeta | undefined, secret: 
 
 export function parseBoolean(value: string): boolean {
   return value.trim().toLowerCase() === 'true'
+}
+
+/** Decimal places in a number or numeric string. `0.01` is 2; `1.0` is 1. */
+function decimalPlaces(value: string | number | undefined): number {
+  if (value === undefined || value === '') {
+    return 0
+  }
+  const text = String(value)
+  const index = text.indexOf('.')
+  if (index === -1) {
+    return 0
+  }
+  return text.length - index - 1
+}
+
+/**
+ * HTML number inputs only accept `min + n * step`. A hardcoded 0.1 with
+ * min 0.01 rejects the game's own 1.0 (Chrome offers 0.91 and 1.01).
+ * Use the finest precision among the current value and the bounds.
+ */
+export function numberInputStep(
+  value: string,
+  min?: number,
+  max?: number,
+): number | 'any' {
+  const places = Math.max(decimalPlaces(value), decimalPlaces(min), decimalPlaces(max))
+  const step = places <= 0 ? 1 : Number(`1e-${places}`)
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return 'any'
+  }
+  const base = min ?? 0
+  const ratio = (numeric - base) / step
+  if (Math.abs(ratio - Math.round(ratio)) > 1e-6) {
+    return 'any'
+  }
+  return step
 }
 
 export function splitList(value: string): string[] {

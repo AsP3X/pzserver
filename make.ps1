@@ -580,16 +580,18 @@ function Do-Nuke {
         return
     }
     Invoke-Compose @("down", "--remove-orphans")
-    # Remove leftover legacy named volumes (if any from older installs)
-    $remaining = @(docker volume ls -q --filter "name=pz-" 2>$null)
+    # Remove leftover named volumes, but never the generated website map pack.
+    $remaining = @(docker volume ls -q --filter "name=pz-" 2>$null | Where-Object { $_ -notmatch "map-tiles" })
     if ($remaining) {
         Write-Host "Removing leftover volumes: $remaining"
         $remaining | ForEach-Object { docker volume rm $_ 2>$null | Out-Null }
     }
-    # Wipe all host bind-mount data
+    Write-Host "Keeping data\map-tiles and pz-map-tiles-sqlite (website map). Delete those by hand." -ForegroundColor Cyan
     if (Test-Path "data") {
-        Write-Host "Removing host data directory ./data ..." -ForegroundColor Yellow
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data"
+        Write-Host "Removing host data under ./data except map-tiles ..." -ForegroundColor Yellow
+        Get-ChildItem "data" -Force | Where-Object { $_.Name -ne "map-tiles" } | ForEach-Object {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $_.FullName
+        }
         Ensure-DataDirs
     }
     Remove-Item -Force -ErrorAction SilentlyContinue .env, .firewall.conf

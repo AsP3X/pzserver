@@ -57,8 +57,13 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/broadcast", post(broadcast))
         .route("/admin/console", post(console))
         .route("/admin/config", get(config).patch(update_config))
+        .route(
+            "/admin/config/sandbox",
+            get(sandbox).patch(update_sandbox),
+        )
         .route("/admin/mods", get(mods).post(add_mod))
         .route("/admin/mods/lookup", post(lookup_mod))
+        .route("/admin/mods/dependencies", post(mod_dependencies))
         .route("/admin/mods/order", axum::routing::put(reorder_mods))
         .route("/admin/mods/import", post(import_mods))
         .route("/admin/mods/{workshop_id}", delete(remove_mod))
@@ -442,6 +447,22 @@ async fn update_config(
     Ok(Json(admin::read_config(&state).await?))
 }
 
+async fn sandbox(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<admin::SandboxConfig>> {
+    Ok(Json(admin::read_sandbox(&state).await?))
+}
+
+async fn update_sandbox(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<ConfigBody>,
+) -> ApiResult<Json<admin::SandboxConfig>> {
+    admin::write_sandbox(&state, body.updates).await?;
+    Ok(Json(admin::read_sandbox(&state).await?))
+}
+
 async fn mods(
     State(state): State<AppState>,
     _staff: AdminUser,
@@ -475,6 +496,16 @@ async fn add_mod(
 #[derive(Deserialize)]
 struct LookupBody {
     workshop_id: String,
+}
+
+async fn mod_dependencies(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<LookupBody>,
+) -> ApiResult<Json<Vec<pz_bridge::WorkshopDetails>>> {
+    Ok(Json(
+        admin::missing_mod_dependencies(&state, &body.workshop_id).await?,
+    ))
 }
 
 async fn lookup_mod(
@@ -1200,5 +1231,7 @@ async fn tile_job(
     _staff: AdminUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<crate::services::map_tile_jobs::Job>> {
-    Ok(Json(crate::services::map_tile_jobs::get(&state.db, id).await?))
+    Ok(Json(
+        crate::services::map_tile_jobs::get(&state.db, id).await?,
+    ))
 }
