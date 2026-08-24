@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api, ApiError, type CatalogItem, type StoreItem, type StoreItemInput } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { adminItemsQuery, adminStorePurchasesQuery, adminStoreQuery } from '@/lib/queries'
+import { storeOnSale, storeUnitPrice } from '@/lib/store-price'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -136,7 +137,17 @@ export function AdminShopPage() {
                         </span>
                       </span>
                       <span className="font-mono text-[0.6875rem] text-dust">
-                        {t('economy.coins', { count: item.price })} · {item.item_type}
+                        {storeOnSale(item) ? (
+                          <>
+                            {t('economy.coins', { count: storeUnitPrice(item) })}
+                            {' · '}
+                            {t('economy.off', { count: item.discount_percent })}
+                            {' · '}
+                          </>
+                        ) : (
+                          <>{t('economy.coins', { count: item.price })} · </>
+                        )}
+                        {item.item_type}
                       </span>
                     </button>
                   </li>
@@ -218,6 +229,8 @@ function Editor({
     max_per_player: item.max_per_player,
     featured: item.featured,
     active: item.active,
+    on_sale: item.on_sale ?? false,
+    discount_percent: item.discount_percent ?? 0,
     sort_order: item.sort_order,
   })
 
@@ -231,7 +244,14 @@ function Editor({
     >
       <ItemFields value={draft} onChange={setDraft} />
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" disabled={busy}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={
+            busy ||
+            Boolean(draft.on_sale && !((draft.discount_percent ?? 0) >= 1 && (draft.discount_percent ?? 0) <= 99))
+          }
+        >
           {t('common.save')}
         </Button>
         <Button type="button" size="sm" variant="outline" className="border-blood text-blood" onClick={onDelete}>
@@ -250,6 +270,8 @@ const EMPTY_LISTING: StoreItemInput = {
   quantity: 1,
   price: 25,
   active: true,
+  on_sale: false,
+  discount_percent: 10,
 }
 
 function ItemDialog({
@@ -282,7 +304,11 @@ function ItemDialog({
       description={<ItemFields value={draft} onChange={setDraft} />}
       confirmLabel={t('economy.new_item')}
       busy={busy}
-      confirmDisabled={!draft.name?.trim() || !draft.item_type?.trim()}
+      confirmDisabled={
+        !draft.name?.trim() ||
+        !draft.item_type?.trim() ||
+        Boolean(draft.on_sale && !((draft.discount_percent ?? 0) >= 1 && (draft.discount_percent ?? 0) <= 99))
+      }
       onConfirm={() => onCreate({ ...draftRef.current, active: draftRef.current.active ?? true })}
       onClose={onClose}
     />
@@ -394,6 +420,34 @@ function ItemFields({
         />
         {t('economy.active')}
       </label>
+      <label className="flex items-center gap-2 text-sm text-bone">
+        <input
+          type="checkbox"
+          checked={value.on_sale ?? false}
+          onChange={(event) =>
+            patch({
+              on_sale: event.target.checked,
+              discount_percent:
+                event.target.checked && !(value.discount_percent && value.discount_percent > 0)
+                  ? 10
+                  : value.discount_percent,
+            })
+          }
+        />
+        {t('economy.on_sale')}
+      </label>
+      {value.on_sale ? (
+        <Field
+          type="number"
+          min={1}
+          max={99}
+          label={t('economy.discount_percent')}
+          value={value.discount_percent ?? 10}
+          hint={t('economy.sale_price', { count: storeUnitPrice(value) })}
+          onChange={(event) => patch({ discount_percent: Number(event.target.value) || 0 })}
+          className="sm:max-w-40"
+        />
+      ) : null}
       <label className="flex items-center gap-2 text-sm text-bone">
         <input
           type="checkbox"

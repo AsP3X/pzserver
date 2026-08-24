@@ -20,6 +20,7 @@ import { cn } from '@/lib/cn'
 import { formatCoins, formatDateTime, formatRelativeTime } from '@/lib/format'
 import { fuzzyMatchWords } from '@/lib/fuzzy'
 import { stackItems } from '@/lib/inventory'
+import { storeOnSale, storeUnitPrice } from '@/lib/store-price'
 import {
   auctionsQuery,
   myAuctionsQuery,
@@ -55,6 +56,7 @@ interface Lot {
   itemType: string
   category: string
   featured: boolean
+  onSale: boolean
   sortOrder: number
   price: number
   haystack: string
@@ -99,8 +101,9 @@ function fromStore(item: StoreItem): Lot {
     itemType: item.item_type,
     category: item.category,
     featured: item.featured,
+    onSale: storeOnSale(item),
     sortOrder: item.sort_order,
-    price: item.price,
+    price: storeUnitPrice(item),
     haystack: [item.name, item.item_type, item.description ?? '', item.category].join(' '),
     endsAt: null,
     store: item,
@@ -117,6 +120,7 @@ function fromAuction(listing: AuctionListing): Lot {
     itemType: listing.item_type,
     category: 'player',
     featured: false,
+    onSale: false,
     sortOrder: 400,
     price: listing.current_price,
     haystack: [listing.item_name, listing.item_type, listing.seller].join(' '),
@@ -129,6 +133,10 @@ function fromAuction(listing: AuctionListing): Lot {
 function compareLots(left: Lot, right: Lot): number {
   if (left.featured !== right.featured) {
     return left.featured ? -1 : 1
+  }
+
+  if (left.onSale !== right.onSale) {
+    return left.onSale ? -1 : 1
   }
 
   if (left.kind !== right.kind) {
@@ -268,7 +276,7 @@ export function AuctionsPage() {
   const available = wallet.data?.available ?? 0
   const cap = storeItem ? maxBuyable(storeItem) : 0
   const units = storeItem ? Math.min(Math.max(1, quantity), Math.max(1, cap)) : 1
-  const storeTotal = storeItem ? storeItem.price * units : 0
+  const storeTotal = storeItem ? storeUnitPrice(storeItem) * units : 0
   const soldOut = storeItem !== null && storeItem.stock !== null && storeItem.stock < 1
   const shortStore = storeItem !== null && wallet.data != null && available < storeTotal
   const canBuyStore = storeItem !== null && wallet.data != null && !soldOut && !shortStore && cap > 0
@@ -616,8 +624,13 @@ function LotRow({
                 ? ` ×${lot.auction.quantity}`
                 : null}
             </span>
-            <span className="shrink-0 font-mono text-sm text-hazard">
-              {t('economy.coins', { count: lot.price })}
+            <span className="flex shrink-0 items-baseline gap-1.5 font-mono text-sm">
+              {lot.onSale && lot.store ? (
+                <span className="text-dust line-through">
+                  {t('economy.coins', { count: lot.store.price })}
+                </span>
+              ) : null}
+              <span className="text-hazard">{t('economy.coins', { count: lot.price })}</span>
             </span>
           </span>
           <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-mono text-[0.6875rem] tracking-wide uppercase">
@@ -628,6 +641,11 @@ function LotRow({
                 {lot.store && lot.store.quantity > 1 ? (
                   <span className="text-smoke">
                     · {t('economy.unit_count', { count: lot.store.quantity })}
+                  </span>
+                ) : null}
+                {lot.onSale && lot.store ? (
+                  <span className="text-hazard">
+                    · {t('economy.off', { count: lot.store.discount_percent })}
                   </span>
                 ) : null}
                 {lot.featured ? (
@@ -706,8 +724,10 @@ function StoreInspector({
 }) {
   const { t } = useTranslation()
   const cap = maxBuyable(item)
-  const total = item.price * quantity
+  const unit = storeUnitPrice(item)
+  const total = unit * quantity
   const remaining = available - total
+  const onSale = storeOnSale(item)
 
   return (
     <>
@@ -715,7 +735,11 @@ function StoreInspector({
         label={t(categoryLabel(item.category))}
         action={
           <span className="border border-hazard/40 bg-hazard-soft px-1.5 py-0.5 font-mono text-[0.625rem] tracking-wide text-hazard uppercase">
-            {item.featured ? t('economy.featured') : t('economy.official')}
+            {onSale
+              ? t('economy.off', { count: item.discount_percent })
+              : item.featured
+                ? t('economy.featured')
+                : t('economy.official')}
           </span>
         }
       />
@@ -729,7 +753,14 @@ function StoreInspector({
         {item.description ? <p className="text-sm leading-relaxed text-smoke">{item.description}</p> : null}
 
         <dl className="grid gap-3 sm:grid-cols-2">
-          <Meta label={t('economy.price')} value={t('economy.coins', { count: item.price })} />
+          <Meta
+            label={t('economy.price')}
+            value={
+              onSale
+                ? `${t('economy.coins', { count: unit })} (${t('economy.off', { count: item.discount_percent })})`
+                : t('economy.coins', { count: item.price })
+            }
+          />
           <Meta
             label={t('economy.stock')}
             value={item.stock === null ? t('economy.stock_unlimited') : String(item.stock)}

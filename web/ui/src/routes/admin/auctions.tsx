@@ -11,6 +11,7 @@ import { api, ApiError, type AuctionListing } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDateTime, formatRelativeTime } from '@/lib/format'
 import { adminAuctionBidsQuery, adminAuctionsQuery, adminStoreQuery } from '@/lib/queries'
+import { storeOnSale, storeUnitPrice } from '@/lib/store-price'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -124,8 +125,15 @@ export function AdminAuctionsPage() {
                   <span className="block truncate text-sm text-bone">{item.name}</span>
                   <span className="font-mono text-[0.6875rem] text-dust">{item.item_type}</span>
                 </span>
-                <span className="shrink-0 font-mono text-sm text-hazard">
-                  {t('economy.coins', { count: item.price })}
+                <span className="flex shrink-0 flex-col items-end">
+                  <span className="font-mono text-sm text-hazard">
+                    {t('economy.coins', { count: storeUnitPrice(item) })}
+                  </span>
+                  {storeOnSale(item) ? (
+                    <span className="font-mono text-[0.625rem] text-dust">
+                      {t('economy.off', { count: item.discount_percent })}
+                    </span>
+                  ) : null}
                 </span>
               </li>
             ))}

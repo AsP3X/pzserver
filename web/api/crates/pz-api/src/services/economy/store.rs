@@ -26,9 +26,15 @@ pub struct StoreItem {
     pub max_per_player: Option<i32>,
     pub featured: bool,
     pub active: bool,
+    pub on_sale: bool,
+    pub discount_percent: i32,
     pub sort_order: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Derived. What the player pays when `on_sale` is set.
+    #[sqlx(skip)]
+    #[serde(default)]
+    pub sale_price: i64,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -59,36 +65,61 @@ pub struct StoreItemPatch {
     pub max_per_player: Option<Option<i32>>,
     pub featured: Option<bool>,
     pub active: Option<bool>,
+    pub on_sale: Option<bool>,
+    pub discount_percent: Option<i32>,
     pub sort_order: Option<i32>,
+}
+
+/// Regular price, or the discounted price when the listing is on sale.
+pub fn unit_price(price: i64, on_sale: bool, discount_percent: i32) -> i64 {
+    if !on_sale || discount_percent <= 0 {
+        return price;
+    }
+    let pct = i64::from(discount_percent.clamp(0, 99));
+    price.saturating_mul(100 - pct) / 100
+}
+
+fn priced(mut item: StoreItem) -> StoreItem {
+    item.sale_price = unit_price(item.price, item.on_sale, item.discount_percent);
+    item
 }
 
 pub async fn list_public(db: &PgPool) -> Result<Vec<StoreItem>, sqlx::Error> {
     sqlx::query_as::<_, StoreItem>(SELECT)
         .fetch_all(db)
         .await
-        .map(|rows| rows.into_iter().filter(|item| item.active).collect())
+        .map(|rows| {
+            rows.into_iter()
+                .filter(|item| item.active)
+                .map(priced)
+                .collect()
+        })
 }
 
 pub async fn list_admin(db: &PgPool) -> Result<Vec<StoreItem>, sqlx::Error> {
-    sqlx::query_as::<_, StoreItem>(SELECT).fetch_all(db).await
+    sqlx::query_as::<_, StoreItem>(SELECT)
+        .fetch_all(db)
+        .await
+        .map(|rows| rows.into_iter().map(priced).collect())
 }
 
 const SELECT: &str = r#"SELECT id, name, item_type, description, category, quantity, price,
-                               stock, max_per_player, featured, active, sort_order,
-                               created_at, updated_at
+                               stock, max_per_player, featured, active, on_sale,
+                               discount_percent, sort_order, created_at, updated_at
                         FROM store_items
-                        ORDER BY featured DESC, sort_order ASC, name ASC"#;
+                        ORDER BY featured DESC, on_sale DESC, sort_order ASC, name ASC"#;
 
 pub async fn get(db: &PgPool, id: Uuid) -> Result<Option<StoreItem>, sqlx::Error> {
     sqlx::query_as::<_, StoreItem>(
         r#"SELECT id, name, item_type, description, category, quantity, price,
-                  stock, max_per_player, featured, active, sort_order,
-                  created_at, updated_at
+                  stock, max_per_player, featured, active, on_sale, discount_percent,
+                  sort_order, created_at, updated_at
            FROM store_items WHERE id = $1"#,
     )
     .bind(id)
     .fetch_optional(db)
     .await
+    .map(|row| row.map(priced))
 }
 
 pub async fn create(db: &PgPool, body: StoreItemPatch) -> ApiResult<StoreItem> {
@@ -96,11 +127,11 @@ pub async fn create(db: &PgPool, body: StoreItemPatch) -> ApiResult<StoreItem> {
     let row = sqlx::query_as::<_, StoreItem>(
         r#"INSERT INTO store_items
             (name, item_type, description, category, quantity, price, stock,
-             max_per_player, featured, active, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             max_per_player, featured, active, on_sale, discount_percent, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            RETURNING id, name, item_type, description, category, quantity, price,
-                     stock, max_per_player, featured, active, sort_order,
-                     created_at, updated_at"#,
+                     stock, max_per_player, featured, active, on_sale, discount_percent,
+                     sort_order, created_at, updated_at"#,
     )
     .bind(&draft.name)
     .bind(&draft.item_type)
@@ -112,10 +143,12 @@ pub async fn create(db: &PgPool, body: StoreItemPatch) -> ApiResult<StoreItem> {
     .bind(draft.max_per_player)
     .bind(draft.featured)
     .bind(draft.active)
+    .bind(draft.on_sale)
+    .bind(draft.discount_percent)
     .bind(draft.sort_order)
     .fetch_one(db)
     .await?;
-    Ok(row)
+    Ok(priced(row))
 }
 
 pub async fn update(db: &PgPool, id: Uuid, body: StoreItemPatch) -> ApiResult<StoreItem> {
@@ -127,7 +160,8 @@ pub async fn update(db: &PgPool, id: Uuid, body: StoreItemPatch) -> ApiResult<St
         r#"UPDATE store_items SET
             name = $2, item_type = $3, description = $4, category = $5,
             quantity = $6, price = $7, stock = $8, max_per_player = $9,
-            featured = $10, active = $11, sort_order = $12, updated_at = now()
+            featured = $10, active = $11, on_sale = $12, discount_percent = $13,
+            sort_order = $14, updated_at = now()
            WHERE id = $1"#,
     )
     .bind(id)
@@ -141,6 +175,8 @@ pub async fn update(db: &PgPool, id: Uuid, body: StoreItemPatch) -> ApiResult<St
     .bind(draft.max_per_player)
     .bind(draft.featured)
     .bind(draft.active)
+    .bind(draft.on_sale)
+    .bind(draft.discount_percent)
     .bind(draft.sort_order)
     .execute(db)
     .await?;
@@ -220,14 +256,15 @@ pub async fn buy(
     let mut tx = state.db.begin().await?;
     let item = sqlx::query_as::<_, StoreItem>(
         r#"SELECT id, name, item_type, description, category, quantity, price,
-                  stock, max_per_player, featured, active, sort_order,
-                  created_at, updated_at
+                  stock, max_per_player, featured, active, on_sale, discount_percent,
+                  sort_order, created_at, updated_at
            FROM store_items WHERE id = $1 FOR UPDATE"#,
     )
     .bind(item_id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::Validation("That item is gone.".to_owned()))?;
+    let item = priced(item);
 
     if !item.active {
         return Err(ApiError::Validation(
@@ -236,7 +273,8 @@ pub async fn buy(
     }
 
     let units = item.quantity.saturating_mul(quantity);
-    let total = item.price.saturating_mul(i64::from(quantity));
+    let unit = item.sale_price;
+    let total = unit.saturating_mul(i64::from(quantity));
 
     if let Some(stock) = item.stock {
         if stock < quantity {
@@ -285,7 +323,7 @@ pub async fn buy(
     .bind(&item.item_type)
     .bind(&item.name)
     .bind(quantity)
-    .bind(item.price)
+    .bind(unit)
     .bind(total)
     .fetch_one(&mut *tx)
     .await?;
@@ -427,6 +465,8 @@ struct Draft {
     max_per_player: Option<i32>,
     featured: bool,
     active: bool,
+    on_sale: bool,
+    discount_percent: i32,
     sort_order: i32,
 }
 
@@ -475,6 +515,24 @@ fn normalised(patch: StoreItemPatch, current: Option<&StoreItem>) -> ApiResult<D
     if description.as_ref().is_some_and(|value| value.len() > 400) {
         return Err(ApiError::Validation("Description is too long.".to_owned()));
     }
+    let on_sale = patch
+        .on_sale
+        .or(current.map(|row| row.on_sale))
+        .unwrap_or(false);
+    let discount_percent = patch
+        .discount_percent
+        .or(current.map(|row| row.discount_percent))
+        .unwrap_or(0);
+    if !(0..=99).contains(&discount_percent) {
+        return Err(ApiError::Validation(
+            "Discount must be between 0 and 99 percent.".to_owned(),
+        ));
+    }
+    if on_sale && !(1..=99).contains(&discount_percent) {
+        return Err(ApiError::Validation(
+            "Set a discount of 1–99 percent.".to_owned(),
+        ));
+    }
 
     Ok(Draft {
         name,
@@ -499,9 +557,29 @@ fn normalised(patch: StoreItemPatch, current: Option<&StoreItem>) -> ApiResult<D
             .active
             .or(current.map(|row| row.active))
             .unwrap_or(true),
+        on_sale,
+        discount_percent,
         sort_order: patch
             .sort_order
             .or(current.map(|row| row.sort_order))
             .unwrap_or(0),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unit_price;
+
+    #[test]
+    fn sale_price_is_the_list_price_when_not_on_sale() {
+        assert_eq!(unit_price(100, false, 50), 100);
+        assert_eq!(unit_price(100, true, 0), 100);
+    }
+
+    #[test]
+    fn sale_price_applies_the_percent() {
+        assert_eq!(unit_price(100, true, 25), 75);
+        assert_eq!(unit_price(25, true, 50), 12);
+        assert_eq!(unit_price(10, true, 99), 0);
+    }
 }

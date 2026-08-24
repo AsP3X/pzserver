@@ -1042,6 +1042,9 @@ export interface StoreItem {
   max_per_player: number | null
   featured: boolean
   active: boolean
+  on_sale: boolean
+  discount_percent: number
+  sale_price: number
   sort_order: number
 }
 
@@ -1056,6 +1059,8 @@ export interface StoreItemInput {
   max_per_player?: number | null
   featured?: boolean
   active?: boolean
+  on_sale?: boolean
+  discount_percent?: number
   sort_order?: number
 }
 
