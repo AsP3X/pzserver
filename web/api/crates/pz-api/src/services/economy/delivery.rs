@@ -282,6 +282,11 @@ async fn finish_ok(state: &AppState, order: &ItemOrder, removed: i32) {
             )
             .await;
         }
+        "auction_buy_offer_fill" => {
+            let _ =
+                crate::services::economy::offers::on_fill_moved(state, order.reference_id, removed)
+                    .await;
+        }
         "vault_move" => {
             let _ =
                 crate::services::economy::vault::on_delivered(state, order.reference_id, removed)
@@ -311,6 +316,10 @@ async fn finish_failed(state: &AppState, order: &ItemOrder) {
                 &order.kind,
             )
             .await;
+        }
+        "auction_buy_offer_fill" => {
+            let _ =
+                crate::services::economy::offers::on_fill_failed(state, order.reference_id).await;
         }
         "vault_move" => {
             let _ = crate::services::economy::vault::on_failed(state, order.reference_id).await;

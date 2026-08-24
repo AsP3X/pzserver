@@ -99,6 +99,18 @@ function auctionStatusLabel(status: string): TranslationKey {
   return 'economy.status_live'
 }
 
+function offerWanted(offer: BuyOffer): number | null {
+  return offer.remaining ?? offer.quantity
+}
+
+function fillCap(offer: BuyOffer, carried: number): number {
+  const left = offerWanted(offer)
+  if (left === null) {
+    return Math.max(0, Math.min(100, carried))
+  }
+  return Math.max(0, Math.min(100, left, carried))
+}
+
 function fromStore(item: StoreItem): Lot {
   return {
     key: `store:${item.id}`,
@@ -238,6 +250,7 @@ export function AuctionsPage() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [quantity, setQuantity] = useState(1)
+  const [fillQty, setFillQty] = useState(1)
   const [bid, setBid] = useState('')
   const [listing, setListing] = useState(false)
   const [offering, setOffering] = useState(false)
@@ -334,7 +347,15 @@ export function AuctionsPage() {
   const carried = offer
     ? stacks.find((item) => item.full_type === offer.item_type)?.count ?? 0
     : 0
-  const canFill = offer !== null && !offer.mine && offer.status === 'live' && carried >= offer.quantity
+  const maxFill = offer ? fillCap(offer, carried) : 0
+  const fillUnits = offer ? Math.min(Math.max(1, fillQty), Math.max(1, maxFill)) : 1
+  const canFill =
+    offer !== null &&
+    !offer.mine &&
+    offer.status === 'live' &&
+    maxFill >= 1 &&
+    fillUnits >= 1 &&
+    fillUnits <= maxFill
   const loading = lots.length === 0 && (items.isPending || live.isPending || offers.isPending)
   const queryError =
     items.error instanceof ApiError
@@ -433,7 +454,7 @@ export function AuctionsPage() {
   })
 
   const filled = useMutation({
-    mutationFn: (id: string) => api.fillBuyOffer(id),
+    mutationFn: (id: string) => api.fillBuyOffer(id, fillUnits),
     onSuccess: async () => {
       setConfirming(null)
       setError(null)
@@ -457,6 +478,7 @@ export function AuctionsPage() {
   function pick(key: string, next: Lot) {
     setSelected((previous) => (previous === key ? null : key))
     setQuantity(1)
+    setFillQty(1)
     setConfirming(null)
     if (next.auction) {
       setBid(String(next.auction.next_bid))
@@ -492,7 +514,8 @@ export function AuctionsPage() {
         : confirming === 'fill' && offer
           ? t('economy.fill_body', {
               name: offer.item_name,
-              price: t('economy.coins', { count: offer.price }),
+              count: fillUnits,
+              price: t('economy.coins', { count: offer.price * fillUnits }),
             })
           : null
 
@@ -648,7 +671,10 @@ export function AuctionsPage() {
                   offer={offer}
                   canFill={canFill}
                   carried={carried}
+                  fillQty={fillUnits}
+                  maxFill={maxFill}
                   busy={filled.isPending || cancelledOffer.isPending}
+                  onFillQty={setFillQty}
                   onFill={() => setConfirming('fill')}
                   onCancel={() => cancelledOffer.mutate(offer.id)}
                 />
@@ -753,10 +779,11 @@ function LotRow({
           <span className="flex w-full items-baseline justify-between gap-2">
             <span className="truncate text-sm text-bone">
               {lot.name}
-              {(lot.kind === 'auction' && lot.auction && lot.auction.quantity > 1) ||
-              (lot.kind === 'offer' && lot.offer && lot.offer.quantity > 1)
-                ? ` ×${lot.auction?.quantity ?? lot.offer?.quantity}`
-                : null}
+              {lot.kind === 'auction' && lot.auction && lot.auction.quantity > 1
+                ? ` ×${lot.auction.quantity}`
+                : lot.kind === 'offer' && lot.offer
+                  ? offerCountSuffix(lot.offer)
+                  : null}
             </span>
             <span className="flex shrink-0 items-baseline gap-1.5 font-mono text-sm">
               {lot.onSale && lot.store ? (
@@ -1070,22 +1097,46 @@ function AuctionInspector({
   )
 }
 
+function offerCountSuffix(offer: BuyOffer): string {
+  if (offer.quantity === null || offer.remaining === null) {
+    return ''
+  }
+  if (offer.remaining !== offer.quantity) {
+    return ` ×${offer.remaining}/${offer.quantity}`
+  }
+  return offer.quantity > 1 ? ` ×${offer.quantity}` : ''
+}
+
 function OfferInspector({
   offer,
   canFill,
   carried,
+  fillQty,
+  maxFill,
   busy,
+  onFillQty,
   onFill,
   onCancel,
 }: {
   offer: BuyOffer
   canFill: boolean
   carried: number
+  fillQty: number
+  maxFill: number
   busy: boolean
+  onFillQty: (value: number) => void
   onFill: () => void
   onCancel: () => void
 }) {
   const { t, intlLocale } = useTranslation()
+  const payout = offer.price * fillQty
+  const remainingLabel =
+    offer.quantity === null || offer.remaining === null
+      ? t('economy.unlimited')
+      : t('economy.offer_progress', {
+          remaining: offer.remaining,
+          want: offer.quantity,
+        })
 
   return (
     <>
@@ -1108,7 +1159,7 @@ function OfferInspector({
         <div>
           <h2 className="display text-2xl text-bone">
             {offer.item_name}
-            {offer.quantity > 1 ? ` ×${offer.quantity}` : ''}
+            {offerCountSuffix(offer)}
           </h2>
           <p className="mt-1 font-mono text-[0.6875rem] text-dust">{offer.item_type}</p>
         </div>
@@ -1118,8 +1169,12 @@ function OfferInspector({
             label={t('economy.buyer')}
             value={offer.staff ? t('economy.staff_seller') : offer.buyer}
           />
-          <Meta label={t('economy.price')} value={t('economy.coins', { count: offer.price })} />
-          <Meta label={t('economy.ends')} value={formatDateTime(offer.ends_at, intlLocale)} />
+          <Meta label={t('economy.unit_price')} value={t('economy.coins', { count: offer.price })} />
+          <Meta label={t('economy.remaining')} value={remainingLabel} />
+          <Meta
+            label={t('economy.ends')}
+            value={offer.ends_at ? formatDateTime(offer.ends_at, intlLocale) : t('economy.indefinite')}
+          />
           {offer.filler ? <Meta label={t('economy.seller')} value={offer.filler} /> : null}
         </dl>
 
@@ -1132,21 +1187,32 @@ function OfferInspector({
             <p className="font-mono text-[0.6875rem] text-dust">
               {t('economy.carrying_count', { count: carried })}
             </p>
-            <Button size="sm" disabled={busy || !canFill} onClick={onFill} className="self-start">
-              <HandCoins aria-hidden="true" className="size-3.5" />
-              {t('economy.fill_offer')}
-              {` · ${t('economy.coins', { count: offer.price })}`}
-            </Button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <Field
+                type="number"
+                min={1}
+                max={Math.max(1, maxFill)}
+                label={t('economy.fill_quantity')}
+                value={fillQty}
+                onChange={(event) => onFillQty(Number(event.target.value) || 1)}
+                className="sm:max-w-40"
+              />
+              <Button size="sm" disabled={busy || !canFill} onClick={onFill} className="sm:ml-auto">
+                <HandCoins aria-hidden="true" className="size-3.5" />
+                {t('economy.fill_offer')}
+                {` · ${t('economy.coins', { count: payout })}`}
+              </Button>
+            </div>
             <p className="text-xs text-dust">{t('economy.offline_fill')}</p>
           </>
         ) : null}
 
-        {offer.mine && (offer.status === 'live' || offer.status === 'collecting') ? (
+        {offer.mine && offer.status === 'live' ? (
           <Button
             size="sm"
             variant="outline"
             className="self-start border-blood text-blood"
-            disabled={busy || offer.status === 'collecting'}
+            disabled={busy}
             onClick={onCancel}
           >
             {t('economy.cancel_offer')}
@@ -1211,7 +1277,7 @@ function Desk({
                     <span className="min-w-0">
                       <span className="block truncate text-sm text-bone">
                         {row.item_name}
-                        {row.quantity > 1 ? ` ×${row.quantity}` : ''}
+                        {offerCountSuffix(row)}
                       </span>
                       <span className="font-mono text-[0.6875rem] text-dust">
                         {t('economy.coins', { count: row.price })}

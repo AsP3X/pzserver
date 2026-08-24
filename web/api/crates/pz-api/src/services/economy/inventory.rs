@@ -52,8 +52,9 @@ pub async fn reserved(db: &PgPool, user_id: Uuid, item_type: &str) -> Result<i64
                 WHERE seller_id = $1 AND item_type = $2 AND status = 'collecting'
             ), 0)::bigint
             + COALESCE((
-                SELECT SUM(quantity) FROM auction_buy_offers
-                WHERE filler_id = $1 AND item_type = $2 AND status = 'collecting'
+                SELECT SUM(f.quantity) FROM auction_buy_offer_fills f
+                JOIN auction_buy_offers o ON o.id = f.offer_id
+                WHERE f.filler_id = $1 AND f.status = 'collecting' AND o.item_type = $2
             ), 0)::bigint"#,
     )
     .bind(user_id)
@@ -129,9 +130,10 @@ pub async fn holds(
         .collect();
 
     let filling = sqlx::query_as::<_, (String, String, i32)>(
-        r#"SELECT item_type, item_name, quantity
-           FROM auction_buy_offers
-           WHERE filler_id = $1 AND status = 'collecting'"#,
+        r#"SELECT o.item_type, o.item_name, f.quantity
+           FROM auction_buy_offer_fills f
+           JOIN auction_buy_offers o ON o.id = f.offer_id
+           WHERE f.filler_id = $1 AND f.status = 'collecting'"#,
     )
     .bind(user_id)
     .fetch_all(db)

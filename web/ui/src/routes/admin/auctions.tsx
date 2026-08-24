@@ -265,9 +265,11 @@ export function AdminAuctionsPage() {
                       <span className="flex w-full items-center justify-between gap-2">
                         <span className="truncate text-sm text-bone">
                           {row.kind === 'listing' ? row.listing.item_name : row.offer.item_name}
-                          {(row.kind === 'listing' ? row.listing.quantity : row.offer.quantity) > 1
-                            ? ` ×${row.kind === 'listing' ? row.listing.quantity : row.offer.quantity}`
-                            : ''}
+                          {row.kind === 'listing' && row.listing.quantity > 1
+                            ? ` ×${row.listing.quantity}`
+                            : row.kind === 'offer'
+                              ? offerCountSuffix(row.offer)
+                              : ''}
                         </span>
                         <span
                           className={cn(
@@ -374,13 +376,27 @@ export function AdminAuctionsPage() {
                       value={currentOffer.staff ? t('economy.staff_seller') : currentOffer.buyer}
                     />
                     <Fact
-                      label={t('economy.price')}
+                      label={t('economy.unit_price')}
                       value={t('economy.coins', { count: currentOffer.price })}
                     />
-                    <Fact label={t('economy.quantity')} value={String(currentOffer.quantity)} />
+                    <Fact
+                      label={t('economy.remaining')}
+                      value={
+                        currentOffer.quantity === null || currentOffer.remaining === null
+                          ? t('economy.unlimited')
+                          : t('economy.offer_progress', {
+                              remaining: currentOffer.remaining,
+                              want: currentOffer.quantity,
+                            })
+                      }
+                    />
                     <Fact
                       label={t('economy.ends')}
-                      value={formatDateTime(currentOffer.ends_at, intlLocale)}
+                      value={
+                        currentOffer.ends_at
+                          ? formatDateTime(currentOffer.ends_at, intlLocale)
+                          : t('economy.indefinite')
+                      }
                     />
                     {currentOffer.filler ? (
                       <Fact label={t('economy.seller')} value={currentOffer.filler} />
@@ -443,6 +459,16 @@ export function AdminAuctionsPage() {
       />
     </section>
   )
+}
+
+function offerCountSuffix(offer: BuyOffer): string {
+  if (offer.quantity === null || offer.remaining === null) {
+    return ''
+  }
+  if (offer.remaining !== offer.quantity) {
+    return ` ×${offer.remaining}/${offer.quantity}`
+  }
+  return offer.quantity > 1 ? ` ×${offer.quantity}` : ''
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

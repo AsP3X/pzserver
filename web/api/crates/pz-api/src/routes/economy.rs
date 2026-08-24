@@ -568,9 +568,10 @@ async fn fill_buy_offer(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
     Path(id): Path<Uuid>,
+    Json(body): Json<offers::FillOffer>,
 ) -> ApiResult<Json<offers::OfferView>> {
     Ok(Json(
-        offers::fill(&state, id, user.id, &user.username).await?,
+        offers::fill(&state, id, user.id, &user.username, body).await?,
     ))
 }
 

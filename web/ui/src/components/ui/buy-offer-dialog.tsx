@@ -11,7 +11,8 @@ import { useTranslation } from '@/i18n/use-translation'
 import type { BuyOfferInput, CatalogItem } from '@/lib/api'
 
 /**
- * Post a buy offer. Players escrow coins now; staff lots are house-funded.
+ * Post a buy offer. Players name a count and escrow coins now. Staff may
+ * post unlimited quantity and no end date, house-funded.
  */
 export function BuyOfferDialog({
   open,
@@ -36,6 +37,8 @@ export function BuyOfferDialog({
   const [quantity, setQuantity] = useState(1)
   const [unit, setUnit] = useState(10)
   const [hours, setHours] = useState(24)
+  const [unlimited, setUnlimited] = useState(false)
+  const [indefinite, setIndefinite] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -45,12 +48,16 @@ export function BuyOfferDialog({
       setQuantity(1)
       setUnit(10)
       setHours(24)
+      setUnlimited(false)
+      setIndefinite(false)
     }
   }, [open])
 
   const known = catalogue.data?.items.find((item) => item.full_type === itemType) ?? null
-  const total = Math.max(1, unit) * Math.max(1, quantity)
-  const short = !staff && total > available
+  const count = Math.max(1, quantity)
+  const total = unlimited ? 0 : Math.max(1, unit) * count
+  const short = !staff && !unlimited && total > available
+  const quantityOk = staff && unlimited ? true : count >= 1
 
   function pick(item: CatalogItem) {
     setItemType(item.full_type)
@@ -114,10 +121,16 @@ export function BuyOfferDialog({
               <Field
                 type="number"
                 min={1}
-                max={50}
-                label={t('economy.quantity')}
-                value={quantity}
+                max={100}
+                label={t('economy.want_quantity')}
+                value={unlimited ? '' : quantity}
                 onChange={(event) => setQuantity(Number(event.target.value) || 1)}
+                disabled={unlimited}
+                hint={
+                  unlimited
+                    ? t('economy.unlimited')
+                    : t('economy.offer_total', { count: total })
+                }
               />
               <Field
                 type="number"
@@ -125,46 +138,69 @@ export function BuyOfferDialog({
                 label={t('economy.unit_price')}
                 value={unit}
                 onChange={(event) => setUnit(Number(event.target.value) || 1)}
-                hint={t('economy.offer_total', { count: total })}
               />
             </div>
+            {staff ? (
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-sm text-bone">
+                  <input
+                    type="checkbox"
+                    checked={unlimited}
+                    onChange={(event) => setUnlimited(event.target.checked)}
+                  />
+                  {t('economy.unlimited')}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-bone">
+                  <input
+                    type="checkbox"
+                    checked={indefinite}
+                    onChange={(event) => setIndefinite(event.target.checked)}
+                  />
+                  {t('economy.indefinite')}
+                </label>
+              </div>
+            ) : null}
             {short ? (
               <p className="text-xs text-blood">{t('economy.offer_short')}</p>
             ) : null}
-            <fieldset>
-              <legend className="mb-2 font-mono text-[0.6875rem] tracking-widest text-smoke uppercase">
-                {t('economy.duration')}
-              </legend>
-              <div className="flex gap-1.5">
-                {[12, 24, 48].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setHours(item)}
-                    className={cn(
-                      'border px-2 py-1 font-mono text-[0.6875rem]',
-                      hours === item
-                        ? 'border-hazard bg-hazard-soft text-hazard'
-                        : 'border-fence text-dust',
-                    )}
-                  >
-                    {t('economy.duration_hours', { count: item })}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
+            {indefinite ? null : (
+              <fieldset>
+                <legend className="mb-2 font-mono text-[0.6875rem] tracking-widest text-smoke uppercase">
+                  {t('economy.duration')}
+                </legend>
+                <div className="flex gap-1.5">
+                  {[12, 24, 48].map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setHours(item)}
+                      className={cn(
+                        'border px-2 py-1 font-mono text-[0.6875rem]',
+                        hours === item
+                          ? 'border-hazard bg-hazard-soft text-hazard'
+                          : 'border-fence text-dust',
+                      )}
+                    >
+                      {t('economy.duration_hours', { count: item })}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
           </div>
         }
         confirmLabel={t('economy.post_buy_offer')}
         busy={busy}
-        confirmDisabled={itemType.trim().length < 3 || unit < 1 || quantity < 1 || short}
+        confirmDisabled={itemType.trim().length < 3 || unit < 1 || !quantityOk || short}
         onConfirm={() =>
           onSubmit({
             item_type: itemType,
             item_name: name || known?.name,
-            quantity,
-            price: total,
-            hours,
+            quantity: unlimited ? null : count,
+            price: unit,
+            hours: indefinite ? null : hours,
+            unlimited,
+            indefinite,
           })
         }
         onClose={onClose}

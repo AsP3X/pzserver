@@ -1126,11 +1126,12 @@ export interface BuyOffer {
   filler_id: string | null
   item_type: string
   item_name: string
-  quantity: number
+  quantity: number | null
+  remaining: number | null
   price: number
   staff: boolean
   status: string
-  ends_at: string
+  ends_at: string | null
   created_at: string
   settled_at: string | null
   buyer: string
@@ -1141,9 +1142,11 @@ export interface BuyOffer {
 export interface BuyOfferInput {
   item_type: string
   item_name?: string
-  quantity?: number
+  quantity?: number | null
   price: number
-  hours?: number
+  hours?: number | null
+  unlimited?: boolean
+  indefinite?: boolean
 }
 
 export interface VaultItem {
@@ -1753,8 +1756,8 @@ export const api = {
   postBuyOffer: (input: BuyOfferInput) =>
     post<BuyOffer>('/api/v1/auctions/offers', input),
 
-  fillBuyOffer: (id: string) =>
-    post<BuyOffer>(`/api/v1/auctions/offers/${id}/fill`, {}),
+  fillBuyOffer: (id: string, quantity: number) =>
+    post<BuyOffer>(`/api/v1/auctions/offers/${id}/fill`, { quantity }),
 
   cancelBuyOffer: (id: string) =>
     post<{ message: string }>(`/api/v1/auctions/offers/${id}/cancel`, {}),

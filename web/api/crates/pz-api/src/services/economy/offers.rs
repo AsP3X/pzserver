@@ -1,11 +1,11 @@
 //! Buy offers on the auction house.
 //!
-//! A player posts a price and the coins leave their wallet immediately. Staff
-//! offers skip that debit — the house mints the payout when someone fills.
-//! Filling takes the item from the seller first, then pays them and delivers
-//! to the buyer.
+//! A player names an item, a count, and a unit price. Coins leave their wallet
+//! for the full count. Anyone with the item can fill part of it; when the
+//! count is gone the offer comes down. Staff may post unlimited quantity and
+//! no end date, house-funded.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -16,6 +16,8 @@ use crate::state::AppState;
 
 const HOUSE_FEE_BPS: i64 = 500;
 const DURATIONS: &[i64] = &[12, 24, 48];
+const PLAYER_MAX_WANT: i32 = 100;
+const FILL_MAX: i32 = 100;
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct Offer {
@@ -24,11 +26,12 @@ pub struct Offer {
     pub filler_id: Option<Uuid>,
     pub item_type: String,
     pub item_name: String,
-    pub quantity: i32,
+    pub quantity: Option<i32>,
+    pub remaining: Option<i32>,
     pub price: i64,
     pub staff: bool,
     pub status: String,
-    pub ends_at: DateTime<Utc>,
+    pub ends_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub settled_at: Option<DateTime<Utc>>,
 }
@@ -42,6 +45,15 @@ pub struct OfferView {
     pub mine: bool,
 }
 
+#[derive(Debug, Clone, FromRow)]
+struct Fill {
+    pub id: Uuid,
+    pub offer_id: Uuid,
+    pub filler_id: Uuid,
+    pub quantity: i32,
+    pub status: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PostOffer {
     pub item_type: String,
@@ -49,6 +61,13 @@ pub struct PostOffer {
     pub quantity: Option<i32>,
     pub price: i64,
     pub hours: Option<i64>,
+    pub unlimited: Option<bool>,
+    pub indefinite: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FillOffer {
+    pub quantity: i32,
 }
 
 pub async fn catalogue(db: &PgPool, viewer: Option<Uuid>) -> Result<Vec<OfferView>, sqlx::Error> {
@@ -57,13 +76,10 @@ pub async fn catalogue(db: &PgPool, viewer: Option<Uuid>) -> Result<Vec<OfferVie
         .await?;
     let mut views = Vec::with_capacity(rows.len());
     for offer in rows {
-        if offer.status != "live" && offer.status != "collecting" {
+        if offer.status != "live" {
             continue;
         }
-        if offer.status == "collecting"
-            && viewer != Some(offer.buyer_id)
-            && viewer != offer.filler_id
-        {
+        if offer.remaining == Some(0) {
             continue;
         }
         views.push(view(db, offer, viewer).await?);
@@ -73,7 +89,7 @@ pub async fn catalogue(db: &PgPool, viewer: Option<Uuid>) -> Result<Vec<OfferVie
 
 pub async fn admin_list(db: &PgPool) -> Result<Vec<OfferView>, sqlx::Error> {
     let rows = sqlx::query_as::<_, Offer>(
-        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, price,
+        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                   staff, status, ends_at, created_at, settled_at
            FROM auction_buy_offers
            ORDER BY created_at DESC
@@ -90,10 +106,14 @@ pub async fn admin_list(db: &PgPool) -> Result<Vec<OfferView>, sqlx::Error> {
 
 pub async fn mine(db: &PgPool, user_id: Uuid) -> Result<Vec<OfferView>, sqlx::Error> {
     let rows = sqlx::query_as::<_, Offer>(
-        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, price,
+        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                   staff, status, ends_at, created_at, settled_at
            FROM auction_buy_offers
-           WHERE buyer_id = $1 OR filler_id = $1
+           WHERE buyer_id = $1
+              OR filler_id = $1
+              OR id IN (
+                  SELECT offer_id FROM auction_buy_offer_fills WHERE filler_id = $1
+              )
            ORDER BY created_at DESC"#,
     )
     .bind(user_id)
@@ -124,27 +144,68 @@ pub async fn post(
     staff: bool,
 ) -> ApiResult<OfferView> {
     let item_type = economy::item_type(&body.item_type)?.to_owned();
-    let quantity = body.quantity.unwrap_or(1);
-    if !(1..=50).contains(&quantity) {
-        return Err(ApiError::Validation("Want between 1 and 50.".to_owned()));
-    }
-    let price = economy::coins(body.price, "Price")?;
-    let hours = body.hours.unwrap_or(24);
-    if !DURATIONS.contains(&hours) {
+    let unlimited = body.unlimited.unwrap_or(false);
+    let indefinite = body.indefinite.unwrap_or(false);
+    if unlimited && !staff {
         return Err(ApiError::Validation(
-            "Duration must be 12, 24 or 48 hours.".to_owned(),
+            "Only staff can post an unlimited buy offer.".to_owned(),
         ));
     }
+    if indefinite && !staff {
+        return Err(ApiError::Validation(
+            "Only staff can post an offer with no end.".to_owned(),
+        ));
+    }
+
+    let (quantity, remaining) = if unlimited {
+        (None, None)
+    } else {
+        let quantity = body
+            .quantity
+            .ok_or_else(|| ApiError::Validation("Say how many you want.".to_owned()))?;
+        if !(1..=PLAYER_MAX_WANT).contains(&quantity) && !staff {
+            return Err(ApiError::Validation(format!(
+                "Want between 1 and {PLAYER_MAX_WANT}."
+            )));
+        }
+        if !(1..=10_000).contains(&quantity) {
+            return Err(ApiError::Validation("Want between 1 and 10000.".to_owned()));
+        }
+        (Some(quantity), Some(quantity))
+    };
+
+    let unit = economy::coins(body.price, "Price")?;
+    if let Some(count) = quantity {
+        economy::coins(unit.saturating_mul(i64::from(count)), "Total")?;
+    }
+
+    let ends_at = if indefinite {
+        None
+    } else {
+        let hours = body.hours.unwrap_or(24);
+        if !DURATIONS.contains(&hours) {
+            return Err(ApiError::Validation(
+                "Duration must be 12, 24 or 48 hours.".to_owned(),
+            ));
+        }
+        Some(Utc::now() + Duration::hours(hours))
+    };
+
     let name = body
         .item_name
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| item_type.clone());
 
+    let escrow = match quantity {
+        Some(count) if !staff => unit * i64::from(count),
+        _ => 0,
+    };
+
     let mut tx = state.db.begin().await?;
-    if !staff {
+    if escrow > 0 {
         let available = wallet::available_tx(&mut tx, buyer_id).await?;
-        if available < price {
+        if available < escrow {
             return Err(ApiError::Validation(format!(
                 "Not enough coins. Available: {available}."
             )));
@@ -152,26 +213,27 @@ pub async fn post(
     }
     let offer = sqlx::query_as::<_, Offer>(
         r#"INSERT INTO auction_buy_offers
-            (buyer_id, item_type, item_name, quantity, price, staff, status, ends_at)
-           VALUES ($1,$2,$3,$4,$5,$6,'live', now() + ($7 * interval '1 hour'))
-           RETURNING id, buyer_id, filler_id, item_type, item_name, quantity, price,
+            (buyer_id, item_type, item_name, quantity, remaining, price, staff, status, ends_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'live',$8)
+           RETURNING id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                      staff, status, ends_at, created_at, settled_at"#,
     )
     .bind(buyer_id)
     .bind(&item_type)
     .bind(&name)
     .bind(quantity)
-    .bind(price)
+    .bind(remaining)
+    .bind(unit)
     .bind(staff)
-    .bind(hours)
+    .bind(ends_at)
     .fetch_one(&mut *tx)
     .await?;
 
-    if !staff {
+    if escrow > 0 {
         wallet::debit_tx(
             &mut tx,
             buyer_id,
-            price,
+            escrow,
             economy::SOURCE_OFFER_ESCROW,
             Some("Buy offer"),
             Some("auction_buy_offer"),
@@ -191,7 +253,15 @@ pub async fn fill(
     offer_id: Uuid,
     filler_id: Uuid,
     username: &str,
+    body: FillOffer,
 ) -> ApiResult<OfferView> {
+    let count = body.quantity;
+    if !(1..=FILL_MAX).contains(&count) {
+        return Err(ApiError::Validation(format!(
+            "Fill between 1 and {FILL_MAX}."
+        )));
+    }
+
     let offer = get(&state.db, offer_id)
         .await?
         .ok_or_else(|| ApiError::Validation("That offer is gone.".to_owned()))?;
@@ -203,8 +273,20 @@ pub async fn fill(
             "You cannot fill your own offer.".to_owned(),
         ));
     }
-    if offer.ends_at <= Utc::now() {
+    if offer.ends_at.is_some_and(|ends| ends <= Utc::now()) {
         return Err(ApiError::Validation("That offer has ended.".to_owned()));
+    }
+    if offer.remaining == Some(0) {
+        return Err(ApiError::Validation(
+            "That offer is already filled.".to_owned(),
+        ));
+    }
+    if let Some(left) = offer.remaining {
+        if count > left {
+            return Err(ApiError::Validation(format!(
+                "Only {left} left on this offer."
+            )));
+        }
     }
 
     let online = state
@@ -219,7 +301,7 @@ pub async fn fill(
         filler_id,
         username,
         &offer.item_type,
-        offer.quantity,
+        count,
         online,
     )
     .await?;
@@ -229,16 +311,47 @@ pub async fn fill(
     if offer.status != "live" {
         return Err(ApiError::Validation("That offer is not open.".to_owned()));
     }
-    if offer.ends_at <= Utc::now() {
+    if offer.ends_at.is_some_and(|ends| ends <= Utc::now()) {
         return Err(ApiError::Validation("That offer has ended.".to_owned()));
     }
-    sqlx::query(
-        r#"UPDATE auction_buy_offers SET status = 'collecting', filler_id = $2
-           WHERE id = $1"#,
+    if let Some(left) = offer.remaining {
+        if left < 1 {
+            return Err(ApiError::Validation(
+                "That offer is already filled.".to_owned(),
+            ));
+        }
+        if count > left {
+            return Err(ApiError::Validation(format!(
+                "Only {left} left on this offer."
+            )));
+        }
+        sqlx::query(
+            r#"UPDATE auction_buy_offers
+               SET remaining = remaining - $2, filler_id = $3
+               WHERE id = $1"#,
+        )
+        .bind(offer.id)
+        .bind(count)
+        .bind(filler_id)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query("UPDATE auction_buy_offers SET filler_id = $2 WHERE id = $1")
+            .bind(offer.id)
+            .bind(filler_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    let fill = sqlx::query_as::<_, Fill>(
+        r#"INSERT INTO auction_buy_offer_fills (offer_id, filler_id, quantity, status)
+           VALUES ($1,$2,$3,'collecting')
+           RETURNING id, offer_id, filler_id, quantity, status"#,
     )
     .bind(offer.id)
     .bind(filler_id)
-    .execute(&mut *tx)
+    .bind(count)
+    .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
 
@@ -246,14 +359,14 @@ pub async fn fill(
         state,
         username,
         &offer.item_type,
-        offer.quantity,
+        count,
         "auction_offer_take",
-        "auction_buy_offer",
-        offer.id,
+        "auction_buy_offer_fill",
+        fill.id,
     )
     .await
     {
-        fail_fill(state, &offer).await?;
+        fail_fill(state, fill.id).await?;
         return Err(error);
     }
 
@@ -268,14 +381,9 @@ pub async fn cancel(state: &AppState, offer_id: Uuid, actor: Uuid, admin: bool) 
     if !admin && offer.buyer_id != actor {
         return Err(ApiError::Forbidden);
     }
-    if offer.status != "live" && offer.status != "collecting" {
+    if offer.status != "live" {
         return Err(ApiError::Validation(
             "That offer cannot be cancelled.".to_owned(),
-        ));
-    }
-    if offer.status == "collecting" && !admin {
-        return Err(ApiError::Validation(
-            "Someone is filling this. An admin has to pull it.".to_owned(),
         ));
     }
 
@@ -288,16 +396,16 @@ pub async fn cancel(state: &AppState, offer_id: Uuid, actor: Uuid, admin: bool) 
     .await?;
     tx.commit().await?;
 
-    refund_buyer(state, &offer).await?;
+    refund_unfilled(state, &offer).await?;
     Ok(())
 }
 
 pub async fn tick(state: &AppState) {
     let Ok(due) = sqlx::query_as::<_, Offer>(
-        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, price,
+        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                   staff, status, ends_at, created_at, settled_at
            FROM auction_buy_offers
-           WHERE status = 'live' AND ends_at <= now()"#,
+           WHERE status = 'live' AND ends_at IS NOT NULL AND ends_at <= now()"#,
     )
     .fetch_all(&state.db)
     .await
@@ -309,53 +417,62 @@ pub async fn tick(state: &AppState) {
     }
 }
 
+pub async fn on_fill_moved(state: &AppState, fill_id: Uuid, removed: i32) -> ApiResult<()> {
+    let Some(fill) = get_fill(&state.db, fill_id).await? else {
+        return Ok(());
+    };
+    if fill.status != "collecting" {
+        return Ok(());
+    }
+    let count = removed.max(0);
+    if count < 1 {
+        fail_fill(state, fill.id).await?;
+        return Ok(());
+    }
+    let quantity = count.min(fill.quantity);
+    settle_fill(state, fill, quantity).await
+}
+
+pub async fn on_fill_failed(state: &AppState, fill_id: Uuid) -> ApiResult<()> {
+    fail_fill(state, fill_id).await
+}
+
+/// Older whole-offer takes from before partial fills. Treat as one fill.
 pub async fn on_item_moved(
     state: &AppState,
     offer_id: Uuid,
     kind: &str,
     removed: i32,
 ) -> ApiResult<()> {
-    let Some(offer) = get(&state.db, offer_id).await? else {
+    if kind != "auction_offer_take" {
+        return Ok(());
+    }
+    let Some(fill_id) = latest_collecting_fill(&state.db, offer_id).await? else {
         return Ok(());
     };
-    if kind != "auction_offer_take" || offer.status != "collecting" {
-        return Ok(());
-    }
-    let count = removed.max(0);
-    if count < 1 {
-        fail_fill(state, &offer).await?;
-        return Ok(());
-    }
-    let quantity = count.min(offer.quantity);
-    settle(state, offer, quantity).await
+    on_fill_moved(state, fill_id, removed).await
 }
 
 pub async fn on_item_failed(state: &AppState, offer_id: Uuid, kind: &str) -> ApiResult<()> {
-    let Some(offer) = get(&state.db, offer_id).await? else {
+    if kind != "auction_offer_take" {
+        return Ok(());
+    }
+    let Some(fill_id) = latest_collecting_fill(&state.db, offer_id).await? else {
         return Ok(());
     };
-    if kind == "auction_offer_take" && offer.status == "collecting" {
-        fail_fill(state, &offer).await?;
-    }
-    Ok(())
+    fail_fill(state, fill_id).await
 }
 
-async fn settle(state: &AppState, offer: Offer, quantity: i32) -> ApiResult<()> {
-    let Some(filler_id) = offer.filler_id else {
-        fail_fill(state, &offer).await?;
+async fn settle_fill(state: &AppState, fill: Fill, quantity: i32) -> ApiResult<()> {
+    let Some(offer) = get(&state.db, fill.offer_id).await? else {
         return Ok(());
     };
-    let fee = if offer.staff {
-        0
-    } else {
-        offer.price * HOUSE_FEE_BPS / 10_000
-    };
-    let proceeds = (offer.price - fee).max(0);
-    if proceeds > 0 {
+    let payout = unit_payout(offer.price, quantity, offer.staff);
+    if payout > 0 {
         wallet::credit(
             &state.db,
-            filler_id,
-            proceeds,
+            fill.filler_id,
+            payout,
             economy::SOURCE_OFFER_SALE,
             Some(&format!("Filled buy offer for {}", offer.item_name)),
             Some("auction_buy_offer"),
@@ -364,13 +481,15 @@ async fn settle(state: &AppState, offer: Offer, quantity: i32) -> ApiResult<()> 
         .await?;
     }
     sqlx::query(
-        r#"UPDATE auction_buy_offers SET status = 'filled', quantity = $2, settled_at = now()
+        r#"UPDATE auction_buy_offer_fills
+           SET status = 'done', quantity = $2, finished_at = now()
            WHERE id = $1"#,
     )
-    .bind(offer.id)
+    .bind(fill.id)
     .bind(quantity)
     .execute(&state.db)
     .await?;
+
     if let Some(username) = username_of(&state.db, offer.buyer_id).await? {
         delivery::give_now(
             state,
@@ -383,15 +502,81 @@ async fn settle(state: &AppState, offer: Offer, quantity: i32) -> ApiResult<()> 
         )
         .await?;
     }
+    close_if_done(state, offer.id).await
+}
+
+async fn fail_fill(state: &AppState, fill_id: Uuid) -> ApiResult<()> {
+    let Some(fill) = get_fill(&state.db, fill_id).await? else {
+        return Ok(());
+    };
+    if fill.status != "collecting" {
+        return Ok(());
+    }
+    let Some(offer) = get(&state.db, fill.offer_id).await? else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        r#"UPDATE auction_buy_offer_fills
+           SET status = 'failed', finished_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(fill.id)
+    .execute(&state.db)
+    .await?;
+
+    if offer.status == "live" {
+        if offer.remaining.is_some() {
+            sqlx::query(
+                r#"UPDATE auction_buy_offers
+                   SET remaining = remaining + $2
+                   WHERE id = $1 AND remaining IS NOT NULL"#,
+            )
+            .bind(offer.id)
+            .bind(fill.quantity)
+            .execute(&state.db)
+            .await?;
+        }
+    } else if !offer.staff {
+        let refund = offer.price * i64::from(fill.quantity);
+        if refund > 0 {
+            wallet::credit(
+                &state.db,
+                offer.buyer_id,
+                refund,
+                economy::SOURCE_OFFER_REFUND,
+                Some("Buy offer fill returned"),
+                Some("auction_buy_offer"),
+                Some(offer.id),
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
-async fn fail_fill(state: &AppState, offer: &Offer) -> ApiResult<()> {
-    sqlx::query(
-        r#"UPDATE auction_buy_offers SET status = 'live', filler_id = NULL
-           WHERE id = $1 AND status = 'collecting'"#,
+async fn close_if_done(state: &AppState, offer_id: Uuid) -> ApiResult<()> {
+    let Some(offer) = get(&state.db, offer_id).await? else {
+        return Ok(());
+    };
+    if offer.status != "live" || offer.remaining != Some(0) {
+        return Ok(());
+    }
+    let pending: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM auction_buy_offer_fills
+           WHERE offer_id = $1 AND status = 'collecting'"#,
     )
-    .bind(offer.id)
+    .bind(offer_id)
+    .fetch_one(&state.db)
+    .await?;
+    if pending > 0 {
+        return Ok(());
+    }
+    sqlx::query(
+        r#"UPDATE auction_buy_offers SET status = 'filled', settled_at = now()
+           WHERE id = $1 AND status = 'live' AND remaining = 0"#,
+    )
+    .bind(offer_id)
     .execute(&state.db)
     .await?;
     Ok(())
@@ -414,18 +599,27 @@ async fn expire(state: &AppState, offer: Offer) -> ApiResult<()> {
         return Ok(());
     }
     tx.commit().await?;
-    refund_buyer(state, &offer).await?;
+    refund_unfilled(state, &offer).await?;
     Ok(())
 }
 
-async fn refund_buyer(state: &AppState, offer: &Offer) -> ApiResult<()> {
+/// Coins still sitting on the unfilled (and not currently collecting) remainder.
+async fn refund_unfilled(state: &AppState, offer: &Offer) -> ApiResult<()> {
     if offer.staff {
+        return Ok(());
+    }
+    let leftover = offer.remaining.unwrap_or(0);
+    if leftover < 1 {
+        return Ok(());
+    }
+    let refund = offer.price * i64::from(leftover);
+    if refund < 1 {
         return Ok(());
     }
     wallet::credit(
         &state.db,
         offer.buyer_id,
-        offer.price,
+        refund,
         economy::SOURCE_OFFER_REFUND,
         Some("Buy offer returned"),
         Some("auction_buy_offer"),
@@ -433,6 +627,16 @@ async fn refund_buyer(state: &AppState, offer: &Offer) -> ApiResult<()> {
     )
     .await?;
     Ok(())
+}
+
+fn unit_payout(unit: i64, quantity: i32, staff: bool) -> i64 {
+    let gross = unit * i64::from(quantity);
+    let fee = if staff {
+        0
+    } else {
+        gross * HOUSE_FEE_BPS / 10_000
+    };
+    (gross - fee).max(0)
 }
 
 async fn username_of(db: &PgPool, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
@@ -444,7 +648,7 @@ async fn username_of(db: &PgPool, user_id: Uuid) -> Result<Option<String>, sqlx:
 
 async fn get(db: &PgPool, id: Uuid) -> Result<Option<Offer>, sqlx::Error> {
     sqlx::query_as::<_, Offer>(
-        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, price,
+        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                   staff, status, ends_at, created_at, settled_at
            FROM auction_buy_offers WHERE id = $1"#,
     )
@@ -453,9 +657,31 @@ async fn get(db: &PgPool, id: Uuid) -> Result<Option<Offer>, sqlx::Error> {
     .await
 }
 
+async fn get_fill(db: &PgPool, id: Uuid) -> Result<Option<Fill>, sqlx::Error> {
+    sqlx::query_as::<_, Fill>(
+        r#"SELECT id, offer_id, filler_id, quantity, status
+           FROM auction_buy_offer_fills WHERE id = $1"#,
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await
+}
+
+async fn latest_collecting_fill(db: &PgPool, offer_id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT id FROM auction_buy_offer_fills
+           WHERE offer_id = $1 AND status = 'collecting'
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(offer_id)
+    .fetch_optional(db)
+    .await
+}
+
 async fn lock_offer(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, id: Uuid) -> ApiResult<Offer> {
     sqlx::query_as::<_, Offer>(
-        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, price,
+        r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                   staff, status, ends_at, created_at, settled_at
            FROM auction_buy_offers WHERE id = $1 FOR UPDATE"#,
     )
@@ -482,25 +708,29 @@ async fn view(db: &PgPool, offer: Offer, viewer: Option<Uuid>) -> Result<OfferVi
     })
 }
 
-const OFFER_SELECT: &str = r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, price,
+const OFFER_SELECT: &str = r#"SELECT id, buyer_id, filler_id, item_type, item_name, quantity, remaining, price,
                                      staff, status, ends_at, created_at, settled_at
                               FROM auction_buy_offers"#;
 
 #[cfg(test)]
 mod tests {
-    fn proceeds(price: i64, staff: bool) -> i64 {
-        let fee = if staff { 0 } else { price * 500 / 10_000 };
-        (price - fee).max(0)
-    }
+    use super::unit_payout;
 
     #[test]
     fn a_player_sale_keeps_five_percent() {
-        assert_eq!(proceeds(100, false), 95);
-        assert_eq!(proceeds(1, false), 1);
+        assert_eq!(unit_payout(100, 1, false), 95);
+        assert_eq!(unit_payout(10, 3, false), 29);
+        assert_eq!(unit_payout(1, 1, false), 1);
     }
 
     #[test]
     fn a_staff_buyback_pays_the_full_price() {
-        assert_eq!(proceeds(100, true), 100);
+        assert_eq!(unit_payout(100, 4, true), 400);
+    }
+
+    #[test]
+    fn leftover_units_are_the_unfilled_remainder() {
+        assert_eq!(Some(10).map(|want| want - 3), Some(7));
+        assert_eq!(Option::<i32>::None, None);
     }
 }
