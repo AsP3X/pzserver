@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,10 @@ use crate::state::AppState;
 
 const CELL_SIZE: i32 = 256;
 const B42_BLOCK: i32 = 8;
+const EDITS_FILE: &str = "world_edits.json";
+const STATUS_FILE: &str = "map_tile_status.json";
+
+static LAST_MTIME_SCAN: Mutex<Option<Instant>> = Mutex::new(None);
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,6 +43,7 @@ pub struct Settings {
     pub auto_rerender: bool,
     pub batch_blocks: i32,
     pub max_wait_secs: i32,
+    pub debug_overlay: bool,
     pub pending_since: Option<DateTime<Utc>>,
 }
 
@@ -52,6 +58,7 @@ pub struct SettingsPatch {
     pub auto_rerender: Option<bool>,
     pub batch_blocks: Option<i32>,
     pub max_wait_secs: Option<i32>,
+    pub debug_overlay: Option<bool>,
 }
 
 pub fn chunk_cell(x: i32, y: i32, unit: i32) -> Cell {
@@ -242,27 +249,6 @@ pub async fn tick(state: &AppState) {
     if map_tile_jobs::require_absolute_binds(state).is_err() {
         return;
     }
-    let save = save_dir(&state.config.data_path, &state.config.pz_save_game);
-    if !save.is_dir() {
-        return;
-    }
-
-    let scanned = match tokio::task::spawn_blocking({
-        let save = save.clone();
-        move || block_mtimes(&save)
-    })
-    .await
-    {
-        Ok(map) => map,
-        Err(error) => {
-            tracing::warn!(%error, "map tile world scan join failed");
-            return;
-        }
-    };
-
-    if scanned.is_empty() {
-        return;
-    }
 
     let settings = match load_settings(&state.db).await {
         Ok(row) => row,
@@ -272,68 +258,78 @@ pub async fn tick(state: &AppState) {
         }
     };
 
-    match load_stored_blocks(&state.db).await {
-        Ok(stored) if stored.is_empty() => {
-            if let Err(error) = replace_stored_blocks(&state.db, &scanned).await {
-                tracing::warn!(%error, "map tile world seed failed");
-                return;
-            }
+    if let Err(error) = ingest_lua_edits(state).await {
+        tracing::warn!(%error, "world edits unread");
+    }
+
+    let mut extra_blocks: Vec<Block> = Vec::new();
+    let save = save_dir(&state.config.data_path, &state.config.pz_save_game);
+    if save.is_dir() && mtime_scan_due(state.config.map_tiles_world_scan) {
+        extra_blocks = scan_mtime_blocks(state, &save).await;
+    }
+
+    let pending = pending_edit_count(&state.db).await.unwrap_or(0);
+    write_status(state, &settings, pending, None, &[]);
+
+    if !settings.auto_rerender {
+        return;
+    }
+
+    let edit_blocks = unflushed_blocks(&state.db).await.unwrap_or_default();
+    let mut blocks: Vec<Block> = edit_blocks;
+    for block in extra_blocks {
+        if !blocks.contains(&block) {
+            blocks.push(block);
+        }
+    }
+    let count = pending.max(blocks.len() as i64);
+    if count < 1 {
+        let _ = set_pending_since(&state.db, None).await;
+        return;
+    }
+    let pending_since = match settings.pending_since {
+        Some(since) => since,
+        None => {
+            let now = Utc::now();
+            let _ = set_pending_since(&state.db, Some(now)).await;
+            now
+        }
+    };
+    let waited = (Utc::now() - pending_since).num_seconds().max(0);
+    if !should_flush(
+        count as usize,
+        settings.batch_blocks,
+        waited,
+        settings.max_wait_secs,
+    ) {
+        return;
+    }
+    if blocks.is_empty() {
+        return;
+    }
+    let squares: Vec<Vec<i32>> = blocks
+        .iter()
+        .map(|block| {
+            let [x, y, w, h] = block_to_square(*block, B42_BLOCK);
+            vec![x, y, w, h]
+        })
+        .collect();
+    let names = unflushed_usernames(&state.db).await.unwrap_or_default();
+    match map_tile_jobs::enqueue(state, squares, Vec::new()).await {
+        Ok(job) => {
+            let _ = mark_edits_flushed(&state.db).await;
+            let _ = set_pending_since(&state.db, None).await;
+            write_status(state, &settings, 0, Some(job.id.to_string()), &names);
             tracing::info!(
-                blocks = scanned.len(),
-                "seeded map tile block mtimes; not enqueueing"
+                id = %job.id,
+                blocks = blocks.len(),
+                edits = pending,
+                "enqueued world-change tile job"
             );
         }
-        Ok(stored) => {
-            if !settings.auto_rerender {
-                return;
-            }
-            let cap = state.config.map_tiles_world_max_cells.max(1) * 8;
-            let dirty = dirty_blocks(&scanned, &stored, cap.min(256));
-            if dirty.is_empty() {
-                let _ = set_pending_since(&state.db, None).await;
-                return;
-            }
-            let pending_since = match settings.pending_since {
-                Some(since) => since,
-                None => {
-                    let now = Utc::now();
-                    let _ = set_pending_since(&state.db, Some(now)).await;
-                    now
-                }
-            };
-            let waited = (Utc::now() - pending_since).num_seconds().max(0);
-            if !should_flush(
-                dirty.len(),
-                settings.batch_blocks,
-                waited,
-                settings.max_wait_secs,
-            ) {
-                return;
-            }
-            let squares: Vec<Vec<i32>> = dirty
-                .iter()
-                .map(|block| {
-                    let [x, y, w, h] = block_to_square(*block, B42_BLOCK);
-                    vec![x, y, w, h]
-                })
-                .collect();
-            match map_tile_jobs::enqueue(state, squares, Vec::new()).await {
-                Ok(job) => {
-                    let _ = set_pending_since(&state.db, None).await;
-                    tracing::info!(
-                        id = %job.id,
-                        blocks = dirty.len(),
-                        "enqueued world-change tile job"
-                    );
-                }
-                Err(ApiError::Conflict { .. }) => {}
-                Err(error) => {
-                    tracing::warn!(%error, "world-change tile job not enqueued");
-                }
-            }
-        }
+        Err(ApiError::Conflict { .. }) => {}
         Err(error) => {
-            tracing::warn!(%error, "map tile block table unreadable");
+            tracing::warn!(%error, "world-change tile job not enqueued");
         }
     }
 }
@@ -423,15 +419,24 @@ pub async fn update_settings(db: &PgPool, patch: SettingsPatch) -> ApiResult<Set
         r#"UPDATE map_tile_settings SET
             auto_rerender = COALESCE($1, auto_rerender),
             batch_blocks = COALESCE($2, batch_blocks),
-            max_wait_secs = COALESCE($3, max_wait_secs)
+            max_wait_secs = COALESCE($3, max_wait_secs),
+            debug_overlay = COALESCE($4, debug_overlay)
            WHERE id = 1"#,
     )
     .bind(patch.auto_rerender)
     .bind(patch.batch_blocks)
     .bind(patch.max_wait_secs)
+    .bind(patch.debug_overlay)
     .execute(db)
     .await?;
     Ok(view_settings(db).await?)
+}
+
+pub async fn apply_settings(state: &AppState, patch: SettingsPatch) -> ApiResult<SettingsView> {
+    let view = update_settings(&state.db, patch).await?;
+    let pending = pending_edit_count(&state.db).await.unwrap_or(0);
+    write_status(state, &view.settings, pending, None, &[]);
+    Ok(view)
 }
 
 async fn load_settings(db: &PgPool) -> Result<Settings, sqlx::Error> {
@@ -442,11 +447,191 @@ async fn load_settings(db: &PgPool) -> Result<Settings, sqlx::Error> {
     .execute(db)
     .await?;
     sqlx::query_as::<_, Settings>(
-        r#"SELECT auto_rerender, batch_blocks, max_wait_secs, pending_since
+        r#"SELECT auto_rerender, batch_blocks, max_wait_secs, debug_overlay, pending_since
            FROM map_tile_settings WHERE id = 1"#,
     )
     .fetch_one(db)
     .await
+}
+
+fn mtime_scan_due(interval: std::time::Duration) -> bool {
+    let Ok(mut last) = LAST_MTIME_SCAN.lock() else {
+        return true;
+    };
+    match *last {
+        None => {
+            *last = Some(Instant::now());
+            true
+        }
+        Some(at) if at.elapsed() >= interval => {
+            *last = Some(Instant::now());
+            true
+        }
+        _ => false,
+    }
+}
+
+async fn scan_mtime_blocks(state: &AppState, save: &Path) -> Vec<Block> {
+    let scanned = match tokio::task::spawn_blocking({
+        let save = save.to_path_buf();
+        move || block_mtimes(&save)
+    })
+    .await
+    {
+        Ok(map) => map,
+        Err(error) => {
+            tracing::warn!(%error, "map tile world scan join failed");
+            return Vec::new();
+        }
+    };
+    if scanned.is_empty() {
+        return Vec::new();
+    }
+    match load_stored_blocks(&state.db).await {
+        Ok(stored) if stored.is_empty() => {
+            if let Err(error) = replace_stored_blocks(&state.db, &scanned).await {
+                tracing::warn!(%error, "map tile world seed failed");
+            } else {
+                tracing::info!(
+                    blocks = scanned.len(),
+                    "seeded map tile block mtimes; not enqueueing"
+                );
+            }
+            Vec::new()
+        }
+        Ok(stored) => {
+            let cap = state.config.map_tiles_world_max_cells.max(1) * 8;
+            dirty_blocks(&scanned, &stored, cap.min(256))
+        }
+        Err(error) => {
+            tracing::warn!(%error, "map tile block table unreadable");
+            Vec::new()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct LuaEditsFile {
+    #[serde(default)]
+    edits: Vec<LuaEdit>,
+}
+
+#[derive(Deserialize)]
+struct LuaEdit {
+    id: Option<String>,
+    username: Option<String>,
+    x: Option<i32>,
+    y: Option<i32>,
+    kind: Option<String>,
+}
+
+async fn ingest_lua_edits(state: &AppState) -> Result<(), sqlx::Error> {
+    let path = state.config.lua_bridge_path.join(EDITS_FILE);
+    let Ok(body) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let parsed: LuaEditsFile = match serde_json::from_str(&body) {
+        Ok(file) => file,
+        Err(error) => {
+            tracing::warn!(%error, "world_edits.json unreadable");
+            return Ok(());
+        }
+    };
+    for edit in parsed.edits {
+        let Some(id) = edit.id.filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let x = edit.x.unwrap_or(0);
+        let y = edit.y.unwrap_or(0);
+        sqlx::query(
+            r#"INSERT INTO map_tile_edits (lua_id, username, bx, by, kind)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (lua_id) DO NOTHING"#,
+        )
+        .bind(id)
+        .bind(edit.username.unwrap_or_default())
+        .bind(div_floor(x, B42_BLOCK))
+        .bind(div_floor(y, B42_BLOCK))
+        .bind(edit.kind.unwrap_or_default())
+        .execute(&state.db)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn pending_edit_count(db: &PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM map_tile_edits WHERE flushed_at IS NULL")
+        .fetch_one(db)
+        .await
+}
+
+async fn unflushed_blocks(db: &PgPool) -> Result<Vec<Block>, sqlx::Error> {
+    let rows: Vec<(i32, i32)> = sqlx::query_as(
+        r#"SELECT DISTINCT bx, by FROM map_tile_edits WHERE flushed_at IS NULL"#,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(bx, by)| Block { bx, by })
+        .collect())
+}
+
+async fn unflushed_usernames(db: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT DISTINCT username FROM map_tile_edits
+           WHERE flushed_at IS NULL AND username <> ''"#,
+    )
+    .fetch_all(db)
+    .await
+}
+
+async fn mark_edits_flushed(db: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE map_tile_edits SET flushed_at = now() WHERE flushed_at IS NULL")
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+fn write_status(
+    state: &AppState,
+    settings: &Settings,
+    pending: i64,
+    fire_id: Option<String>,
+    fire_usernames: &[String],
+) {
+    let path = state.config.lua_bridge_path.join(STATUS_FILE);
+    let keep = if fire_id.is_none() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+    } else {
+        None
+    };
+    let fire = fire_id.or_else(|| {
+        keep.as_ref()
+            .and_then(|value| value.get("fire_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+    });
+    let names = if fire_usernames.is_empty() {
+        keep.as_ref()
+            .and_then(|value| value.get("fire_usernames"))
+            .cloned()
+            .unwrap_or(serde_json::json!([]))
+    } else {
+        serde_json::json!(fire_usernames)
+    };
+    let body = serde_json::json!({
+        "debug": settings.debug_overlay,
+        "pending": pending,
+        "batch": settings.batch_blocks,
+        "fire_id": fire,
+        "fire_usernames": names,
+    });
+    if let Err(error) = std::fs::write(&path, body.to_string()) {
+        tracing::debug!(%error, "map_tile_status.json not written");
+    }
 }
 
 async fn set_pending_since(

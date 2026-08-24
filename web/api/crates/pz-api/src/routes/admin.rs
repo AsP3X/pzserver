@@ -1255,6 +1255,6 @@ async fn update_map_tile_settings(
     Json(body): Json<crate::services::map_tile_world::SettingsPatch>,
 ) -> ApiResult<Json<crate::services::map_tile_world::SettingsView>> {
     Ok(Json(
-        crate::services::map_tile_world::update_settings(&state.db, body).await?,
+        crate::services::map_tile_world::apply_settings(&state, body).await?,
     ))
 }

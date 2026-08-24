@@ -1196,6 +1196,7 @@ export interface MapTileSettings {
   auto_rerender: boolean
   batch_blocks: number
   max_wait_secs: number
+  debug_overlay: boolean
   pending_since: string | null
 }
 

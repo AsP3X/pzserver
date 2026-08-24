@@ -42,6 +42,7 @@ local Vitals = require("KR_Vitals")
 local Enrol = require("KR_Enrol")
 local Report = require("KR_Report")
 local Tickets = require("KR_Tickets")
+local MapEdit = require("KR_MapEdit")
 
 local LOG = "[KnoxRelay] "
 
@@ -145,6 +146,7 @@ local function onEveryOneMinute()
     Enrol.poll()
     Report.poll()
     Tickets.poll()
+    MapEdit.poll()
 
     -- Takes first, every tick: a joiner must not get a window to drop a
     -- reserved item before the queue runs.
@@ -310,6 +312,7 @@ Events.OnServerStarted.Add(onServerStarted)
 Events.OnClientCommand.Add(Enrol.onClientCommand)
 Events.OnClientCommand.Add(Report.onClientCommand)
 Events.OnClientCommand.Add(Tickets.onClientCommand)
+Events.OnClientCommand.Add(MapEdit.onClientCommand)
 
 -- Optional: without it a player who disconnects mid-registration leaves an
 -- entry that poll() drops on the answer timeout anyway.
@@ -327,7 +330,7 @@ local tickHooked = pcall(function() Events.OnTickEvenPaused.Add(onTickEvenPaused
 -- everything else; only the recently-learned-recipes panel stays empty.
 local recipeHooked = pcall(function() Events.OnRecipeLearned.Add(onRecipeLearned) end)
 
-print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, OnClientCommand(2), MoneyDeposit"
+print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, OnClientCommand(4), MoneyDeposit"
     .. (tickHooked and ", OnTickEvenPaused" or "")
     .. (recipeHooked and ", OnRecipeLearned" or "")
     .. (disconnectHooked and ", OnPlayerDisconnect" or ""))

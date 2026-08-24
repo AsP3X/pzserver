@@ -56,11 +56,10 @@ async fn map_tile_progress_loop(state: AppState) {
 }
 
 async fn map_tile_world_loop(state: AppState) {
-    let interval = state.config.map_tiles_world_scan;
-    if interval.is_zero() {
+    if state.config.map_tiles_world_scan.is_zero() {
         return;
     }
-    let mut ticker = tokio::time::interval(interval);
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         ticker.tick().await;
         crate::services::map_tile_world::tick(&state).await;

@@ -650,6 +650,7 @@
   "admin.map_tiles_settings": "Weltänderungen",
   "admin.map_tiles_settings_hint": "Türen, Fenstertücher und andere kleine Save-Änderungen sammeln sich, dann übermalt ein schnelles regionales Render sie. Ausschalten lässt die isometrische Karte wie zuletzt gerendert.",
   "admin.map_tiles_auto": "Kleine Weltänderungen automatisch neu zeichnen",
+  "admin.map_tiles_debug": "Debug: Zähler über dem Spieler bei jeder Karten-Aktion, und PAINT wenn ein Job startet",
   "admin.map_tiles_batch": "Zeichnen nach so vielen Stellen",
   "admin.map_tiles_wait": "Höchstens warten (Minuten)",
   "admin.map_tiles_saved": "Karteneinstellungen gespeichert.",

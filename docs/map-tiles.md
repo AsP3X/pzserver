@@ -129,9 +129,14 @@ and enqueue them as small square rects once either:
 - `max_wait_secs` (default 300) has passed since the first pending spot.
 
 Staff toggle this on the player map under **World changes**. Off means the
-isometric pack stays as last painted. Oldest dirty blocks go first so a
-quiet door is not starved by a busy cell. One job at a time; a running job
-skips the tick. Set the scan interval to `0` to disable the scanner itself.
+isometric pack stays as last painted. Each door, curtain or sheet action
+counts as one, even when they share an 8-square block — ten blinds in one
+room still reach the batch. Oldest dirty blocks go first so a quiet door is
+not starved by a busy cell. One job at a time; a running job skips the tick.
+Set the scan interval to `0` to disable the scanner itself.
+
+**Debug overlay** (same panel) draws the running count above the player in
+game on each counted action, and `PAINT` when a job actually starts.
 
 `make map-tiles-region` does the same overlay when `/saves` is mounted.
 `make map-tiles-detail` does not — that is a vanilla z21 fill.

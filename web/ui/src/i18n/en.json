@@ -650,6 +650,7 @@
   "admin.map_tiles_settings": "World changes",
   "admin.map_tiles_settings_hint": "Doors, window sheets, and other small save edits pile up, then one fast regional paint covers them. Turn this off to leave the isometric map as last rendered.",
   "admin.map_tiles_auto": "Auto-rerender small world changes",
+  "admin.map_tiles_debug": "Debug: show a count above the player on each map-trigger action, and PAINT when a job starts",
   "admin.map_tiles_batch": "Paint after this many dirty spots",
   "admin.map_tiles_wait": "Wait at most (minutes)",
   "admin.map_tiles_saved": "Map tile settings saved.",

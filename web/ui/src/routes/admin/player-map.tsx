@@ -495,6 +495,15 @@ function MapTileSettingsBar({
           />
           {t('admin.map_tiles_auto')}
         </label>
+        <label className="flex items-center gap-2 text-sm text-bone">
+          <input
+            type="checkbox"
+            checked={settings.debug_overlay}
+            disabled={busy}
+            onChange={(event) => onSave({ debug_overlay: event.target.checked })}
+          />
+          {t('admin.map_tiles_debug')}
+        </label>
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
           <Field
             type="number"
