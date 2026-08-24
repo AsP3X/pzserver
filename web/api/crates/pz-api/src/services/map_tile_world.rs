@@ -178,7 +178,8 @@ fn iter_chunks(save: &Path) -> Vec<(i32, i32, i32, PathBuf)> {
     out
 }
 
-pub fn dirty_cells(
+#[cfg(test)]
+fn dirty_cells(
     scanned: &HashMap<Cell, i64>,
     stored: &HashMap<Cell, i64>,
     max_cells: usize,
