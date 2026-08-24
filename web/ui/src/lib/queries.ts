@@ -334,7 +334,8 @@ export const adminDepositsQuery = queryOptions({
 export const storeItemsQuery = queryOptions({
   queryKey: ['store', 'items'],
   queryFn: api.storeItems,
-  staleTime: 10_000,
+  refetchInterval: 8_000,
+  staleTime: 4_000,
 })
 
 export const myStorePurchasesQuery = queryOptions({

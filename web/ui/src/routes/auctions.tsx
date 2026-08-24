@@ -204,11 +204,18 @@ export function AuctionsPage() {
     [inventory.data],
   )
 
+  const staffItems = useMemo(
+    () => (Array.isArray(items.data) ? items.data : []),
+    [items.data],
+  )
+  const liveLots = useMemo(() => (Array.isArray(live.data) ? live.data : []), [live.data])
+  const myLots = useMemo(() => (Array.isArray(mine.data) ? mine.data : []), [mine.data])
+
   const lots = useMemo(() => {
-    const staff = (items.data ?? []).map(fromStore)
-    const player = (live.data ?? []).map(fromAuction)
+    const staff = staffItems.map(fromStore)
+    const player = liveLots.map(fromAuction)
     return [...staff, ...player].sort(compareLots)
-  }, [items.data, live.data])
+  }, [liveLots, staffItems])
 
   const tabs = useMemo<TabItem<string>[]>(() => {
     const counts = new Map<string, number>()
@@ -265,7 +272,15 @@ export function AuctionsPage() {
   const soldOut = storeItem !== null && storeItem.stock !== null && storeItem.stock < 1
   const shortStore = storeItem !== null && wallet.data != null && available < storeTotal
   const canBuyStore = storeItem !== null && wallet.data != null && !soldOut && !shortStore && cap > 0
-  const loading = items.isPending || live.isPending
+  const loading = lots.length === 0 && (items.isPending || live.isPending)
+  const queryError =
+    items.error instanceof ApiError
+      ? items.error.message
+      : live.error instanceof ApiError
+        ? live.error.message
+        : items.error || live.error
+          ? t('auth.unexpected_error')
+          : null
 
   async function refreshMarket() {
     await queryClient.invalidateQueries({ queryKey: ['me'] })
@@ -430,10 +445,11 @@ export function AuctionsPage() {
         </p>
       ) : null}
       {error ? <FormError>{error}</FormError> : null}
+      {queryError ? <FormError>{queryError}</FormError> : null}
 
       {loading ? (
         <Skeleton className="min-h-0 flex-1" />
-      ) : lots.length === 0 ? (
+      ) : lots.length === 0 && myLots.length === 0 ? (
         <Panel bracketed className="flex min-h-0 flex-1 flex-col items-center justify-center p-10 text-center">
           <Tag aria-hidden="true" className="size-8 text-dust" strokeWidth={1.25} />
           <p className="mt-4 text-sm text-dust">{t('economy.market_empty')}</p>

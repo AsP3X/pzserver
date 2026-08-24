@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Search, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -43,6 +43,7 @@ export function AdminShopPage() {
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['admin', 'store'] })
+    await queryClient.invalidateQueries({ queryKey: ['store'] })
   }
 
   function fail(cause: unknown) {
@@ -242,6 +243,15 @@ function Editor({
   )
 }
 
+const EMPTY_LISTING: StoreItemInput = {
+  name: '',
+  item_type: 'Base.Axe',
+  category: 'tools',
+  quantity: 1,
+  price: 25,
+  active: true,
+}
+
 function ItemDialog({
   open,
   busy,
@@ -254,14 +264,15 @@ function ItemDialog({
   onCreate: (input: StoreItemInput) => void
 }) {
   const { t } = useTranslation()
-  const [draft, setDraft] = useState<StoreItemInput>({
-    name: '',
-    item_type: 'Base.Axe',
-    category: 'tools',
-    quantity: 1,
-    price: 25,
-    active: true,
-  })
+  const [draft, setDraft] = useState<StoreItemInput>(EMPTY_LISTING)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
+  useEffect(() => {
+    if (open) {
+      setDraft({ ...EMPTY_LISTING })
+    }
+  }, [open])
 
   return (
     <ConfirmDialog
@@ -272,7 +283,7 @@ function ItemDialog({
       confirmLabel={t('economy.new_item')}
       busy={busy}
       confirmDisabled={!draft.name?.trim() || !draft.item_type?.trim()}
-      onConfirm={() => onCreate(draft)}
+      onConfirm={() => onCreate({ ...draftRef.current, active: draftRef.current.active ?? true })}
       onClose={onClose}
     />
   )

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -9,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api, ApiError, type AuctionListing } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDateTime, formatRelativeTime } from '@/lib/format'
-import { adminAuctionBidsQuery, adminAuctionsQuery } from '@/lib/queries'
+import { adminAuctionBidsQuery, adminAuctionsQuery, adminStoreQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -53,6 +54,8 @@ export function AdminAuctionsPage() {
   const { t, intlLocale } = useTranslation()
   const queryClient = useQueryClient()
   const list = useQuery(adminAuctionsQuery)
+  const catalogue = useQuery(adminStoreQuery)
+  const staffLots = (catalogue.data ?? []).filter((item) => item.active)
   const [filter, setFilter] = useState('open')
   const [selected, setSelected] = useState<string | null>(null)
   const [pull, setPull] = useState<AuctionListing | null>(null)
@@ -100,6 +103,35 @@ export function AdminAuctionsPage() {
         </p>
       ) : null}
       {error ? <FormError>{error}</FormError> : null}
+
+      {staffLots.length > 0 ? (
+        <Panel bracketed className="shrink-0">
+          <PanelHeader
+            label={t('economy.official')}
+            action={
+              <Link
+                to="/admin/shop"
+                className="font-mono text-[0.6875rem] tracking-widest text-dust uppercase hover:text-hazard"
+              >
+                {t('economy.catalogue')}
+              </Link>
+            }
+          />
+          <ul className="divide-y divide-fence">
+            {staffLots.map((item) => (
+              <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm text-bone">{item.name}</span>
+                  <span className="font-mono text-[0.6875rem] text-dust">{item.item_type}</span>
+                </span>
+                <span className="shrink-0 font-mono text-sm text-hazard">
+                  {t('economy.coins', { count: item.price })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <div className="flex flex-wrap gap-1.5">
         {FILTERS.map((item) => (
