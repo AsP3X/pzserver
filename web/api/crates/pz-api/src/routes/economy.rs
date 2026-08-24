@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{AdminUser, AuthUser};
-use crate::services::economy::{self, auction, deposit, quests, rewards, store, vault, wallet};
+use crate::services::economy::{
+    self, auction, deposit, offers, quests, rewards, store, vault, wallet,
+};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -42,11 +44,17 @@ pub fn routes() -> Router<AppState> {
             "/admin/groups/{id}/members/{username}",
             axum::routing::delete(remove_group_member),
         )
+        .route("/items", get(item_catalog))
         .route("/store", get(store_catalogue))
         .route("/store/{id}/buy", post(buy_store))
         .route("/me/store/purchases", get(my_purchases))
         .route("/auctions", get(auctions).post(list_auction))
         .route("/auctions/mine", get(my_auctions))
+        .route("/auctions/offers", get(buy_offers).post(post_buy_offer))
+        .route("/auctions/offers/mine", get(my_buy_offers))
+        .route("/auctions/offers/{id}", get(show_buy_offer))
+        .route("/auctions/offers/{id}/fill", post(fill_buy_offer))
+        .route("/auctions/offers/{id}/cancel", post(cancel_buy_offer))
         .route("/auctions/{id}", get(show_auction))
         .route("/auctions/{id}/bid", post(place_bid))
         .route("/auctions/{id}/buyout", post(buyout))
@@ -66,6 +74,14 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/auctions", get(admin_auctions))
         .route("/admin/auctions/{id}/bids", get(admin_auction_bids))
         .route("/admin/auctions/{id}/cancel", post(admin_cancel_auction))
+        .route(
+            "/admin/auctions/offers",
+            get(admin_buy_offers).post(admin_post_buy_offer),
+        )
+        .route(
+            "/admin/auctions/offers/{id}/cancel",
+            post(admin_cancel_buy_offer),
+        )
         .route("/me/deposit", get(deposit_preview).post(open_deposit))
         .route("/me/deposit/history", get(my_deposits))
         .route(
@@ -496,6 +512,100 @@ async fn admin_cancel_auction(
 ) -> ApiResult<Json<serde_json::Value>> {
     auction::cancel(&state, id, staff.id, true).await?;
     Ok(Json(serde_json::json!({ "message": "Listing cancelled." })))
+}
+
+#[derive(Serialize)]
+struct ItemCatalogResponse {
+    items: Vec<pz_bridge::ItemCatalogEntry>,
+}
+
+async fn item_catalog(
+    State(state): State<AppState>,
+    _user: AuthUser,
+) -> ApiResult<Json<ItemCatalogResponse>> {
+    Ok(Json(ItemCatalogResponse {
+        items: state.item_catalog.items().await.to_vec(),
+    }))
+}
+
+async fn buy_offers(
+    State(state): State<AppState>,
+    crate::extract::MaybeAuthUser(user): crate::extract::MaybeAuthUser,
+) -> ApiResult<Json<Vec<offers::OfferView>>> {
+    Ok(Json(
+        offers::catalogue(&state.db, user.map(|row| row.id)).await?,
+    ))
+}
+
+async fn my_buy_offers(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<Vec<offers::OfferView>>> {
+    Ok(Json(offers::mine(&state.db, user.id).await?))
+}
+
+async fn show_buy_offer(
+    State(state): State<AppState>,
+    crate::extract::MaybeAuthUser(user): crate::extract::MaybeAuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<offers::OfferView>> {
+    offers::get_view(&state.db, id, user.map(|row| row.id))
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::Validation("That offer is gone.".to_owned()))
+}
+
+async fn post_buy_offer(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(body): Json<offers::PostOffer>,
+) -> ApiResult<(StatusCode, Json<offers::OfferView>)> {
+    let offer = offers::post(&state, user.id, body, false).await?;
+    Ok((StatusCode::CREATED, Json(offer)))
+}
+
+async fn fill_buy_offer(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<offers::OfferView>> {
+    Ok(Json(
+        offers::fill(&state, id, user.id, &user.username).await?,
+    ))
+}
+
+async fn cancel_buy_offer(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    offers::cancel(&state, id, user.id, false).await?;
+    Ok(Json(serde_json::json!({ "message": "Offer cancelled." })))
+}
+
+async fn admin_buy_offers(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<Vec<offers::OfferView>>> {
+    Ok(Json(offers::admin_list(&state.db).await?))
+}
+
+async fn admin_post_buy_offer(
+    State(state): State<AppState>,
+    AdminUser(staff): AdminUser,
+    Json(body): Json<offers::PostOffer>,
+) -> ApiResult<(StatusCode, Json<offers::OfferView>)> {
+    let offer = offers::post(&state, staff.id, body, true).await?;
+    Ok((StatusCode::CREATED, Json(offer)))
+}
+
+async fn admin_cancel_buy_offer(
+    State(state): State<AppState>,
+    AdminUser(staff): AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    offers::cancel(&state, id, staff.id, true).await?;
+    Ok(Json(serde_json::json!({ "message": "Offer cancelled." })))
 }
 
 // ── Cash deposits ───────────────────────────────────────────────────

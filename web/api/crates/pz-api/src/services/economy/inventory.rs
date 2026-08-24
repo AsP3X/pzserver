@@ -47,11 +47,14 @@ pub async fn has_snapshot(state: &AppState, username: &str) -> bool {
 
 pub async fn reserved(db: &PgPool, user_id: Uuid, item_type: &str) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        r#"SELECT COALESCE(SUM(quantity), 0)::bigint
-           FROM auction_listings
-           WHERE seller_id = $1
-             AND item_type = $2
-             AND status = 'collecting'"#,
+        r#"SELECT COALESCE((
+                SELECT SUM(quantity) FROM auction_listings
+                WHERE seller_id = $1 AND item_type = $2 AND status = 'collecting'
+            ), 0)::bigint
+            + COALESCE((
+                SELECT SUM(quantity) FROM auction_buy_offers
+                WHERE filler_id = $1 AND item_type = $2 AND status = 'collecting'
+            ), 0)::bigint"#,
     )
     .bind(user_id)
     .bind(item_type)
@@ -124,6 +127,24 @@ pub async fn holds(
             kind: "auction_take".to_owned(),
         })
         .collect();
+
+    let filling = sqlx::query_as::<_, (String, String, i32)>(
+        r#"SELECT item_type, item_name, quantity
+           FROM auction_buy_offers
+           WHERE filler_id = $1 AND status = 'collecting'"#,
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?;
+
+    for (item_type, item_name, quantity) in filling {
+        out.push(InventoryHold {
+            item_type,
+            item_name,
+            quantity,
+            kind: "auction_offer_take".to_owned(),
+        });
+    }
 
     let orders = sqlx::query_as::<_, (String, i32, String)>(
         r#"SELECT item_type, count, kind

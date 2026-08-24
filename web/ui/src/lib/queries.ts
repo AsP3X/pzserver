@@ -157,6 +157,12 @@ export const adminItemsQuery = queryOptions({
   staleTime: 30 * 60_000,
 })
 
+export const itemsQuery = queryOptions({
+  queryKey: ['items'],
+  queryFn: api.items,
+  staleTime: 30 * 60_000,
+})
+
 export const adminLogsQuery = (tail: number) =>
   queryOptions({
     queryKey: ['admin', 'logs', tail],
@@ -359,6 +365,20 @@ export const myAuctionsQuery = queryOptions({
   staleTime: 4_000,
 })
 
+export const buyOffersQuery = queryOptions({
+  queryKey: ['auctions', 'offers'],
+  queryFn: api.buyOffers,
+  refetchInterval: 8_000,
+  staleTime: 4_000,
+})
+
+export const myBuyOffersQuery = queryOptions({
+  queryKey: ['auctions', 'offers', 'mine'],
+  queryFn: api.myBuyOffers,
+  refetchInterval: 8_000,
+  staleTime: 4_000,
+})
+
 export const myVaultQuery = queryOptions({
   queryKey: ['me', 'vault'],
   queryFn: api.myVault,
@@ -439,6 +459,13 @@ export function adminAuctionBidsQuery(id: string) {
     enabled: id.length > 0,
   })
 }
+
+export const adminBuyOffersQuery = queryOptions({
+  queryKey: ['admin', 'auctions', 'offers'],
+  queryFn: api.adminBuyOffers,
+  refetchInterval: 10_000,
+  staleTime: 5_000,
+})
 
 export function adminBackupContentsQuery(id: string) {
   return queryOptions({

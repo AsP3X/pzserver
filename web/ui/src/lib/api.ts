@@ -1120,6 +1120,32 @@ export interface AuctionListInput {
   hours?: number
 }
 
+export interface BuyOffer {
+  id: string
+  buyer_id: string
+  filler_id: string | null
+  item_type: string
+  item_name: string
+  quantity: number
+  price: number
+  staff: boolean
+  status: string
+  ends_at: string
+  created_at: string
+  settled_at: string | null
+  buyer: string
+  filler: string | null
+  mine: boolean
+}
+
+export interface BuyOfferInput {
+  item_type: string
+  item_name?: string
+  quantity?: number
+  price: number
+  hours?: number
+}
+
 export interface VaultItem {
   id: string
   item_type: string
@@ -1528,6 +1554,8 @@ export const api = {
 
   adminItems: () => request<ItemCatalog>('/api/v1/admin/items'),
 
+  items: () => request<ItemCatalog>('/api/v1/items'),
+
   adminLogs: (tail = 200) =>
     request<ContainerLogs>(`/api/v1/admin/logs?tail=${tail}`),
 
@@ -1718,6 +1746,19 @@ export const api = {
   cancelAuction: (id: string) =>
     post<{ message: string }>(`/api/v1/auctions/${id}/cancel`, {}),
 
+  buyOffers: () => request<BuyOffer[]>('/api/v1/auctions/offers'),
+
+  myBuyOffers: () => request<BuyOffer[]>('/api/v1/auctions/offers/mine'),
+
+  postBuyOffer: (input: BuyOfferInput) =>
+    post<BuyOffer>('/api/v1/auctions/offers', input),
+
+  fillBuyOffer: (id: string) =>
+    post<BuyOffer>(`/api/v1/auctions/offers/${id}/fill`, {}),
+
+  cancelBuyOffer: (id: string) =>
+    post<{ message: string }>(`/api/v1/auctions/offers/${id}/cancel`, {}),
+
   adminStoreItems: () => request<StoreItem[]>('/api/v1/admin/store'),
 
   adminCreateStoreItem: (input: StoreItemInput) =>
@@ -1746,6 +1787,14 @@ export const api = {
 
   adminCancelAuction: (id: string) =>
     post<{ message: string }>(`/api/v1/admin/auctions/${id}/cancel`, {}),
+
+  adminBuyOffers: () => request<BuyOffer[]>('/api/v1/admin/auctions/offers'),
+
+  adminPostBuyOffer: (input: BuyOfferInput) =>
+    post<BuyOffer>('/api/v1/admin/auctions/offers', input),
+
+  adminCancelBuyOffer: (id: string) =>
+    post<{ message: string }>(`/api/v1/admin/auctions/offers/${id}/cancel`, {}),
 
   myVault: () => request<VaultView>('/api/v1/me/vault'),
 

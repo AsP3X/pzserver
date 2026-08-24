@@ -6,6 +6,7 @@
 //!   coins, items-first through the Knox Relay queue.
 //! - [`store`] is the staff catalogue. Fixed prices, optional stock.
 //! - [`auction`] is player-to-player: list, bid, buyout.
+//! - [`offers`] is the other side of that: post a price, fill it with the item.
 //! - [`delivery`] gives and takes items through RCON or the Knox Relay queue.
 //!
 //! [`rewards`] pays the daily drop, tasks and rank-ups through `wallet`.
@@ -15,6 +16,7 @@ pub mod delivery;
 pub mod deposit;
 pub mod inventory;
 pub mod measure;
+pub mod offers;
 pub mod quests;
 pub mod rewards;
 pub mod store;
@@ -31,6 +33,9 @@ pub const SOURCE_STORE_REFUND: &str = "store_refund";
 pub const SOURCE_AUCTION_ESCROW: &str = "auction_escrow";
 pub const SOURCE_AUCTION_REFUND: &str = "auction_refund";
 pub const SOURCE_AUCTION_SALE: &str = "auction_sale";
+pub const SOURCE_OFFER_ESCROW: &str = "offer_escrow";
+pub const SOURCE_OFFER_REFUND: &str = "offer_refund";
+pub const SOURCE_OFFER_SALE: &str = "offer_sale";
 pub const SOURCE_DAILY_REWARD: &str = "daily_reward";
 pub const SOURCE_DEPOSIT: &str = "deposit";
 pub const SOURCE_QUEST: &str = "quest";

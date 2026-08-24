@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/cn'
 import { fuzzyMatchWords, fuzzySlices } from '@/lib/fuzzy'
-import { adminItemsQuery } from '@/lib/queries'
+import { itemsQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { CatalogItem } from '@/lib/api'
 
@@ -39,7 +39,7 @@ export function ItemPickerDialog({
   // Shared by key with the field that opens this, which needs the catalogue on
   // page load anyway to resolve the selected item's display name. One fetch,
   // cached for the session either way.
-  const catalogue = useQuery(adminItemsQuery)
+  const catalogue = useQuery(itemsQuery)
   const dialog = useRef<HTMLDialogElement>(null)
   const search = useRef<HTMLInputElement>(null)
   const titleId = useId()

@@ -99,6 +99,7 @@ async fn economy_loop(state: AppState) {
         crate::services::economy::delivery::tick(&state).await;
         crate::services::economy::deposit::tick(&state).await;
         crate::services::economy::auction::tick(&state).await;
+        crate::services::economy::offers::tick(&state).await;
     }
 }
 

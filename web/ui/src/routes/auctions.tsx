@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Coins, Lock, Package, Search, Tag, Wallet } from 'lucide-react'
+import { Coins, HandCoins, Lock, Package, Search, Tag, Wallet } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 
+import { BuyOfferDialog } from '@/components/ui/buy-offer-dialog'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Field, FormError } from '@/components/ui/field'
@@ -13,6 +14,7 @@ import {
   api,
   ApiError,
   type AuctionListing,
+  type BuyOffer,
   type StoreItem,
   type StorePurchase,
 } from '@/lib/api'
@@ -23,7 +25,9 @@ import { stackItems } from '@/lib/inventory'
 import { storeOnSale, storeUnitPrice } from '@/lib/store-price'
 import {
   auctionsQuery,
+  buyOffersQuery,
   myAuctionsQuery,
+  myBuyOffersQuery,
   myInventoryQuery,
   myStorePurchasesQuery,
   myWalletQuery,
@@ -37,6 +41,7 @@ const CATEGORIES: { id: string; label: TranslationKey }[] = [
   { id: 'all', label: 'common.all' },
   { id: 'official', label: 'economy.official' },
   { id: 'player', label: 'economy.player_lots' },
+  { id: 'offers', label: 'economy.buy_offers' },
   { id: 'weapons', label: 'economy.category_weapons' },
   { id: 'ammo', label: 'economy.category_ammo' },
   { id: 'food', label: 'economy.category_food' },
@@ -46,7 +51,7 @@ const CATEGORIES: { id: string; label: TranslationKey }[] = [
   { id: 'other', label: 'economy.category_other' },
 ]
 
-type Kind = 'store' | 'auction'
+type Kind = 'store' | 'auction' | 'offer'
 
 interface Lot {
   key: string
@@ -63,6 +68,7 @@ interface Lot {
   endsAt: string | null
   store: StoreItem | null
   auction: AuctionListing | null
+  offer: BuyOffer | null
 }
 
 function categoryLabel(category: string): TranslationKey {
@@ -86,6 +92,7 @@ function purchaseStatusTone(status: string): string {
 function auctionStatusLabel(status: string): TranslationKey {
   if (status === 'collecting') return 'economy.status_collecting'
   if (status === 'sold') return 'economy.status_sold'
+  if (status === 'filled') return 'economy.status_filled'
   if (status === 'expired') return 'economy.status_expired'
   if (status === 'cancelled') return 'economy.status_cancelled'
   if (status === 'failed') return 'economy.status_failed'
@@ -108,6 +115,7 @@ function fromStore(item: StoreItem): Lot {
     endsAt: null,
     store: item,
     auction: null,
+    offer: null,
   }
 }
 
@@ -127,6 +135,27 @@ function fromAuction(listing: AuctionListing): Lot {
     endsAt: listing.ends_at,
     store: null,
     auction: listing,
+    offer: null,
+  }
+}
+
+function fromOffer(offer: BuyOffer): Lot {
+  return {
+    key: `offer:${offer.id}`,
+    kind: 'offer',
+    id: offer.id,
+    name: offer.item_name,
+    itemType: offer.item_type,
+    category: offer.staff ? 'official' : 'offers',
+    featured: offer.staff,
+    onSale: false,
+    sortOrder: offer.staff ? 200 : 500,
+    price: offer.price,
+    haystack: [offer.item_name, offer.item_type, offer.buyer].join(' '),
+    endsAt: offer.ends_at,
+    store: null,
+    auction: null,
+    offer,
   }
 }
 
@@ -140,10 +169,11 @@ function compareLots(left: Lot, right: Lot): number {
   }
 
   if (left.kind !== right.kind) {
-    return left.kind === 'auction' ? -1 : 1
+    const rank = { auction: 0, offer: 1, store: 2 }
+    return rank[left.kind] - rank[right.kind]
   }
 
-  if (left.kind === 'auction' && right.kind === 'auction' && left.endsAt && right.endsAt) {
+  if (left.endsAt && right.endsAt) {
     return left.endsAt.localeCompare(right.endsAt)
   }
 
@@ -170,18 +200,23 @@ function matchesFilter(lot: Lot, filter: string): boolean {
   }
 
   if (filter === 'official') {
-    return lot.kind === 'store'
+    return lot.kind === 'store' || (lot.kind === 'offer' && lot.offer?.staff === true)
   }
 
   if (filter === 'player') {
     return lot.kind === 'auction'
   }
 
+  if (filter === 'offers') {
+    return lot.kind === 'offer'
+  }
+
   return lot.kind === 'store' && lot.category === filter
 }
 
 /**
- * One market: staff lots at a fixed price, and player lots you can bid on.
+ * One market: staff lots at a fixed price, player lots you can bid on, and
+ * buy offers you can fill.
  *
  * Same two-pane shell as wallet and inventory — a list on the left, the
  * selected lot (or your orders) on the right.
@@ -191,7 +226,9 @@ export function AuctionsPage() {
   const queryClient = useQueryClient()
   const items = useQuery(storeItemsQuery)
   const live = useQuery(auctionsQuery)
+  const offers = useQuery(buyOffersQuery)
   const mine = useQuery(myAuctionsQuery)
+  const myOffers = useQuery(myBuyOffersQuery)
   const purchases = useQuery(myStorePurchasesQuery)
   const wallet = useQuery(myWalletQuery)
   const inventory = useQuery(myInventoryQuery)
@@ -203,7 +240,8 @@ export function AuctionsPage() {
   const [quantity, setQuantity] = useState(1)
   const [bid, setBid] = useState('')
   const [listing, setListing] = useState(false)
-  const [confirming, setConfirming] = useState<'buy' | 'buyout' | null>(null)
+  const [offering, setOffering] = useState(false)
+  const [confirming, setConfirming] = useState<'buy' | 'buyout' | 'fill' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -217,22 +255,32 @@ export function AuctionsPage() {
     [items.data],
   )
   const liveLots = useMemo(() => (Array.isArray(live.data) ? live.data : []), [live.data])
+  const liveOffers = useMemo(() => (Array.isArray(offers.data) ? offers.data : []), [offers.data])
   const myLots = useMemo(() => (Array.isArray(mine.data) ? mine.data : []), [mine.data])
+  const ownOffers = useMemo(
+    () => (Array.isArray(myOffers.data) ? myOffers.data : []),
+    [myOffers.data],
+  )
 
   const lots = useMemo(() => {
     const staff = staffItems.map(fromStore)
     const player = liveLots.map(fromAuction)
-    return [...staff, ...player].sort(compareLots)
-  }, [liveLots, staffItems])
+    const wanted = liveOffers.map(fromOffer)
+    return [...staff, ...player, ...wanted].sort(compareLots)
+  }, [liveLots, liveOffers, staffItems])
 
   const tabs = useMemo<TabItem<string>[]>(() => {
     const counts = new Map<string, number>()
 
     for (const lot of lots) {
-      const source = lot.kind === 'store' ? 'official' : 'player'
+      const source =
+        lot.kind === 'store' ? 'official' : lot.kind === 'offer' ? 'offers' : 'player'
       counts.set(source, (counts.get(source) ?? 0) + 1)
       if (lot.kind === 'store') {
         counts.set(lot.category, (counts.get(lot.category) ?? 0) + 1)
+      }
+      if (lot.kind === 'offer' && lot.offer?.staff) {
+        counts.set('official', (counts.get('official') ?? 0) + 1)
       }
     }
 
@@ -272,6 +320,9 @@ export function AuctionsPage() {
   const auction = current?.auction
     ? (live.data ?? []).find((row) => row.id === current.id) ?? current.auction
     : null
+  const offer = current?.offer
+    ? (offers.data ?? []).find((row) => row.id === current.id) ?? current.offer
+    : null
 
   const available = wallet.data?.available ?? 0
   const cap = storeItem ? maxBuyable(storeItem) : 0
@@ -280,15 +331,21 @@ export function AuctionsPage() {
   const soldOut = storeItem !== null && storeItem.stock !== null && storeItem.stock < 1
   const shortStore = storeItem !== null && wallet.data != null && available < storeTotal
   const canBuyStore = storeItem !== null && wallet.data != null && !soldOut && !shortStore && cap > 0
-  const loading = lots.length === 0 && (items.isPending || live.isPending)
+  const carried = offer
+    ? stacks.find((item) => item.full_type === offer.item_type)?.count ?? 0
+    : 0
+  const canFill = offer !== null && !offer.mine && offer.status === 'live' && carried >= offer.quantity
+  const loading = lots.length === 0 && (items.isPending || live.isPending || offers.isPending)
   const queryError =
     items.error instanceof ApiError
       ? items.error.message
       : live.error instanceof ApiError
         ? live.error.message
-        : items.error || live.error
-          ? t('auth.unexpected_error')
-          : null
+        : offers.error instanceof ApiError
+          ? offers.error.message
+          : items.error || live.error || offers.error
+            ? t('auth.unexpected_error')
+            : null
 
   async function refreshMarket() {
     await queryClient.invalidateQueries({ queryKey: ['me'] })
@@ -364,6 +421,39 @@ export function AuctionsPage() {
     onError: fail,
   })
 
+  const posted = useMutation({
+    mutationFn: api.postBuyOffer,
+    onSuccess: async () => {
+      setOffering(false)
+      setError(null)
+      setNotice(t('economy.buy_offer_posted'))
+      await refreshMarket()
+    },
+    onError: fail,
+  })
+
+  const filled = useMutation({
+    mutationFn: (id: string) => api.fillBuyOffer(id),
+    onSuccess: async () => {
+      setConfirming(null)
+      setError(null)
+      setNotice(t('economy.offer_filled'))
+      await refreshMarket()
+    },
+    onError: fail,
+  })
+
+  const cancelledOffer = useMutation({
+    mutationFn: (id: string) => api.cancelBuyOffer(id),
+    onSuccess: async () => {
+      setSelected(null)
+      setError(null)
+      setNotice(t('economy.cancelled'))
+      await refreshMarket()
+    },
+    onError: fail,
+  })
+
   function pick(key: string, next: Lot) {
     setSelected((previous) => (previous === key ? null : key))
     setQuantity(1)
@@ -384,7 +474,9 @@ export function AuctionsPage() {
       ? t('economy.buy_confirm', { name: storeItem.name })
       : confirming === 'buyout' && auction
         ? t('economy.buy_confirm', { name: auction.item_name })
-        : t('economy.buy')
+        : confirming === 'fill' && offer
+          ? t('economy.fill_confirm', { name: offer.item_name })
+          : t('economy.buy')
 
   const confirmBody =
     confirming === 'buy' && storeItem
@@ -397,7 +489,12 @@ export function AuctionsPage() {
             name: auction.item_name,
             price: t('economy.coins', { count: auction.buyout_price }),
           })
-        : null
+        : confirming === 'fill' && offer
+          ? t('economy.fill_body', {
+              name: offer.item_name,
+              price: t('economy.coins', { count: offer.price }),
+            })
+          : null
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:p-5">
@@ -417,6 +514,9 @@ export function AuctionsPage() {
           >
             {t('economy.open_wallet')}
           </Link>
+          <Button size="sm" variant="outline" onClick={() => setOffering(true)}>
+            {t('economy.post_buy_offer')}
+          </Button>
           <Button size="sm" onClick={() => setListing(true)}>
             {t('economy.list_item')}
           </Button>
@@ -457,7 +557,7 @@ export function AuctionsPage() {
 
       {loading ? (
         <Skeleton className="min-h-0 flex-1" />
-      ) : lots.length === 0 && myLots.length === 0 ? (
+      ) : lots.length === 0 && myLots.length === 0 && ownOffers.length === 0 ? (
         <Panel bracketed className="flex min-h-0 flex-1 flex-col items-center justify-center p-10 text-center">
           <Tag aria-hidden="true" className="size-8 text-dust" strokeWidth={1.25} />
           <p className="mt-4 text-sm text-dust">{t('economy.market_empty')}</p>
@@ -543,11 +643,21 @@ export function AuctionsPage() {
                   onBuyout={() => setConfirming('buyout')}
                   onCancel={() => cancelled.mutate(auction.id)}
                 />
+              ) : offer ? (
+                <OfferInspector
+                  offer={offer}
+                  canFill={canFill}
+                  carried={carried}
+                  busy={filled.isPending || cancelledOffer.isPending}
+                  onFill={() => setConfirming('fill')}
+                  onCancel={() => cancelledOffer.mutate(offer.id)}
+                />
               ) : (
                 <Desk
                   listings={mine.data ?? []}
+                  offers={ownOffers}
                   purchases={purchases.data ?? []}
-                  pending={mine.isPending || purchases.isPending}
+                  pending={mine.isPending || myOffers.isPending || purchases.isPending}
                 />
               )}
             </Panel>
@@ -556,17 +666,31 @@ export function AuctionsPage() {
       )}
 
       <ConfirmDialog
-        open={confirming !== null && (storeItem !== null || auction !== null)}
+        open={confirming !== null && (storeItem !== null || auction !== null || offer !== null)}
         title={confirmTitle}
         description={confirmBody}
-        confirmLabel={confirming === 'buyout' ? t('economy.buy_now') : t('economy.buy')}
-        busy={buy.isPending || bought.isPending}
-        confirmDisabled={confirming === 'buy' ? !canBuyStore : auction?.buyout_price == null}
+        confirmLabel={
+          confirming === 'buyout'
+            ? t('economy.buy_now')
+            : confirming === 'fill'
+              ? t('economy.fill_offer')
+              : t('economy.buy')
+        }
+        busy={buy.isPending || bought.isPending || filled.isPending}
+        confirmDisabled={
+          confirming === 'buy'
+            ? !canBuyStore
+            : confirming === 'fill'
+              ? !canFill
+              : auction?.buyout_price == null
+        }
         onConfirm={() => {
           if (confirming === 'buy') {
             buy.mutate()
           } else if (confirming === 'buyout') {
             bought.mutate()
+          } else if (confirming === 'fill' && offer) {
+            filled.mutate(offer.id)
           }
         }}
         onClose={() => setConfirming(null)}
@@ -583,6 +707,15 @@ export function AuctionsPage() {
         }}
         onError={fail}
       />
+
+      <BuyOfferDialog
+        open={offering}
+        staff={false}
+        available={available}
+        busy={posted.isPending}
+        onClose={() => setOffering(false)}
+        onSubmit={(input) => posted.mutate(input)}
+      />
     </section>
   )
 }
@@ -598,7 +731,7 @@ function LotRow({
 }) {
   const { t, intlLocale } = useTranslation()
   const empty = lot.store !== null && lot.store.stock !== null && lot.store.stock < 1
-  const Icon = lot.kind === 'store' ? Package : Tag
+  const Icon = lot.kind === 'store' ? Package : lot.kind === 'offer' ? HandCoins : Tag
 
   return (
     <li>
@@ -620,8 +753,9 @@ function LotRow({
           <span className="flex w-full items-baseline justify-between gap-2">
             <span className="truncate text-sm text-bone">
               {lot.name}
-              {lot.kind === 'auction' && lot.auction && lot.auction.quantity > 1
-                ? ` ×${lot.auction.quantity}`
+              {(lot.kind === 'auction' && lot.auction && lot.auction.quantity > 1) ||
+              (lot.kind === 'offer' && lot.offer && lot.offer.quantity > 1)
+                ? ` ×${lot.auction?.quantity ?? lot.offer?.quantity}`
                 : null}
             </span>
             <span className="flex shrink-0 items-baseline gap-1.5 font-mono text-sm">
@@ -657,6 +791,16 @@ function LotRow({
                   <span className="text-smoke">
                     · {t('economy.stock')} {lot.store.stock}
                   </span>
+                ) : null}
+              </>
+            ) : lot.kind === 'offer' ? (
+              <>
+                <span className="text-hazard">{t('economy.wants')}</span>
+                <span className="text-dust">
+                  · {lot.offer?.staff ? t('economy.staff_seller') : (lot.offer?.buyer ?? t('economy.buyer'))}
+                </span>
+                {lot.endsAt ? (
+                  <span className="text-smoke">· {formatRelativeTime(lot.endsAt, intlLocale)}</span>
                 ) : null}
               </>
             ) : (
@@ -926,12 +1070,101 @@ function AuctionInspector({
   )
 }
 
+function OfferInspector({
+  offer,
+  canFill,
+  carried,
+  busy,
+  onFill,
+  onCancel,
+}: {
+  offer: BuyOffer
+  canFill: boolean
+  carried: number
+  busy: boolean
+  onFill: () => void
+  onCancel: () => void
+}) {
+  const { t, intlLocale } = useTranslation()
+
+  return (
+    <>
+      <PanelHeader
+        label={t(auctionStatusLabel(offer.status))}
+        action={
+          offer.mine ? (
+            <span className="font-mono text-[0.625rem] tracking-wide text-dust uppercase">
+              {t('economy.mine')}
+            </span>
+          ) : offer.staff ? (
+            <span className="font-mono text-[0.625rem] tracking-wide text-hazard uppercase">
+              {t('economy.official')}
+            </span>
+          ) : null
+        }
+      />
+
+      <div className="flex flex-col gap-5 p-5">
+        <div>
+          <h2 className="display text-2xl text-bone">
+            {offer.item_name}
+            {offer.quantity > 1 ? ` ×${offer.quantity}` : ''}
+          </h2>
+          <p className="mt-1 font-mono text-[0.6875rem] text-dust">{offer.item_type}</p>
+        </div>
+
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <Meta
+            label={t('economy.buyer')}
+            value={offer.staff ? t('economy.staff_seller') : offer.buyer}
+          />
+          <Meta label={t('economy.price')} value={t('economy.coins', { count: offer.price })} />
+          <Meta label={t('economy.ends')} value={formatDateTime(offer.ends_at, intlLocale)} />
+          {offer.filler ? <Meta label={t('economy.seller')} value={offer.filler} /> : null}
+        </dl>
+
+        <p className="text-xs text-dust">
+          {offer.staff ? t('economy.staff_offer_hint') : t('economy.house_fee')}
+        </p>
+
+        {offer.status === 'live' && !offer.mine ? (
+          <>
+            <p className="font-mono text-[0.6875rem] text-dust">
+              {t('economy.carrying_count', { count: carried })}
+            </p>
+            <Button size="sm" disabled={busy || !canFill} onClick={onFill} className="self-start">
+              <HandCoins aria-hidden="true" className="size-3.5" />
+              {t('economy.fill_offer')}
+              {` · ${t('economy.coins', { count: offer.price })}`}
+            </Button>
+            <p className="text-xs text-dust">{t('economy.offline_fill')}</p>
+          </>
+        ) : null}
+
+        {offer.mine && (offer.status === 'live' || offer.status === 'collecting') ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="self-start border-blood text-blood"
+            disabled={busy || offer.status === 'collecting'}
+            onClick={onCancel}
+          >
+            {t('economy.cancel_offer')}
+          </Button>
+        ) : null}
+      </div>
+    </>
+  )
+}
+
 function Desk({
   listings,
+  offers,
   purchases,
   pending,
 }: {
   listings: AuctionListing[]
+  offers: BuyOffer[]
   purchases: StorePurchase[]
   pending: boolean
 }) {
@@ -942,7 +1175,7 @@ function Desk({
       <PanelHeader label={t('economy.my_listings')} />
       {pending ? (
         <Skeleton className="m-5 h-24" />
-      ) : listings.length === 0 && purchases.length === 0 ? (
+      ) : listings.length === 0 && offers.length === 0 && purchases.length === 0 ? (
         <div className="p-8 text-center sm:p-10">
           <p className="text-sm text-dust">{t('economy.pick_listing')}</p>
           <p className="mt-2 text-sm text-smoke">{t('economy.purchases_empty')}</p>
@@ -969,6 +1202,29 @@ function Desk({
               ))}
             </ul>
           )}
+          {offers.length > 0 ? (
+            <div className="border-t border-fence">
+              <PanelHeader label={t('economy.my_offers')} />
+              <ul className="divide-y divide-fence">
+                {offers.slice(0, 8).map((row) => (
+                  <li key={row.id} className="flex items-start justify-between gap-3 px-5 py-3">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-bone">
+                        {row.item_name}
+                        {row.quantity > 1 ? ` ×${row.quantity}` : ''}
+                      </span>
+                      <span className="font-mono text-[0.6875rem] text-dust">
+                        {t('economy.coins', { count: row.price })}
+                      </span>
+                    </span>
+                    <span className="shrink-0 font-mono text-[0.625rem] tracking-widest text-hazard uppercase">
+                      {t(auctionStatusLabel(row.status))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="border-t border-fence">
             <PanelHeader label={t('economy.purchases')} />
             {purchases.length === 0 ? (

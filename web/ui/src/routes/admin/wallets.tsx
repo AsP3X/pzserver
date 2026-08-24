@@ -19,6 +19,9 @@ const SOURCES: Record<string, TranslationKey> = {
   auction_escrow: 'economy.source_auction_escrow',
   auction_refund: 'economy.source_auction_refund',
   auction_sale: 'economy.source_auction_sale',
+  offer_escrow: 'economy.source_offer_escrow',
+  offer_refund: 'economy.source_offer_refund',
+  offer_sale: 'economy.source_offer_sale',
   daily_reward: 'economy.source_daily_reward',
   quest: 'economy.source_quest',
   level: 'economy.source_level',
@@ -42,12 +45,13 @@ function sourceKey(source: string): TranslationKey | null {
 function matchesFilter(filter: string, source: string): boolean {
   if (filter === 'all') return true
   if (filter === 'store') return source.startsWith('store')
-  if (filter === 'auction') return source.startsWith('auction')
+  if (filter === 'auction') return source.startsWith('auction') || source.startsWith('offer')
   if (filter === 'vault') return source.startsWith('vault')
   if (filter === 'admin') return source === 'admin'
   return (
     !source.startsWith('store') &&
     !source.startsWith('auction') &&
+    !source.startsWith('offer') &&
     !source.startsWith('vault') &&
     source !== 'admin'
   )

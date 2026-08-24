@@ -279,6 +279,10 @@ fn classify(method: &str, path: &str) -> (String, Option<String>) {
         ["admin", "auctions", id, "cancel"] => {
             return ("auction.cancel".into(), Some((*id).to_owned()));
         }
+        ["admin", "auctions", "offers"] if method == "POST" => "auction.offer.create".into(),
+        ["admin", "auctions", "offers", id, "cancel"] => {
+            return ("auction.offer.cancel".into(), Some((*id).to_owned()));
+        }
         _ => format!("{}:{path}", method.to_ascii_lowercase()),
     };
 
