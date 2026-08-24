@@ -108,13 +108,12 @@ const JOB_STAGE_KEY: Record<string, TranslationKey> = {
   pack: 'map.job.pack',
 }
 
-function jobCaption(
+function jobStageLabel(
   t: (key: TranslationKey, vars?: Replacements) => string,
-  job: UpdatingJob,
+  stage: string,
 ): string {
-  const percent = job.percent === null || job.percent === undefined ? '…' : job.percent
-  const key = JOB_STAGE_KEY[job.stage] ?? 'map.job.running'
-  return t(key, { percent })
+  const key = JOB_STAGE_KEY[stage] ?? 'map.job.running'
+  return t(key)
 }
 
 function readMode(): MapBasemap {
@@ -411,7 +410,11 @@ export function WorldmapView({
                 cellSize: drawnZones[0]?.cellSize ?? 16,
               }
             : null,
-        updating: updating.map((job) => ({ ...job, label: jobCaption(t, job) })),
+        updating: updating.map((job) => ({
+          ...job,
+          title: t('map.updating_title'),
+          label: jobStageLabel(t, job.stage),
+        })),
       }
 
       if (modeRef.current === 'iso') {

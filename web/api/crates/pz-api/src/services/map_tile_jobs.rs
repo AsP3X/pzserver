@@ -32,6 +32,8 @@ pub struct Job {
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+    pub progress_stage: Option<String>,
+    pub progress_pct: Option<i32>,
 }
 
 /// Promote `[x, y]` to `[x, y, 1, 1]`. Cells stay cells; the container converts.
@@ -100,26 +102,34 @@ fn json_rects(value: &serde_json::Value) -> Vec<[i32; 4]> {
 
 pub async fn active_updating(
     db: &PgPool,
-    progress: Option<(String, i32)>,
+    file_progress: Option<(String, i32)>,
 ) -> Result<Vec<UpdatingRegion>, sqlx::Error> {
-    let rows: Vec<(serde_json::Value, serde_json::Value, String)> = sqlx::query_as(
-        r#"SELECT squares, cells, status FROM map_tile_jobs
+    let rows: Vec<(
+        serde_json::Value,
+        serde_json::Value,
+        String,
+        Option<String>,
+        Option<i32>,
+    )> = sqlx::query_as(
+        r#"SELECT squares, cells, status, progress_stage, progress_pct
+           FROM map_tile_jobs
            WHERE status IN ('queued', 'running')"#,
     )
     .fetch_all(db)
     .await?;
     Ok(rows
         .into_iter()
-        .filter_map(|(squares, cells, status)| {
+        .filter_map(|(squares, cells, status, row_stage, row_pct)| {
             let rects = world_rects(&squares, &cells);
             if rects.is_empty() {
                 return None;
             }
-            let (stage, percent) = match (status.as_str(), progress.as_ref()) {
-                ("queued", _) => ("queued".to_owned(), Some(0)),
-                (_, Some((stage, pct))) => (stage.clone(), Some(*pct)),
-                _ => ("starting".to_owned(), None),
-            };
+            let (stage, percent) = resolve_progress(
+                &status,
+                file_progress.as_ref(),
+                row_stage.as_deref(),
+                row_pct,
+            );
             Some(UpdatingRegion {
                 rects,
                 percent,
@@ -127,6 +137,102 @@ pub async fn active_updating(
             })
         })
         .collect())
+}
+
+fn resolve_progress(
+    status: &str,
+    file: Option<&(String, i32)>,
+    row_stage: Option<&str>,
+    row_pct: Option<i32>,
+) -> (String, Option<i32>) {
+    if let Some((stage, pct)) = file {
+        return (stage.clone(), Some(*pct));
+    }
+    if let (Some(stage), Some(pct)) = (row_stage, row_pct) {
+        return (stage.to_owned(), Some(pct));
+    }
+    match status {
+        "queued" => ("queued".to_owned(), Some(0)),
+        _ => ("starting".to_owned(), Some(0)),
+    }
+}
+
+/// `==>` stage lines and `job: N/M` from pzmap2dzi / run.sh.
+pub fn parse_progress_from_logs(text: &str) -> Option<(String, i32)> {
+    let mut stage = None;
+    let mut job: Option<(i32, i32)> = None;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("==> ") {
+            let head = rest.trim();
+            if let Some(mapped) = stage_from_banner(head) {
+                stage = Some(mapped);
+            }
+        }
+        if let Some((done, total)) = parse_job_counts(line) {
+            job = Some((done, total));
+        }
+    }
+    let stage = stage?;
+    let percent = match (stage.as_str(), job) {
+        ("render", Some((done, total))) if total > 0 => {
+            20 + (50.0 * f64::from(done) / f64::from(total)) as i32
+        }
+        ("save", Some((done, total))) if total > 0 => {
+            70 + (15.0 * f64::from(done) / f64::from(total)) as i32
+        }
+        ("render", _) => 20,
+        ("save", _) => 70,
+        ("snapshot", _) => 4,
+        ("plan", _) => 6,
+        ("restore", _) => 10,
+        ("prepare", _) => 16,
+        ("composite", _) => 88,
+        ("pack", _) => 92,
+        ("queued", _) => 0,
+        ("starting", _) => 0,
+        _ => 0,
+    };
+    Some((stage, percent.clamp(0, 100)))
+}
+
+fn parse_job_counts(line: &str) -> Option<(i32, i32)> {
+    let start = line.find("job:")?;
+    let rest = line[start + 4..].trim_start();
+    let (done, total) = rest.split_once('/')?;
+    let done = done.trim().parse().ok()?;
+    let total = total
+        .split_whitespace()
+        .next()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some((done, total))
+}
+
+fn stage_from_banner(head: &str) -> Option<String> {
+    let key = head.to_ascii_lowercase();
+    let stage = if key.starts_with("planning") {
+        "plan"
+    } else if key.starts_with("snapshot") {
+        "snapshot"
+    } else if key.starts_with("restoring") {
+        "restore"
+    } else if key.starts_with("deploy") || key.starts_with("unpack") {
+        "prepare"
+    } else if key.starts_with("render save") || key.contains("save overlay") {
+        "save"
+    } else if key.starts_with("composite") {
+        "composite"
+    } else if key.starts_with("pack") {
+        "pack"
+    } else if key.starts_with("render") {
+        "render"
+    } else if key.starts_with("done") {
+        "pack"
+    } else {
+        return None;
+    };
+    Some(stage.to_owned())
 }
 
 /// Last sidecar the renderer wrote next to `tiles.sqlite`.
@@ -203,8 +309,8 @@ pub async fn enqueue(
     }
 
     let id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO map_tile_jobs (squares, cells, status)
-           VALUES ($1, $2, 'queued')
+        r#"INSERT INTO map_tile_jobs (squares, cells, status, progress_stage, progress_pct)
+           VALUES ($1, $2, 'queued', 'queued', 0)
            RETURNING id"#,
     )
     .bind(serde_json::json!(squares))
@@ -220,7 +326,7 @@ pub async fn enqueue(
 pub async fn get(db: &PgPool, id: Uuid) -> ApiResult<Job> {
     sqlx::query_as::<_, Job>(
         r#"SELECT id, squares, cells, status, error, tiles_replaced,
-                  created_at, started_at, finished_at
+                  created_at, started_at, finished_at, progress_stage, progress_pct
            FROM map_tile_jobs WHERE id = $1"#,
     )
     .bind(id)
@@ -255,7 +361,8 @@ async fn spawn_and_wait(
 ) -> Result<(), String> {
     sqlx::query(
         r#"UPDATE map_tile_jobs
-           SET status = 'running', started_at = now()
+           SET status = 'running', started_at = now(),
+               progress_stage = 'starting', progress_pct = 0
            WHERE id = $1"#,
     )
     .bind(id)
@@ -316,7 +423,16 @@ async fn spawn_and_wait(
         return Err(format!("docker start failed ({start_status}): {text}"));
     }
 
-    let wait_outcome = wait_container(proxy).await;
+    let wait = wait_container(proxy);
+    tokio::pin!(wait);
+    let wait_outcome = loop {
+        tokio::select! {
+            outcome = &mut wait => break outcome,
+            () = tokio::time::sleep(Duration::from_secs(1)) => {
+                refresh_job_progress(state, id, proxy).await;
+            }
+        }
+    };
     let logs = container_logs(proxy).await;
     remove_container(proxy).await;
 
@@ -324,7 +440,8 @@ async fn spawn_and_wait(
     if wait_body.status_code == 0 {
         sqlx::query(
             r#"UPDATE map_tile_jobs
-               SET status = 'done', finished_at = now()
+               SET status = 'done', finished_at = now(),
+                   progress_stage = 'pack', progress_pct = 100
                WHERE id = $1"#,
         )
         .bind(id)
@@ -346,6 +463,27 @@ async fn spawn_and_wait(
     Err(exit_message(wait_body.status_code, &logs))
 }
 
+async fn refresh_job_progress(state: &AppState, id: Uuid, proxy: &str) {
+    let from_file = read_progress_file(&state.config.map_tiles_path);
+    let from_logs = parse_progress_from_logs(&container_logs(proxy).await.join("\n"));
+    let Some((stage, pct)) = from_file.or(from_logs) else {
+        return;
+    };
+    if let Err(error) = sqlx::query(
+        r#"UPDATE map_tile_jobs
+           SET progress_stage = $2, progress_pct = $3
+           WHERE id = $1 AND status IN ('queued', 'running')"#,
+    )
+    .bind(id)
+    .bind(&stage)
+    .bind(pct)
+    .execute(&state.db)
+    .await
+    {
+        tracing::debug!(%id, %error, "map tile progress not stored");
+    }
+}
+
 async fn wait_container(proxy: &str) -> Result<WaitBody, String> {
     let wait = http_client(WAIT_TIMEOUT)
         .post(format!("{proxy}/containers/{CONTAINER}/wait"))
@@ -361,7 +499,7 @@ async fn wait_container(proxy: &str) -> Result<WaitBody, String> {
 }
 
 async fn container_logs(proxy: &str) -> Vec<String> {
-    let url = format!("{proxy}/containers/{CONTAINER}/logs?stdout=1&stderr=1&tail=50");
+    let url = format!("{proxy}/containers/{CONTAINER}/logs?stdout=1&stderr=1&tail=80");
     let Ok(response) = http_client(INSPECT_TIMEOUT).get(url).send().await else {
         return Vec::new();
     };
@@ -471,6 +609,29 @@ mod tests {
     #[test]
     fn world_rects_ignore_junk() {
         assert!(world_rects(&serde_json::json!({}), &serde_json::json!([1, 2, 3])).is_empty());
+    }
+
+    #[test]
+    fn log_progress_reads_banner_and_job_ratio() {
+        let logs = "\
+==> planning regional re-render: 34,30,1,1
+==> render region
+job: 25/100 worker: 8/8
+";
+        assert_eq!(
+            parse_progress_from_logs(logs),
+            Some(("render".to_owned(), 32))
+        );
+    }
+
+    #[test]
+    fn file_progress_beats_row_defaults() {
+        let (stage, pct) = resolve_progress("running", Some(&("pack".to_owned(), 92)), Some("render"), Some(40));
+        assert_eq!((stage.as_str(), pct), ("pack", Some(92)));
+        let (stage, pct) = resolve_progress("running", None, Some("render"), Some(40));
+        assert_eq!((stage.as_str(), pct), ("render", Some(40)));
+        let (stage, pct) = resolve_progress("running", None, None, None);
+        assert_eq!((stage.as_str(), pct), ("starting", Some(0)));
     }
 
     #[test]

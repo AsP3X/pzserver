@@ -199,6 +199,7 @@ export interface UpdatingOverlay {
   rects: number[][]
   percent: number | null
   stage: string
+  title: string
   label: string
 }
 
@@ -482,16 +483,22 @@ function drawJobBubble(
     return
   }
   const anchor = toScreen(centre.x, centre.y)
-  const label = job.label
+  const title = job.title
+  const status =
+    job.percent === null || job.percent === undefined
+      ? job.label
+      : `${job.label}  ${job.percent}%`
   ctx.save()
-  ctx.font = '600 12px ui-monospace, "JetBrains Mono", monospace'
-  const textW = Math.ceil(ctx.measureText(label).width)
+  ctx.font = '700 13px ui-monospace, "JetBrains Mono", monospace'
+  const titleW = Math.ceil(ctx.measureText(title).width)
+  ctx.font = '500 11px ui-monospace, "JetBrains Mono", monospace'
+  const statusW = Math.ceil(ctx.measureText(status).width)
   const padX = 12
   const padY = 8
   const barH = 5
-  const barGap = 6
-  const bodyW = Math.max(132, textW + padX * 2)
-  const bodyH = 16 + padY * 2 + barGap + barH
+  const barGap = 7
+  const bodyW = Math.max(148, titleW, statusW) + padX * 2
+  const bodyH = 13 + 4 + 13 + padY * 2 + barGap + barH
   const tail = 9
   let left = Math.round(anchor.x - bodyW / 2)
   let top = Math.round(anchor.y - bodyH - tail - 6)
@@ -521,10 +528,14 @@ function drawJobBubble(
   ctx.fillStyle = TAPE_BLACK
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  ctx.fillText(label, left + bodyW / 2, top + padY)
+  ctx.font = '700 13px ui-monospace, "JetBrains Mono", monospace'
+  ctx.fillText(title, left + bodyW / 2, top + padY)
+  ctx.font = '500 11px ui-monospace, "JetBrains Mono", monospace'
+  ctx.fillStyle = '#3a3428'
+  ctx.fillText(status, left + bodyW / 2, top + padY + 17)
 
   const barLeft = left + padX
-  const barTop = top + padY + 16 + barGap
+  const barTop = top + padY + 13 + 4 + 13 + barGap
   const barW = bodyW - padX * 2
   ctx.fillStyle = '#d4cbb8'
   roundBar(ctx, barLeft, barTop, barW, barH, 2)
