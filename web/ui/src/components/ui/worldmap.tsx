@@ -13,6 +13,7 @@ import {
   isoTiles,
   levelForScale,
   loadTileMeta,
+  refreshTileMeta,
   worldToDzi,
 } from '@/lib/iso-tiles'
 import type { TileMeta } from '@/lib/iso-tiles'
@@ -91,6 +92,7 @@ const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
  * basemap needs nothing external and is what everyone falls back to meanwhile.
  */
 const ISO_BASEMAP: boolean = true
+const NO_UPDATING: number[][] = []
 
 function readMode(): MapBasemap {
   if (typeof window === 'undefined') {
@@ -168,6 +170,8 @@ export function WorldmapView({
   const [isoTick, setIsoTick] = useState(0)
   const [isoFellBack, setIsoFellBack] = useState(false)
   const [tileMeta, setTileMeta] = useState<TileMeta | null>(null)
+  const [tapeTick, setTapeTick] = useState(0)
+  const updating = tileMeta?.updating ?? NO_UPDATING
   const [paintHover, setPaintHover] = useState<{ x: number; y: number } | null>(null)
   const [draftRect, setDraftRect] = useState<MapRect | null>(null)
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
@@ -204,21 +208,44 @@ export function WorldmapView({
   useEffect(() => isoTiles.subscribe(() => setIsoTick((tick) => tick + 1)), [])
 
   /**
-   * Read the pyramid's meta once, which also clamps `levelForScale` to the
-   * deepest level actually rendered. Without it every deep zoom asks for
-   * levels that can only 404.
+   * Pyramid bounds, plus any cells a tile job is painting. Poll so a
+   * construction border appears when a job starts and disappears (with a
+   * cache-bust) when `generated_at` moves.
    */
   useEffect(() => {
     let live = true
-    loadTileMeta().then((meta) => {
-      if (live) {
-        setTileMeta(meta)
-      }
-    })
+    const pull = (fresh: boolean) => {
+      const load = fresh ? refreshTileMeta : loadTileMeta
+      load().then((meta) => {
+        if (live) {
+          setTileMeta(meta)
+        }
+      })
+    }
+    pull(false)
+    const id = window.setInterval(() => pull(true), 2500)
     return () => {
       live = false
+      window.clearInterval(id)
     }
   }, [])
+
+  useEffect(() => {
+    if (updating.length === 0) {
+      return
+    }
+    let frame = 0
+    let last = 0
+    const tick = (now: number) => {
+      if (now - last > 80) {
+        setTapeTick((n) => n + 1)
+        last = now
+      }
+      frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
+  }, [updating.length])
 
   /**
    * Leave iso the moment its tiles stop arriving.
@@ -361,6 +388,7 @@ export function WorldmapView({
                 cellSize: drawnZones[0]?.cellSize ?? 16,
               }
             : null,
+        updating,
       }
 
       if (modeRef.current === 'iso') {
@@ -401,6 +429,8 @@ export function WorldmapView({
     selectedId,
     view,
     drawnZones,
+    updating,
+    tapeTick,
   ])
 
   const zoomAt = useCallback(
@@ -825,6 +855,9 @@ export function WorldmapView({
           <p className="text-hazard">
             {tileMeta && !tileMeta.generated ? t('map.iso_not_generated') : t('map.iso_unavailable')}
           </p>
+        ) : null}
+        {updating.length > 0 ? (
+          <p className="text-hazard">{t('map.updating')}</p>
         ) : null}
         <p className="text-dust">
           {mode === 'iso' ? t('map.attribution_iso') : t('map.attribution')}

@@ -311,7 +311,7 @@ function Do-MapTiles {
         if ($DetailOnly) {
             Write-Host "Filling z21 for $what (minutes; leaves z20 in place)..." -ForegroundColor Cyan
         } else {
-            Write-Host "Redrawing map $what (minutes; updates the existing pack)..." -ForegroundColor Cyan
+            Write-Host "Redrawing map $what from the live save (minutes; updates the existing pack)..." -ForegroundColor Cyan
         }
     } else {
         Write-Host "Rendering the isometric basemap from the game files (hours, ~15 GB)..." -ForegroundColor Cyan
@@ -325,7 +325,9 @@ function Do-MapTiles {
     if ($DetailOnly) {
         $run += @("-e", "PZ_MAP_DETAIL_ONLY=1", "-e", "PZ_MAP_DETAIL=21")
     } elseif ($Detail) {
-        $run += @("-e", "PZ_MAP_DETAIL=$Detail")
+        $run += @("-e", "PZ_MAP_DETAIL=$Detail", "-e", "PZ_MAP_SAVE=1")
+    } elseif ($Squares -or $Cells) {
+        $run += @("-e", "PZ_MAP_DETAIL=21", "-e", "PZ_MAP_SAVE=1")
     }
     $run += @("map-tiles")
     Invoke-Compose @run

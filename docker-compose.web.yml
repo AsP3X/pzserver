@@ -167,6 +167,10 @@ services:
       PZ_SERVER_HOST: ${PZ_SERVER_HOST:-./data/server}
       PZ_TEXTUREPACKS_HOST: ${PZ_TEXTUREPACKS_HOST:-./data/server/media/texturepacks}
       PZ_MAP_TILES_HOST: ${PZ_MAP_TILES_HOST:-./data/map-tiles}
+      PZ_DATA_HOST: ${PZ_DATA_HOST:-./data/zomboid}
+      PZ_SAVE_GAME: Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}
+      MAP_TILES_WORLD_SCAN_SECS: ${MAP_TILES_WORLD_SCAN_SECS:-120}
+      MAP_TILES_WORLD_MAX_CELLS: ${MAP_TILES_WORLD_MAX_CELLS:-8}
       MAP_TILES_VOLUME: pz-map-tiles-sqlite
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
       PZ_STEAM_BRANCH: ${PZ_STEAM_BRANCH:-}
@@ -275,8 +279,13 @@ services:
       # Live pack. Same volume web-api reads, so a region job updates the
       # file the site is serving.
       - pz-map-tiles-sqlite:/pack
+      # Dedicated-server worlds. Region jobs snapshot dirty chunks from here
+      # and paint them as a save overlay. Read-only: never write the live save.
+      - ${PZ_DATA_HOST:-./data/zomboid}/Saves:/saves:ro
     environment:
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
+      PZ_SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
+      PZ_SAVE_GAME: Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}
 
 # The one named volume in this stack. tiles.sqlite is a 24 GB random-read
 # database; on Windows a bind of that file through Docker Desktop's 9p is

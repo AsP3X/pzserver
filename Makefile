@@ -158,7 +158,7 @@ map-tiles-region:
 	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-region SQUARES=\"8704,7680,256,256\""; exit 1; }
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_DETAIL=21 map-tiles
+	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_DETAIL=21 -e PZ_MAP_SAVE=1 map-tiles
 
 # Paint z21 for a region without redrawing z20…0. Minutes per cell, not hours.
 # Missing z21 tiles 404 and the client upscales from z20 until this lands.

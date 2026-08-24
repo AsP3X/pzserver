@@ -148,6 +148,42 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     # Without this the fresh bytes lose to the rows already in the pack and the
     # whole run is a no-op. Only dirty keys; WAL so a live reader can keep going.
     PACK_ARGS="--replace --only /tmp/dirty.txt --wal"
+
+    # World-change jobs paint the live save on top of vanilla. Detail-only
+    # fills (z21 of the shipped map) skip this — they have no world state.
+    SAVE_GAME="${PZ_SAVE_GAME:-}"
+    WANT_SAVE="${PZ_MAP_SAVE:-}"
+    if [ -z "$DETAIL_ONLY" ] && { [ -n "$WANT_SAVE" ] || [ -n "$SAVE_GAME" ]; }; then
+        SAVE_GAME="${SAVE_GAME:-Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}}"
+        LIVE_SAVE="/saves/${SAVE_GAME}"
+        if [ ! -d "$LIVE_SAVE" ]; then
+            if [ -n "$WANT_SAVE" ]; then
+                echo "FAIL: PZ_MAP_SAVE is set but $LIVE_SAVE is missing." >&2
+                echo "Mount the dedicated-server Saves folder at /saves." >&2
+                exit 1
+            fi
+            echo "==> no save at $LIVE_SAVE; region will be vanilla tiles only"
+        else
+            SNAP="/out/save-snapshot/${SAVE_GAME}"
+            echo "==> snapshot save $SAVE_GAME for overlay"
+            rm -rf "/out/save-snapshot"
+            python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt
+            if [ ! -f "$SNAP/WorldDictionary.bin" ]; then
+                echo "==> save has no WorldDictionary.bin; region will be vanilla tiles only"
+                WANT_SAVE=
+            elif [ ! -d "$SNAP/map" ] && [ -z "$(ls "$SNAP"/map_*_*.bin 2>/dev/null)" ]; then
+                echo "==> those cells have no save chunks; region will be vanilla tiles only"
+                WANT_SAVE=
+            else
+                python /tools/set_save_game.py "$CONF" /out/save-snapshot "$SAVE_GAME"
+                export SAVE_GAME
+                SAVE_TREE="$OUT/html/map_data/saves/$(python -c "from chunks import sanitize_save_name; import os; print(sanitize_save_name(os.environ['SAVE_GAME']))")/base"
+                # Fresh geometry for this omit_levels; leftover skip values abort.
+                rm -f "$SAVE_TREE/map_info.json" "$SAVE_TREE/sources.json"
+                WANT_SAVE=1
+            fi
+        fi
+    fi
 fi
 
 echo "==> deploy"
@@ -175,6 +211,13 @@ fi
 # is how a run with 13,000 destroyed tiles got mistaken for a good one.
 RENDER_LOG=/tmp/render.log
 python main.py -c "$CONF" render base 2>&1 | tee "$RENDER_LOG"
+
+if [ -n "${WANT_SAVE:-}" ]; then
+    echo "==> render save overlay"
+    python main.py -c "$CONF" render save 2>&1 | tee -a "$RENDER_LOG"
+    echo "==> composite save onto base"
+    python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
+fi
 
 # Before anything is packed. If the cache filled up, the render evicted tiles
 # to make room -- and the levels omit_levels drops are never written to disk,

@@ -4,6 +4,8 @@ pz_root: /pz
 output_root: /out
 mod_root: /pz/steamapps/workshop/content/108600
 custom_root: .
+# Live world overlay. A full county run leaves this at /dev/null. Region jobs
+# that set PZ_MAP_SAVE rewrite it to the snapshot of the dedicated-server save.
 save_game_root: /dev/null
 
 output_entry: default
@@ -81,6 +83,8 @@ render_conf:
     # jpg for the base layer is already the default; stated so a future default
     # change cannot silently break the client's .jpg URLs.
     image_fmt_base_layer0: jpg
+    # Save overlay is composited onto those JPEGs; it has to keep alpha.
+    "image_fmt(save)": png
     image_save_options:
         # 85 was the original pack: 24 GB, most of it z20. 70 is the usual
         # map-tile quality and is what new regional / detail tiles (including

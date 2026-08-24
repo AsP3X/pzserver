@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 
+use crate::services::map_tile_jobs;
 use crate::services::map_tiles::TileMeta;
 use crate::state::AppState;
 
@@ -23,7 +24,14 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn meta(State(state): State<AppState>) -> Json<TileMeta> {
-    Json(state.map_tiles.meta())
+    let mut meta = state.map_tiles.meta();
+    match map_tile_jobs::active_world_rects(&state.db).await {
+        Ok(rects) => meta.updating = rects,
+        Err(error) => {
+            tracing::warn!(%error, "map tile jobs unread; construction overlay empty");
+        }
+    }
+    Json(meta)
 }
 
 async fn tile(State(state): State<AppState>, Path((z, tile)): Path<(i64, String)>) -> Response {

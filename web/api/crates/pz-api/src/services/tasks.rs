@@ -38,11 +38,24 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(session_cleanup_loop(state.clone())),
         tokio::spawn(sanction_expiry_loop(state.clone())),
         tokio::spawn(backup_schedule_loop(state.clone())),
+        tokio::spawn(map_tile_world_loop(state.clone())),
         tokio::spawn(automation_loop(state.clone())),
         tokio::spawn(economy_loop(state.clone())),
         tokio::spawn(respawn_loop(state.clone())),
         tokio::spawn(safezone_loop(state)),
     ]
+}
+
+async fn map_tile_world_loop(state: AppState) {
+    let interval = state.config.map_tiles_world_scan;
+    if interval.is_zero() {
+        return;
+    }
+    let mut ticker = tokio::time::interval(interval);
+    loop {
+        ticker.tick().await;
+        crate::services::map_tile_world::tick(&state).await;
+    }
 }
 
 const SAFEZONE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);

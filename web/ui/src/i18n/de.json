@@ -1035,6 +1035,7 @@
   "map.in_game": "im Spiel",
   "map.iso_not_generated": "Für diesen Server wurden noch keine isometrischen Kacheln erzeugt — es wird die schematische Grundkarte angezeigt.",
   "map.iso_unavailable": "Isometrische Kacheln antworten nicht — es wird die schematische Grundkarte angezeigt.",
+  "map.updating": "Dieser Bereich wird aus der Live-Welt aktualisiert.",
   "map.last_known": "Zuletzt bekannte Position",
   "map.load_failed": "Die Karte konnte nicht geladen werden.",
   "map.mode_iso": "Isometrisch",

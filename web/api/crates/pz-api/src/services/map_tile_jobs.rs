@@ -58,6 +58,58 @@ fn normalize_rects(rects: &[Vec<i32>]) -> Result<Vec<[i32; 4]>, ApiError> {
         .collect()
 }
 
+/// One map cell is 256 world squares on B42.
+const CELL_SQUARES: i32 = 256;
+
+/// World-square rects a job will paint. Cells are expanded; squares pass through.
+pub fn world_rects(squares: &serde_json::Value, cells: &serde_json::Value) -> Vec<[i32; 4]> {
+    let mut out = json_rects(squares);
+    for [x, y, w, h] in json_rects(cells) {
+        out.push([
+            x * CELL_SQUARES,
+            y * CELL_SQUARES,
+            w * CELL_SQUARES,
+            h * CELL_SQUARES,
+        ]);
+    }
+    out
+}
+
+fn json_rects(value: &serde_json::Value) -> Vec<[i32; 4]> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let Some(nums) = item.as_array() else {
+            continue;
+        };
+        let ints: Vec<i32> = nums
+            .iter()
+            .filter_map(|n| n.as_i64().map(|v| v as i32))
+            .collect();
+        match ints.as_slice() {
+            [x, y] => out.push([*x, *y, 1, 1]),
+            [x, y, w, h] if *w > 0 && *h > 0 => out.push([*x, *y, *w, *h]),
+            _ => {}
+        }
+    }
+    out
+}
+
+pub async fn active_world_rects(db: &PgPool) -> Result<Vec<[i32; 4]>, sqlx::Error> {
+    let rows: Vec<(serde_json::Value, serde_json::Value)> = sqlx::query_as(
+        r#"SELECT squares, cells FROM map_tile_jobs
+           WHERE status IN ('queued', 'running')"#,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .flat_map(|(squares, cells)| world_rects(&squares, &cells))
+        .collect())
+}
+
 fn format_rects(rects: &[[i32; 4]]) -> String {
     rects
         .iter()
@@ -80,16 +132,17 @@ fn is_docker_bind_source(s: &str) -> bool {
     )
 }
 
-fn require_absolute_binds(state: &AppState) -> ApiResult<()> {
+pub(crate) fn require_absolute_binds(state: &AppState) -> ApiResult<()> {
     if is_docker_bind_source(&state.config.pz_server_host)
         && is_docker_bind_source(&state.config.pz_texturepacks_host)
         && is_docker_bind_source(&state.config.map_tiles_host)
+        && is_docker_bind_source(&state.config.pz_data_host)
     {
         return Ok(());
     }
 
     Err(ApiError::Validation(
-        "PZ_SERVER_HOST, PZ_TEXTUREPACKS_HOST, and PZ_MAP_TILES_HOST must be absolute host paths for the API".to_owned(),
+        "PZ_SERVER_HOST, PZ_TEXTUREPACKS_HOST, PZ_MAP_TILES_HOST, and PZ_DATA_HOST must be absolute host paths for the API".to_owned(),
     ))
 }
 
@@ -189,14 +242,19 @@ async fn spawn_and_wait(
             format!("PZ_MAP_SQUARES={}", format_rects(squares)),
             format!("PZ_MAP_CELLS={}", format_rects(cells)),
             format!("PZ_GAME_VERSION={}", state.config.pz_game_version),
+            format!("PZ_SAVE_GAME={}", state.config.pz_save_game),
+            format!("PZ_SERVER_NAME={}", state.config.server_name),
             // Regional jobs write z21 for these cells. A full county of z21
             // is tens of GB; this is how it accumulates, one job at a time.
             "PZ_MAP_DETAIL=21".to_owned(),
+            // Paint the live save on top of vanilla for those cells.
+            "PZ_MAP_SAVE=1".to_owned(),
         ],
         "HostConfig": renderer_host_config(
             &state.config.pz_server_host,
             &state.config.pz_texturepacks_host,
             &state.config.map_tiles_host,
+            &state.config.pz_data_host,
             &state.config.map_tiles_volume,
         ),
     });
@@ -244,6 +302,15 @@ async fn spawn_and_wait(
         .execute(&state.db)
         .await
         .map_err(|error| error.to_string())?;
+        let save = crate::services::map_tile_world::save_dir(
+            &state.config.data_path,
+            &state.config.pz_save_game,
+        );
+        if let Err(error) =
+            crate::services::map_tile_world::mark_seen(&state.db, &save, cells).await
+        {
+            tracing::warn!(%id, %error, "map tile chunk mtimes not updated");
+        }
         return Ok(());
     }
 
@@ -315,13 +382,20 @@ fn renderer_host_config(
     pz_server_host: &str,
     pz_texturepacks_host: &str,
     map_tiles_host: &str,
+    pz_data_host: &str,
     map_tiles_volume: &str,
 ) -> serde_json::Value {
+    let saves = if pz_data_host.ends_with('/') || pz_data_host.ends_with('\\') {
+        format!("{pz_data_host}Saves:/saves:ro")
+    } else {
+        format!("{pz_data_host}/Saves:/saves:ro")
+    };
     serde_json::json!({
         "Binds": [
             format!("{pz_server_host}:/pz:ro"),
             format!("{pz_texturepacks_host}:/pz/media/texturepacks:ro"),
             format!("{map_tiles_host}:/out"),
+            saves,
         ],
         "Mounts": [{
             "Type": "volume",
@@ -353,6 +427,21 @@ mod tests {
     #[test]
     fn empty_enqueue_is_validation() {
         assert!(normalize(&[], &[]).is_err());
+    }
+
+    #[test]
+    fn world_rects_expand_cells_to_squares() {
+        let squares = serde_json::json!([[100, 200, 10, 10]]);
+        let cells = serde_json::json!([[34, 30, 1, 1], [40, 12]]);
+        assert_eq!(
+            world_rects(&squares, &cells),
+            vec![[100, 200, 10, 10], [8704, 7680, 256, 256], [10240, 3072, 256, 256]]
+        );
+    }
+
+    #[test]
+    fn world_rects_ignore_junk() {
+        assert!(world_rects(&serde_json::json!({}), &serde_json::json!([1, 2, 3])).is_empty());
     }
 
     #[test]
@@ -396,9 +485,11 @@ mod tests {
             "/data/server",
             "/data/tex",
             "/data/map-tiles",
+            "/data/zomboid",
             "pz-map-tiles-sqlite",
         );
         assert_eq!(host["Binds"][2], "/data/map-tiles:/out");
+        assert_eq!(host["Binds"][3], "/data/zomboid/Saves:/saves:ro");
         assert_eq!(host["Mounts"][0]["Type"], "volume");
         assert_eq!(host["Mounts"][0]["Source"], "pz-map-tiles-sqlite");
         assert_eq!(host["Mounts"][0]["Target"], "/pack");

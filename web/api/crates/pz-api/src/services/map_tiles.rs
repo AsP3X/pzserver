@@ -21,6 +21,11 @@ pub struct TileMeta {
     pub max_level: Option<i64>,
     pub game_version: Option<String>,
     pub generated_at: Option<String>,
+    /// World-square rects `[x, y, w, h]` currently being re-rendered. Empty
+    /// when no job is queued or running. The map paints a construction border
+    /// over these until the job finishes.
+    #[serde(default)]
+    pub updating: Vec<[i32; 4]>,
 }
 
 impl TileMeta {
@@ -31,6 +36,7 @@ impl TileMeta {
             max_level: None,
             game_version: None,
             generated_at: None,
+            updating: Vec::new(),
         }
     }
 }
@@ -199,6 +205,7 @@ fn read_meta(con: &Connection) -> rusqlite::Result<TileMeta> {
         max_level: get("max_level")?.and_then(|v| v.parse().ok()),
         game_version: get("game_version")?,
         generated_at: get("generated_at")?,
+        updating: Vec::new(),
     })
 }
 

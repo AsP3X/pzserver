@@ -107,6 +107,37 @@ A full county of z21 is ~60–80 GB, so it is never part of `make map-tiles`.
 Regional jobs (and the admin rerender endpoint) write z21 for just those cells.
 Until a cell has z21, the client asks for it, gets 404, and upscales z20.
 
+### World changes (player builds, fire, smashed tiles)
+
+The county pack is vanilla map files. Player construction and environment
+damage live in the dedicated-server save
+(`Saves/Multiplayer/<name>/map/{x}/{y}.bin` on B42).
+
+A **world-change job** is the same regional job, plus a save overlay:
+
+1. Snapshot the dirty cells' chunks (the live files stay with PZ).
+2. Paint vanilla `base` for those cells, then `render save`.
+3. Composite the save PNGs onto the base JPEGs for dirty keys only.
+4. WAL-replace those rows in `tiles.sqlite`.
+
+The API scans chunk mtimes every `MAP_TILES_WORLD_SCAN_SECS` (default 120).
+The first pass seeds the table and does not enqueue. Later passes enqueue up
+to `MAP_TILES_WORLD_MAX_CELLS` (default 8) dirty cells into
+`POST /api/v1/admin/map-tiles/rerender`. One job at a time; a running job
+skips the tick. Set the scan interval to `0` to disable.
+
+`make map-tiles-region` does the same overlay when `/saves` is mounted.
+`make map-tiles-detail` does not — that is a vanilla z21 fill.
+
+While a job is `queued` or `running`, `GET /api/v1/map-tiles/meta` includes
+those cells as `updating` world-square rects. The player map paints a
+yellow-and-black construction border over them and drops it when the job
+finishes (`generated_at` moves, tile URLs cache-bust).
+
+The scanner only starts a container when `PZ_DATA_HOST` (and the other
+renderer binds) are **absolute** host paths. Relative `./data/zomboid` is
+fine for `make map-tiles-region`; the API spawn cannot use it.
+
 #### Do
 
 1. **Speak squares (or cells as a helper).** Public contract is a game-world
@@ -163,9 +194,9 @@ Until a cell has z21, the client asks for it, gets 404, and upscales z20.
    grazes the ceiling.
 9. **Do not wait on HTTP for the render.** A region takes minutes. `POST`
    returns `202` + job id.
-10. **Do not detect player buildings or game patches in this sitting.** Those
-    later emit squares into this pipeline. Do not invent a second render path
-    for them.
+10. **Do not invent a second render path for world changes.** Chunk mtimes
+    emit cells into this same job. Save overlay is composited onto dirty
+    keys, not a second pack.
 
 ### What it costs
 

@@ -191,6 +191,8 @@ interface DrawOptions {
     erase?: boolean
     cellSize?: number
   } | null
+  /** World-square rects `[x, y, w, h]` a tile job is painting right now. */
+  updating?: number[][]
 }
 
 export interface MapRect {
@@ -292,6 +294,10 @@ export function drawMapOverlays(
   toScreen: (x: number, y: number) => { x: number; y: number },
   zoom: number,
 ): void {
+  for (const rect of options.updating ?? []) {
+    drawConstruction(ctx, rect, toScreen)
+  }
+
   if (options.marker) {
     const point = toScreen(options.marker.x, options.marker.y)
     try {
@@ -329,6 +335,103 @@ export function drawMapOverlays(
 
   if (options.brush) {
     drawBrush(ctx, options.brush, toScreen)
+  }
+}
+
+const TAPE_YELLOW = '#f5c400'
+const TAPE_BLACK = '#1a1a1a'
+
+/**
+ * Hazard-tape border around a world rectangle. The same four world corners
+ * become a diamond on the isometric basemap and a box on the schematic one.
+ * Stripe phase marches so the overlay reads as in-progress, not a painted zone.
+ */
+function drawConstruction(
+  ctx: CanvasRenderingContext2D,
+  rect: number[],
+  toScreen: (x: number, y: number) => { x: number; y: number },
+): void {
+  if (rect.length < 4) {
+    return
+  }
+  const [x, y, w, h] = rect
+  if (!(w > 0) || !(h > 0)) {
+    return
+  }
+  const corners = [
+    toScreen(x, y),
+    toScreen(x + w, y),
+    toScreen(x + w, y + h),
+    toScreen(x, y + h),
+  ]
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(corners[0]!.x, corners[0]!.y)
+  for (let i = 1; i < corners.length; i += 1) {
+    ctx.lineTo(corners[i]!.x, corners[i]!.y)
+  }
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(245, 196, 0, 0.16)'
+  ctx.fill()
+
+  const width = 7
+  ctx.lineJoin = 'miter'
+  ctx.miterLimit = 4
+  ctx.lineWidth = width + 2
+  ctx.strokeStyle = TAPE_BLACK
+  ctx.stroke()
+
+  const stripe = 12
+  const phase = -((Date.now() / 28) % (stripe * 2))
+  for (let i = 0; i < corners.length; i += 1) {
+    const a = corners[i]!
+    const b = corners[(i + 1) % corners.length]!
+    stripeEdge(ctx, a.x, a.y, b.x, b.y, width, stripe, phase)
+  }
+  ctx.restore()
+}
+
+function stripeEdge(
+  ctx: CanvasRenderingContext2D,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  width: number,
+  stripe: number,
+  phase: number,
+): void {
+  const dx = x1 - x0
+  const dy = y1 - y0
+  const length = Math.hypot(dx, dy)
+  if (length < 1) {
+    return
+  }
+  const ux = dx / length
+  const uy = dy / length
+  const px = (-uy * width) / 2
+  const py = (ux * width) / 2
+  let along = phase
+  let yellow = true
+  while (along < length) {
+    const start = Math.max(0, along)
+    const end = Math.min(length, along + stripe)
+    if (end > start) {
+      const sx = x0 + ux * start
+      const sy = y0 + uy * start
+      const ex = x0 + ux * end
+      const ey = y0 + uy * end
+      ctx.beginPath()
+      ctx.moveTo(sx + px, sy + py)
+      ctx.lineTo(ex + px, ey + py)
+      ctx.lineTo(ex - px, ey - py)
+      ctx.lineTo(sx - px, sy - py)
+      ctx.closePath()
+      ctx.fillStyle = yellow ? TAPE_YELLOW : TAPE_BLACK
+      ctx.fill()
+    }
+    along += stripe
+    yellow = !yellow
   }
 }
 

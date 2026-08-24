@@ -118,11 +118,19 @@ export interface TileMeta {
   max_level: number | null
   game_version: string | null
   generated_at: string | null
+  /** World-square rects `[x, y, w, h]` a tile job is currently painting. */
+  updating?: number[][]
 }
 
 let metaRequest: Promise<TileMeta> | null = null
 
-/** Read once per page; the answer only changes when someone re-renders. */
+/** Forget the cached meta so the next `loadTileMeta` hits the network. */
+export function refreshTileMeta(): Promise<TileMeta> {
+  metaRequest = null
+  return loadTileMeta()
+}
+
+/** Read once, then again via `refreshTileMeta` while a job is running. */
 export function loadTileMeta(): Promise<TileMeta> {
   metaRequest ??= fetch('/api/v1/map-tiles/meta')
     .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
@@ -142,6 +150,7 @@ export function loadTileMeta(): Promise<TileMeta> {
         max_level: null,
         game_version: null,
         generated_at: null,
+        updating: [],
       }
     })
 
@@ -508,6 +517,9 @@ export class IsoTileCache {
 export const isoTiles = new IsoTileCache()
 
 export function setPackRevision(rev: string): void {
+  if (packRevision === rev) {
+    return
+  }
   packRevision = rev
   isoTiles.invalidate()
 }

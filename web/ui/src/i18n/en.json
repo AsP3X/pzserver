@@ -1035,6 +1035,7 @@
   "map.in_game": "in game",
   "map.iso_not_generated": "Isometric tiles have not been generated on this server yet — showing the schematic basemap.",
   "map.iso_unavailable": "Isometric tiles are not answering — showing the schematic basemap instead.",
+  "map.updating": "Refreshing this area from the live world.",
   "map.last_known": "Last known position",
   "map.load_failed": "The map could not be loaded.",
   "map.mode_iso": "Isometric",
