@@ -925,6 +925,10 @@ pub struct ModEntry {
     /// `modversion=` from the cached `mod.info`, when the file has one.
     #[serde(default)]
     pub installed_version: Option<String>,
+    /// SteamCMD `timeupdated` for the copy on disk. Shown when the mod
+    /// never ships a version string.
+    #[serde(default)]
+    pub installed_updated_at: Option<i64>,
     /// The Workshop tree is on disk under `steamapps/workshop/content/108600`.
     #[serde(default)]
     pub cached: bool,
@@ -952,6 +956,7 @@ pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
                 mod_id,
                 protected,
                 installed_version: None,
+                installed_updated_at: None,
                 cached: false,
                 update_available: false,
             }
@@ -1003,6 +1008,7 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
                 .get(&entry.workshop_id)
                 .and_then(|row| row.version.clone())
         });
+        entry.installed_updated_at = install.time_updated.map(|at| at as i64);
         entry.cached = install.cached;
         entry.update_available = install.update_available(
             steam

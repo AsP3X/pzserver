@@ -18,12 +18,13 @@ import { Field, FormError, TextAreaField } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, ApiError, type ModEntry, type WorkshopLookup } from '@/lib/api'
+import { formatDateFromUnix } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { fuzzyMatch } from '@/lib/fuzzy'
 import { parseModImport } from '@/lib/parse-mod-import'
 import { adminModsQuery, serverStatusQuery } from '@/lib/queries'
 import { useCopy } from '@/lib/use-copy'
-import { useTranslation } from '@/i18n/use-translation'
+import { useTranslation, type TranslationContextValue } from '@/i18n/use-translation'
 
 type LookupState =
   | { status: 'idle' }
@@ -40,7 +41,7 @@ type LookupState =
  * the dedicated server will try first.
  */
 export function AdminModsPage() {
-  const { t } = useTranslation()
+  const { t, intlLocale } = useTranslation()
   const queryClient = useQueryClient()
   const { data, isPending, isError, refetch } = useQuery(adminModsQuery)
   const status = useQuery(serverStatusQuery)
@@ -423,11 +424,7 @@ export function AdminModsPage() {
                         <td className="px-3 py-3">
                           <span className="flex flex-col gap-0.5">
                             <span className="font-mono text-xs text-smoke">
-                              {entry.installed_version?.trim()
-                                ? entry.installed_version
-                                : entry.update_available && !entry.cached
-                                  ? t('admin.mods_not_cached')
-                                  : '—'}
+                              {modVersionLabel(entry, t, intlLocale)}
                             </span>
                             {entry.update_available ? (
                               <span className="font-mono text-[0.625rem] tracking-widest text-hazard uppercase">
@@ -693,6 +690,24 @@ export function AdminModsPage() {
       />
     </section>
   )
+}
+
+function modVersionLabel(
+  entry: ModEntry,
+  t: TranslationContextValue['t'],
+  locale: string,
+): string {
+  const version = entry.installed_version?.trim()
+  if (version) {
+    return version
+  }
+  if (entry.update_available && !entry.cached) {
+    return t('admin.mods_not_cached')
+  }
+  if (entry.installed_updated_at && entry.installed_updated_at > 0) {
+    return formatDateFromUnix(entry.installed_updated_at, locale)
+  }
+  return '—'
 }
 
 function LookupPreview({

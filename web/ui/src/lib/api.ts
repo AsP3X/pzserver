@@ -674,6 +674,7 @@ export interface ModEntry {
   mod_id: string
   protected: boolean
   installed_version?: string | null
+  installed_updated_at?: number | null
   cached?: boolean
   update_available?: boolean
 }

@@ -43,6 +43,16 @@ const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
  * Unlike compact notation, `RelativeTimeFormat` has complete CLDR data for both
  * locales, so this is safe to lean on.
  */
+/** Calendar day from a unix timestamp, in the viewer's language. */
+export function formatDateFromUnix(seconds: number, locale: string): string {
+  const date = new Date(seconds * 1000)
+  if (Number.isNaN(date.getTime())) {
+    return String(seconds)
+  }
+
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(date)
+}
+
 /** Calendar date and clock, in the viewer's language. */
 export function formatDateTime(iso: string, locale: string): string {
   const date = new Date(iso)
