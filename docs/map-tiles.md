@@ -120,11 +120,18 @@ A **world-change job** is the same regional job, plus a save overlay:
 3. Composite the save PNGs onto the base JPEGs for dirty keys only.
 4. WAL-replace those rows in `tiles.sqlite`.
 
-The API scans chunk mtimes every `MAP_TILES_WORLD_SCAN_SECS` (default 120).
-The first pass seeds the table and does not enqueue. Later passes enqueue up
-to `MAP_TILES_WORLD_MAX_CELLS` (default 8) dirty cells into
-`POST /api/v1/admin/map-tiles/rerender`. One job at a time; a running job
-skips the tick. Set the scan interval to `0` to disable.
+The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
+(default 120). The first pass seeds `map_tile_blocks` and does not enqueue.
+Later passes collect dirty blocks (a door or a window sheet is one block)
+and enqueue them as small square rects once either:
+
+- at least `batch_blocks` (default 8) dirty spots have piled up, or
+- `max_wait_secs` (default 300) has passed since the first pending spot.
+
+Staff toggle this on the player map under **World changes**. Off means the
+isometric pack stays as last painted. Oldest dirty blocks go first so a
+quiet door is not starved by a busy cell. One job at a time; a running job
+skips the tick. Set the scan interval to `0` to disable the scanner itself.
 
 `make map-tiles-region` does the same overlay when `/saves` is mounted.
 `make map-tiles-detail` does not — that is a vanilla z21 fill.

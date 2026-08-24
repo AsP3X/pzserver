@@ -522,7 +522,7 @@ async fn spawn_and_wait(
             &state.config.pz_save_game,
         );
         if let Err(error) =
-            crate::services::map_tile_world::mark_seen(&state.db, &save, cells).await
+            crate::services::map_tile_world::mark_painted(&state.db, &save, squares, cells).await
         {
             tracing::warn!(%id, %error, "map tile chunk mtimes not updated");
         }

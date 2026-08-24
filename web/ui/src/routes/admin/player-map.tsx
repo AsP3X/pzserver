@@ -1,20 +1,20 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Crosshair, Search, X } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { FormError } from '@/components/ui/field'
+import { Field, FormError } from '@/components/ui/field'
 import { HealthMeter } from '@/components/ui/bar'
 import { PlayerHead } from '@/components/ui/player-head'
-import { Panel } from '@/components/ui/panel'
+import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorldmapView, type MapFocus } from '@/components/ui/worldmap'
-import { api, ApiError, type AdminPlayer } from '@/lib/api'
+import { api, ApiError, type AdminPlayer, type MapTileSettings } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
 import { fuzzyMatch } from '@/lib/fuzzy'
-import { adminPlayersQuery } from '@/lib/queries'
+import { adminMapTileSettingsQuery, adminPlayersQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -45,8 +45,10 @@ export function AdminPlayerMapPage() {
   const { t, intlLocale } = useTranslation()
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
 
   const { data, isPending, isError, refetch } = useQuery(adminPlayersQuery)
+  const tileSettings = useQuery(adminMapTileSettingsQuery)
 
   const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
@@ -144,6 +146,19 @@ export function AdminPlayerMapPage() {
             : COLOR.offline,
   }))
 
+  const tilesSaved = useMutation({
+    mutationFn: (input: Partial<MapTileSettings>) => api.adminUpdateMapTileSettings(input),
+    onSuccess: async () => {
+      setNotice(t('admin.map_tiles_saved'))
+      setError(null)
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'map-tiles'] })
+    },
+    onError: (cause) => {
+      setNotice(null)
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
   const teleport = useMutation({
     mutationFn: () => {
       if (!current || !destination) {
@@ -207,6 +222,14 @@ export function AdminPlayerMapPage() {
         </p>
       ) : null}
       {error ? <FormError>{error}</FormError> : null}
+
+      {tileSettings.data ? (
+        <MapTileSettingsBar
+          settings={tileSettings.data}
+          busy={tilesSaved.isPending}
+          onSave={(input) => tilesSaved.mutate(input)}
+        />
+      ) : null}
 
       {isPending ? (
         <Skeleton className="min-h-0 flex-1" />
@@ -437,6 +460,75 @@ export function AdminPlayerMapPage() {
         }}
       />
     </section>
+  )
+}
+
+function MapTileSettingsBar({
+  settings,
+  busy,
+  onSave,
+}: {
+  settings: MapTileSettings
+  busy: boolean
+  onSave: (input: Partial<MapTileSettings>) => void
+}) {
+  const { t } = useTranslation()
+  const [batch, setBatch] = useState(settings.batch_blocks)
+  const [waitMinutes, setWaitMinutes] = useState(Math.round(settings.max_wait_secs / 60))
+
+  useEffect(() => {
+    setBatch(settings.batch_blocks)
+    setWaitMinutes(Math.round(settings.max_wait_secs / 60))
+  }, [settings.batch_blocks, settings.max_wait_secs])
+
+  return (
+    <Panel bracketed className="shrink-0">
+      <PanelHeader label={t('admin.map_tiles_settings')} />
+      <div className="flex flex-col gap-3 p-4">
+        <p className="text-sm text-smoke">{t('admin.map_tiles_settings_hint')}</p>
+        <label className="flex items-center gap-2 text-sm text-bone">
+          <input
+            type="checkbox"
+            checked={settings.auto_rerender}
+            disabled={busy}
+            onChange={(event) => onSave({ auto_rerender: event.target.checked })}
+          />
+          {t('admin.map_tiles_auto')}
+        </label>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+          <Field
+            type="number"
+            min={1}
+            max={256}
+            label={t('admin.map_tiles_batch')}
+            value={batch}
+            disabled={busy || !settings.auto_rerender}
+            onChange={(event) => setBatch(Number(event.target.value) || 1)}
+          />
+          <Field
+            type="number"
+            min={0}
+            max={1440}
+            label={t('admin.map_tiles_wait')}
+            value={waitMinutes}
+            disabled={busy || !settings.auto_rerender}
+            onChange={(event) => setWaitMinutes(Number(event.target.value) || 0)}
+          />
+          <Button
+            size="sm"
+            disabled={busy || !settings.auto_rerender}
+            onClick={() =>
+              onSave({
+                batch_blocks: Math.min(256, Math.max(1, batch)),
+                max_wait_secs: Math.min(86_400, Math.max(0, waitMinutes * 60)),
+              })
+            }
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      </div>
+    </Panel>
   )
 }
 

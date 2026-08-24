@@ -1192,6 +1192,13 @@ export interface VaultView {
   moves: VaultMove[]
 }
 
+export interface MapTileSettings {
+  auto_rerender: boolean
+  batch_blocks: number
+  max_wait_secs: number
+  pending_since: string | null
+}
+
 export interface VaultSettings {
   enabled: boolean
   default_slots: number
@@ -1808,6 +1815,11 @@ export const api = {
     post<VaultView>('/api/v1/me/vault/retrieve', { item_id: itemId, quantity }),
 
   upgradeVault: () => post<VaultView>('/api/v1/me/vault/upgrade', {}),
+
+  adminMapTileSettings: () => request<MapTileSettings>('/api/v1/admin/map-tiles/settings'),
+
+  adminUpdateMapTileSettings: (input: Partial<MapTileSettings>) =>
+    patch<MapTileSettings>('/api/v1/admin/map-tiles/settings', input),
 
   adminVault: () => request<AdminVault>('/api/v1/admin/vault'),
 

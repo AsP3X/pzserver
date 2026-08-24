@@ -9,19 +9,49 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sqlx::PgPool;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgPool};
 
-use crate::error::ApiError;
+use crate::error::{ApiError, ApiResult};
 use crate::services::map_tile_jobs;
 use crate::state::AppState;
 
 const CELL_SIZE: i32 = 256;
 const B42_BLOCK: i32 = 8;
 
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Cell {
     pub cx: i32,
     pub cy: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Block {
+    pub bx: i32,
+    pub by: i32,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Settings {
+    pub auto_rerender: bool,
+    pub batch_blocks: i32,
+    pub max_wait_secs: i32,
+    pub pending_since: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SettingsView {
+    #[serde(flatten)]
+    pub settings: Settings,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SettingsPatch {
+    pub auto_rerender: Option<bool>,
+    pub batch_blocks: Option<i32>,
+    pub max_wait_secs: Option<i32>,
 }
 
 pub fn chunk_cell(x: i32, y: i32, unit: i32) -> Cell {
@@ -44,15 +74,35 @@ pub fn save_dir(data_path: &Path, save_game: &str) -> PathBuf {
 /// Max mtime (unix millis) of every chunk that belongs to a cell.
 pub fn cell_mtimes(save: &Path) -> HashMap<Cell, i64> {
     let mut out = HashMap::new();
-    for (x, y, unit, path) in iter_chunks(save) {
-        let Ok(mtime) = file_mtime_ms(&path) else {
-            continue;
-        };
-        let cell = chunk_cell(x, y, unit);
+    for (block, unit, mtime) in iter_block_mtimes(save) {
+        let cell = chunk_cell(block.bx, block.by, unit);
         let entry = out.entry(cell).or_insert(mtime);
         if mtime > *entry {
             *entry = mtime;
         }
+    }
+    out
+}
+
+/// One 8-square B42 block (or a legacy cell, which is 256 squares).
+pub fn block_mtimes(save: &Path) -> HashMap<Block, i64> {
+    let mut out = HashMap::new();
+    for (block, _unit, mtime) in iter_block_mtimes(save) {
+        let entry = out.entry(block).or_insert(mtime);
+        if mtime > *entry {
+            *entry = mtime;
+        }
+    }
+    out
+}
+
+fn iter_block_mtimes(save: &Path) -> Vec<(Block, i32, i64)> {
+    let mut out = Vec::new();
+    for (x, y, unit, path) in iter_chunks(save) {
+        let Ok(mtime) = file_mtime_ms(&path) else {
+            continue;
+        };
+        out.push((Block { bx: x, by: y }, unit, mtime));
     }
     out
 }
@@ -148,6 +198,39 @@ pub fn dirty_cells(
     dirty.into_iter().map(|(cell, _)| cell).collect()
 }
 
+pub fn dirty_blocks(
+    scanned: &HashMap<Block, i64>,
+    stored: &HashMap<Block, i64>,
+    max_blocks: usize,
+) -> Vec<Block> {
+    let mut dirty: Vec<(Block, i64)> = scanned
+        .iter()
+        .filter_map(|(block, mtime)| match stored.get(block) {
+            None => Some((*block, *mtime)),
+            Some(seen) if mtime > seen => Some((*block, *mtime)),
+            _ => None,
+        })
+        .collect();
+    // Oldest first so a quiet door is not starved by a busy cell.
+    dirty.sort_by(|a, b| a.1.cmp(&b.1));
+    dirty.truncate(max_blocks);
+    dirty.into_iter().map(|(block, _)| block).collect()
+}
+
+pub fn should_flush(dirty: usize, batch: i32, waited_secs: i64, max_wait_secs: i32) -> bool {
+    if dirty == 0 {
+        return false;
+    }
+    if dirty >= batch.max(1) as usize {
+        return true;
+    }
+    max_wait_secs > 0 && waited_secs >= i64::from(max_wait_secs)
+}
+
+pub fn block_to_square(block: Block, unit: i32) -> [i32; 4] {
+    [block.bx * unit, block.by * unit, unit, unit]
+}
+
 /// Background tick. Seeds on first run. No-ops when the save is missing, the
 /// renderer binds are relative (docker cannot use them), or a job is already
 /// running.
@@ -165,7 +248,7 @@ pub async fn tick(state: &AppState) {
 
     let scanned = match tokio::task::spawn_blocking({
         let save = save.clone();
-        move || cell_mtimes(&save)
+        move || block_mtimes(&save)
     })
     .await
     {
@@ -180,35 +263,65 @@ pub async fn tick(state: &AppState) {
         return;
     }
 
-    match load_stored(&state.db).await {
+    let settings = match load_settings(&state.db).await {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::warn!(%error, "map tile settings unread");
+            return;
+        }
+    };
+
+    match load_stored_blocks(&state.db).await {
         Ok(stored) if stored.is_empty() => {
-            if let Err(error) = replace_stored(&state.db, &scanned).await {
+            if let Err(error) = replace_stored_blocks(&state.db, &scanned).await {
                 tracing::warn!(%error, "map tile world seed failed");
                 return;
             }
             tracing::info!(
-                cells = scanned.len(),
-                "seeded map tile chunk mtimes; not enqueueing"
+                blocks = scanned.len(),
+                "seeded map tile block mtimes; not enqueueing"
             );
         }
         Ok(stored) => {
-            let dirty = dirty_cells(
-                &scanned,
-                &stored,
-                state.config.map_tiles_world_max_cells,
-            );
-            if dirty.is_empty() {
+            if !settings.auto_rerender {
                 return;
             }
-            let cells: Vec<Vec<i32>> = dirty
+            let cap = state.config.map_tiles_world_max_cells.max(1) * 8;
+            let dirty = dirty_blocks(&scanned, &stored, cap.min(256));
+            if dirty.is_empty() {
+                let _ = set_pending_since(&state.db, None).await;
+                return;
+            }
+            let pending_since = match settings.pending_since {
+                Some(since) => since,
+                None => {
+                    let now = Utc::now();
+                    let _ = set_pending_since(&state.db, Some(now)).await;
+                    now
+                }
+            };
+            let waited = (Utc::now() - pending_since).num_seconds().max(0);
+            if !should_flush(
+                dirty.len(),
+                settings.batch_blocks,
+                waited,
+                settings.max_wait_secs,
+            ) {
+                return;
+            }
+            let squares: Vec<Vec<i32>> = dirty
                 .iter()
-                .map(|cell| vec![cell.cx, cell.cy, 1, 1])
+                .map(|block| {
+                    let [x, y, w, h] = block_to_square(*block, B42_BLOCK);
+                    vec![x, y, w, h]
+                })
                 .collect();
-            match map_tile_jobs::enqueue(state, Vec::new(), cells).await {
+            match map_tile_jobs::enqueue(state, squares, Vec::new()).await {
                 Ok(job) => {
+                    let _ = set_pending_since(&state.db, None).await;
                     tracing::info!(
                         id = %job.id,
-                        cells = dirty.len(),
+                        blocks = dirty.len(),
                         "enqueued world-change tile job"
                     );
                 }
@@ -219,53 +332,169 @@ pub async fn tick(state: &AppState) {
             }
         }
         Err(error) => {
-            tracing::warn!(%error, "map tile chunk table unreadable");
+            tracing::warn!(%error, "map tile block table unreadable");
         }
     }
 }
 
-pub async fn mark_seen(db: &PgPool, save: &Path, cells: &[[i32; 4]]) -> Result<(), sqlx::Error> {
-    if cells.is_empty() {
+pub async fn mark_painted(
+    db: &PgPool,
+    save: &Path,
+    squares: &[[i32; 4]],
+    cells: &[[i32; 4]],
+) -> Result<(), sqlx::Error> {
+    let mut square_rects: Vec<[i32; 4]> = squares.to_vec();
+    for &[x, y, w, h] in cells {
+        square_rects.push([x * CELL_SIZE, y * CELL_SIZE, w * CELL_SIZE, h * CELL_SIZE]);
+    }
+    if square_rects.is_empty() {
         return Ok(());
     }
-    let scanned = cell_mtimes(save);
-    let mut relevant = HashMap::new();
+
+    let scanned_blocks = block_mtimes(save);
+    let mut relevant_blocks = HashMap::new();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    for &[x, y, w, h] in &square_rects {
+        let bx0 = div_floor(x, B42_BLOCK);
+        let by0 = div_floor(y, B42_BLOCK);
+        let bx1 = div_floor(x + w - 1, B42_BLOCK);
+        let by1 = div_floor(y + h - 1, B42_BLOCK);
+        for bx in bx0..=bx1 {
+            for by in by0..=by1 {
+                let block = Block { bx, by };
+                let mtime = scanned_blocks.get(&block).copied().unwrap_or(now);
+                relevant_blocks.insert(block, mtime);
+            }
+        }
+    }
+    upsert_stored_blocks(db, &relevant_blocks).await?;
+
+    let scanned_cells = cell_mtimes(save);
+    let mut relevant_cells = HashMap::new();
     for &[x, y, w, h] in cells {
         for cx in x..x + w {
             for cy in y..y + h {
                 let cell = Cell { cx, cy };
-                if let Some(mtime) = scanned.get(&cell).copied() {
-                    relevant.insert(cell, mtime);
-                } else {
-                    relevant.insert(
-                        cell,
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64,
-                    );
-                }
+                let mtime = scanned_cells.get(&cell).copied().unwrap_or(now);
+                relevant_cells.insert(cell, mtime);
             }
         }
     }
-    upsert_stored(db, &relevant).await
+    if !relevant_cells.is_empty() {
+        upsert_stored(db, &relevant_cells).await?;
+    }
+    Ok(())
 }
 
-async fn load_stored(db: &PgPool) -> Result<HashMap<Cell, i64>, sqlx::Error> {
-    let rows: Vec<(i32, i32, i64)> = sqlx::query_as("SELECT cx, cy, mtime_ms FROM map_tile_chunks")
-        .fetch_all(db)
+fn div_floor(value: i32, unit: i32) -> i32 {
+    if value >= 0 {
+        value / unit
+    } else {
+        (value - unit + 1) / unit
+    }
+}
+
+pub async fn view_settings(db: &PgPool) -> Result<SettingsView, sqlx::Error> {
+    Ok(SettingsView {
+        settings: load_settings(db).await?,
+    })
+}
+
+pub async fn update_settings(db: &PgPool, patch: SettingsPatch) -> ApiResult<SettingsView> {
+    if let Some(batch) = patch.batch_blocks {
+        if !(1..=256).contains(&batch) {
+            return Err(ApiError::Validation(
+                "Batch must be between 1 and 256 blocks.".to_owned(),
+            ));
+        }
+    }
+    if let Some(wait) = patch.max_wait_secs {
+        if !(0..=86_400).contains(&wait) {
+            return Err(ApiError::Validation(
+                "Wait must be between 0 and 86400 seconds.".to_owned(),
+            ));
+        }
+    }
+    sqlx::query(
+        r#"UPDATE map_tile_settings SET
+            auto_rerender = COALESCE($1, auto_rerender),
+            batch_blocks = COALESCE($2, batch_blocks),
+            max_wait_secs = COALESCE($3, max_wait_secs)
+           WHERE id = 1"#,
+    )
+    .bind(patch.auto_rerender)
+    .bind(patch.batch_blocks)
+    .bind(patch.max_wait_secs)
+    .execute(db)
+    .await?;
+    Ok(view_settings(db).await?)
+}
+
+async fn load_settings(db: &PgPool) -> Result<Settings, sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO map_tile_settings (id) VALUES (1)
+           ON CONFLICT (id) DO NOTHING"#,
+    )
+    .execute(db)
+    .await?;
+    sqlx::query_as::<_, Settings>(
+        r#"SELECT auto_rerender, batch_blocks, max_wait_secs, pending_since
+           FROM map_tile_settings WHERE id = 1"#,
+    )
+    .fetch_one(db)
+    .await
+}
+
+async fn set_pending_since(
+    db: &PgPool,
+    since: Option<DateTime<Utc>>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE map_tile_settings SET pending_since = $1 WHERE id = 1")
+        .bind(since)
+        .execute(db)
         .await?;
+    Ok(())
+}
+
+async fn load_stored_blocks(db: &PgPool) -> Result<HashMap<Block, i64>, sqlx::Error> {
+    let rows: Vec<(i32, i32, i64)> =
+        sqlx::query_as("SELECT bx, by, mtime_ms FROM map_tile_blocks")
+            .fetch_all(db)
+            .await?;
     Ok(rows
         .into_iter()
-        .map(|(cx, cy, mtime_ms)| (Cell { cx, cy }, mtime_ms))
+        .map(|(bx, by, mtime_ms)| (Block { bx, by }, mtime_ms))
         .collect())
 }
 
-async fn replace_stored(db: &PgPool, scanned: &HashMap<Cell, i64>) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM map_tile_chunks")
+async fn replace_stored_blocks(
+    db: &PgPool,
+    scanned: &HashMap<Block, i64>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM map_tile_blocks").execute(db).await?;
+    upsert_stored_blocks(db, scanned).await
+}
+
+async fn upsert_stored_blocks(
+    db: &PgPool,
+    scanned: &HashMap<Block, i64>,
+) -> Result<(), sqlx::Error> {
+    for (block, mtime) in scanned {
+        sqlx::query(
+            r#"INSERT INTO map_tile_blocks (bx, by, mtime_ms)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (bx, by) DO UPDATE SET mtime_ms = EXCLUDED.mtime_ms"#,
+        )
+        .bind(block.bx)
+        .bind(block.by)
+        .bind(mtime)
         .execute(db)
         .await?;
-    upsert_stored(db, scanned).await
+    }
+    Ok(())
 }
 
 async fn upsert_stored(db: &PgPool, scanned: &HashMap<Cell, i64>) -> Result<(), sqlx::Error> {
@@ -332,5 +561,41 @@ mod tests {
         assert_eq!(dirty, vec![Cell { cx: 2, cy: 2 }, Cell { cx: 1, cy: 1 }]);
         let capped = dirty_cells(&scanned, &HashMap::new(), 1);
         assert_eq!(capped, vec![Cell { cx: 2, cy: 2 }]);
+    }
+
+    #[test]
+    fn dirty_blocks_keep_the_oldest_first() {
+        let scanned = HashMap::from([
+            (Block { bx: 1, by: 1 }, 50),
+            (Block { bx: 2, by: 2 }, 80),
+            (Block { bx: 3, by: 3 }, 10),
+        ]);
+        let stored = HashMap::from([(Block { bx: 1, by: 1 }, 40)]);
+        let dirty = dirty_blocks(&scanned, &stored, 8);
+        assert_eq!(
+            dirty,
+            vec![
+                Block { bx: 3, by: 3 },
+                Block { bx: 1, by: 1 },
+                Block { bx: 2, by: 2 },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_block_becomes_an_eight_square() {
+        assert_eq!(
+            block_to_square(Block { bx: 1375, by: 1251 }, 8),
+            [11000, 10008, 8, 8]
+        );
+    }
+
+    #[test]
+    fn flush_waits_for_a_batch_unless_the_clock_runs_out() {
+        assert!(!should_flush(3, 8, 10, 300));
+        assert!(should_flush(8, 8, 10, 300));
+        assert!(should_flush(1, 8, 300, 300));
+        assert!(!should_flush(1, 8, 10, 0));
+        assert!(!should_flush(0, 1, 999, 1));
     }
 }
