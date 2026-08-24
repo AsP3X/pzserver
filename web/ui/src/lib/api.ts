@@ -673,6 +673,9 @@ export interface ModEntry {
   workshop_id: string
   mod_id: string
   protected: boolean
+  installed_version?: string | null
+  cached?: boolean
+  update_available?: boolean
 }
 
 export interface WorkshopLookup {
@@ -1551,6 +1554,9 @@ export const api = {
 
   adminRemoveMod: (workshopId: string) =>
     del<ModEntry[]>(`/api/v1/admin/mods/${encodeURIComponent(workshopId)}`),
+
+  adminUpdateMod: (workshopId: string) =>
+    post<ModEntry[]>(`/api/v1/admin/mods/${encodeURIComponent(workshopId)}/update`, {}),
 
   adminSetOpen: (open: boolean) =>
     patch<ServerConfig>('/api/v1/admin/whitelist', { open }),

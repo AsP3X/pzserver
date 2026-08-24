@@ -69,6 +69,9 @@ pub struct Config {
     /// Workshop id of the Knox Relay mod — never removable from the load list.
     pub bridge_workshop_id: Option<String>,
     pub bridge_mod_id: String,
+    /// Steam Workshop cache (`steamapps/workshop`). None when the API cannot
+    /// see the game install, so the mod list still loads without versions.
+    pub workshop_path: Option<PathBuf>,
 
     /// Address players type into the game client.
     pub connect_host: Option<String>,
@@ -172,6 +175,7 @@ impl Config {
             server_ini_path,
             bridge_workshop_id: optional("PZ_BRIDGE_WORKSHOP_ID"),
             bridge_mod_id: string("PZ_BRIDGE_MOD_ID", "KnoxRelay"),
+            workshop_path: optional("PZ_WORKSHOP_PATH").map(PathBuf::from),
 
             connect_host: optional("PZ_CONNECT_HOST"),
             connect_port: parse("PZ_GAME_PORT", "16261", "port number")?,

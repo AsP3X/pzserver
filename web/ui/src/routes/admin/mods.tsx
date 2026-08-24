@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ChevronDown,
   Copy,
+  Download,
   ExternalLink,
   RotateCcw,
   Search,
@@ -53,6 +54,7 @@ export function AdminModsPage() {
   const [importText, setImportText] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [removing, setRemoving] = useState<ModEntry | null>(null)
+  const [updating, setUpdating] = useState<ModEntry | null>(null)
   const [restarting, setRestarting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingDeps, setPendingDeps] = useState<WorkshopLookup[] | null>(null)
@@ -67,7 +69,7 @@ export function AdminModsPage() {
     }
     return source
       .map((entry, index) => {
-        const haystack = `${entry.mod_id} ${entry.workshop_id}`
+        const haystack = `${entry.mod_id} ${entry.workshop_id} ${entry.installed_version ?? ''}`
         const hit = fuzzyMatch(query, haystack)
         return hit ? { entry, index, score: hit.score } : null
       })
@@ -177,6 +179,16 @@ export function AdminModsPage() {
     },
   })
 
+  const updateMod = useMutation({
+    mutationFn: (entry: ModEntry) => api.adminUpdateMod(entry.workshop_id),
+    onSuccess: async () => {
+      setUpdating(null)
+      setNotice(t('admin.mods_updated'))
+      await invalidate()
+    },
+    onError: () => setUpdating(null),
+  })
+
   const imported = useMutation({
     mutationFn: async () => {
       const parsed = parseModImport(importText)
@@ -243,6 +255,7 @@ export function AdminModsPage() {
       checkDeps.error,
       remove.error,
       reorder.error,
+      updateMod.error,
       imported.error,
       restart.error,
     ].find(Boolean) instanceof ApiError
@@ -252,6 +265,7 @@ export function AdminModsPage() {
           checkDeps.error,
           remove.error,
           reorder.error,
+          updateMod.error,
           imported.error,
           restart.error,
         ].find(Boolean) as ApiError).message
@@ -261,6 +275,7 @@ export function AdminModsPage() {
             checkDeps.error,
             remove.error,
             reorder.error,
+            updateMod.error,
             imported.error,
             restart.error,
           ].find(Boolean)
@@ -333,7 +348,7 @@ export function AdminModsPage() {
               </p>
             ) : (
               <div className="min-h-0 flex-1 overflow-auto">
-                <table className="w-full min-w-[36rem] text-left text-sm">
+                <table className="w-full min-w-[44rem] text-left text-sm">
                   <caption className="sr-only">{t('admin.mods_loaded')}</caption>
                   <thead className="sticky top-0 bg-ash font-mono text-[0.6875rem] tracking-widest text-dust uppercase">
                     <tr className="border-b border-fence">
@@ -345,6 +360,9 @@ export function AdminModsPage() {
                       </th>
                       <th scope="col" className="px-3 py-2">
                         {t('admin.mods_workshop_id')}
+                      </th>
+                      <th scope="col" className="px-3 py-2">
+                        {t('admin.mods_version')}
                       </th>
                       <th scope="col" className="px-3 py-2 text-right">
                         {t('common.actions')}
@@ -403,6 +421,22 @@ export function AdminModsPage() {
                           )}
                         </td>
                         <td className="px-3 py-3">
+                          <span className="flex flex-col gap-0.5">
+                            <span className="font-mono text-xs text-smoke">
+                              {entry.installed_version?.trim()
+                                ? entry.installed_version
+                                : entry.update_available && !entry.cached
+                                  ? t('admin.mods_not_cached')
+                                  : '—'}
+                            </span>
+                            {entry.update_available ? (
+                              <span className="font-mono text-[0.625rem] tracking-widest text-hazard uppercase">
+                                {t('admin.mods_update_available')}
+                              </span>
+                            ) : null}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
                           <div className="flex justify-end gap-1">
                             <Button
                               size="sm"
@@ -422,6 +456,22 @@ export function AdminModsPage() {
                               <ArrowDown aria-hidden="true" className="size-3.5" />
                               <span className="sr-only">{t('admin.mods_move_down')}</span>
                             </Button>
+                            {entry.workshop_id && entry.update_available ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={updateMod.isPending}
+                                onClick={() => {
+                                  setNotice(null)
+                                  setUpdating(entry)
+                                }}
+                              >
+                                <Download aria-hidden="true" className="size-3.5" />
+                                {entry.cached
+                                  ? t('admin.mods_update')
+                                  : t('admin.mods_download')}
+                              </Button>
+                            ) : null}
                             {entry.protected ? null : (
                               <Button
                                 size="sm"
@@ -581,6 +631,30 @@ export function AdminModsPage() {
           setPendingDeps(null)
           if (skip) {
             add.mutate()
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={updating !== null}
+        title={
+          updating?.cached ? t('admin.mods_update') : t('admin.mods_download')
+        }
+        description={t('admin.mods_update_confirm', {
+          name: updating?.mod_id || updating?.workshop_id || '',
+        })}
+        confirmLabel={
+          updateMod.isPending
+            ? t('admin.mods_updating')
+            : updating?.cached
+              ? t('admin.mods_update')
+              : t('admin.mods_download')
+        }
+        busy={updateMod.isPending}
+        onConfirm={() => updating && updateMod.mutate(updating)}
+        onClose={() => {
+          if (!updateMod.isPending) {
+            setUpdating(null)
           }
         }}
       />

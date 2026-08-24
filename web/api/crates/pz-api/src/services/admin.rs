@@ -4,12 +4,12 @@
 //! cannot reach it is a validation failure the operator can act on.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use pz_bridge::{
-    InventoryReader, ModState, SandboxError, SandboxKind, SandboxVars, ServerIni, UpdateReport,
-    WorkshopDetails, persist_config_state, read_intended_mod_lists, sandbox_path,
+    DockerClient, InventoryReader, ModState, SandboxError, SandboxKind, SandboxVars, ServerIni,
+    UpdateReport, WorkshopDetails, persist_config_state, read_intended_mod_lists, sandbox_path,
     write_intended_mod_lists,
 };
 use serde::{Deserialize, Serialize};
@@ -922,6 +922,16 @@ pub struct ModEntry {
     pub mod_id: String,
     #[serde(default)]
     pub protected: bool,
+    /// `modversion=` from the cached `mod.info`, when the file has one.
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    /// The Workshop tree is on disk under `steamapps/workshop/content/108600`.
+    #[serde(default)]
+    pub cached: bool,
+    /// Steam's `time_updated` is newer than the ACF copy, or the item has
+    /// never been downloaded.
+    #[serde(default)]
+    pub update_available: bool,
 }
 
 pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
@@ -932,7 +942,7 @@ pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
     let mods = intended.mods;
     let len = workshop.len().max(mods.len());
 
-    Ok((0..len)
+    let mut entries: Vec<ModEntry> = (0..len)
         .map(|index| {
             let workshop_id = workshop.get(index).cloned().unwrap_or_default();
             let mod_id = mods.get(index).cloned().unwrap_or_default();
@@ -941,9 +951,127 @@ pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
                 workshop_id,
                 mod_id,
                 protected,
+                installed_version: None,
+                cached: false,
+                update_available: false,
             }
         })
-        .collect())
+        .collect();
+
+    attach_workshop_versions(state, &mut entries).await;
+    Ok(entries)
+}
+
+async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
+    let workshop_root = state.config.workshop_path.as_deref();
+    let acf = workshop_root
+        .map(pz_bridge::workshop::read_acf)
+        .unwrap_or_default();
+
+    let mut ids = Vec::new();
+    for entry in entries.iter() {
+        if entry.workshop_id.is_empty() {
+            continue;
+        }
+        if !ids.iter().any(|existing| existing == &entry.workshop_id) {
+            ids.push(entry.workshop_id.clone());
+        }
+    }
+
+    let steam_times = match pz_bridge::workshop::published_times(&ids).await {
+        Ok(times) => times,
+        Err(error) => {
+            tracing::warn!(%error, "Steam Workshop lookup for mod versions failed");
+            BTreeMap::new()
+        }
+    };
+
+    for entry in entries.iter_mut() {
+        if entry.workshop_id.is_empty() {
+            continue;
+        }
+        let install = pz_bridge::workshop::inspect_install(
+            workshop_root,
+            &entry.workshop_id,
+            &entry.mod_id,
+            &acf,
+        );
+        entry.installed_version = install.version.clone();
+        entry.cached = install.cached;
+        entry.update_available =
+            install.update_available(steam_times.get(&entry.workshop_id).copied());
+    }
+}
+
+/// Pull one Workshop item through SteamCMD inside the game container.
+///
+/// The running dedicated server keeps the Lua it already loaded. A restart
+/// is what makes the new files live — same as adding a mod.
+pub async fn update_mod(state: &AppState, workshop_id: &str) -> ApiResult<Vec<ModEntry>> {
+    let workshop_id = pz_bridge::parse_workshop_id(workshop_id).ok_or_else(|| {
+        ApiError::Validation("Paste a Workshop id, or a Steam Workshop URL.".to_owned())
+    })?;
+
+    let current = list_mods(state).await?;
+    if !current.iter().any(|entry| entry.workshop_id == workshop_id) {
+        return Err(ApiError::Validation(
+            "That mod is not on the list.".to_owned(),
+        ));
+    }
+
+    let Ok(_guard) = state.workshop_update.try_lock() else {
+        return Err(ApiError::Validation(
+            "A Workshop download is already running.".to_owned(),
+        ));
+    };
+
+    let status = state
+        .docker
+        .status()
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+    if !status.running {
+        return Err(ApiError::Validation(
+            "Start the game server before updating a Workshop mod.".to_owned(),
+        ));
+    }
+
+    let docker = DockerClient::new(
+        &state.config.docker_proxy_url,
+        &state.config.game_server_container,
+        Duration::from_secs(540),
+    );
+    let (code, output) = docker
+        .exec_output(&["bash", "/home/steam/workshop-update-item.sh", &workshop_id])
+        .await
+        .map_err(|error| {
+            ApiError::Internal(format!(
+                "could not run SteamCMD in the game container: {error}"
+            ))
+        })?;
+
+    if code != 0 || !output.contains("STATUS=ok") {
+        tracing::warn!(workshop_id, code, %output, "workshop item update failed");
+        return Err(ApiError::Validation(workshop_update_message(&output)));
+    }
+
+    list_mods(state).await
+}
+
+fn workshop_update_message(output: &str) -> String {
+    let tail: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .rev()
+        .take(6)
+        .collect();
+    if tail.is_empty() {
+        return "Steam could not download that Workshop item.".to_owned();
+    }
+    let snippet = tail.into_iter().rev().collect::<Vec<_>>().join(" ");
+    let snippet: String = snippet.chars().take(280).collect();
+    format!("Steam could not download that Workshop item. {snippet}")
 }
 
 fn is_protected(state: &AppState, workshop_id: &str, mod_id: &str) -> bool {

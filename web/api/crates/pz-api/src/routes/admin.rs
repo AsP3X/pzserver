@@ -57,10 +57,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/broadcast", post(broadcast))
         .route("/admin/console", post(console))
         .route("/admin/config", get(config).patch(update_config))
-        .route(
-            "/admin/config/sandbox",
-            get(sandbox).patch(update_sandbox),
-        )
+        .route("/admin/config/sandbox", get(sandbox).patch(update_sandbox))
         .route("/admin/mods", get(mods).post(add_mod))
         .route("/admin/mods/lookup", post(lookup_mod))
         .route("/admin/mods/dependencies", post(mod_dependencies))
@@ -118,6 +115,7 @@ pub fn file_routes() -> Router<AppState> {
         .route("/admin/backups/{id}/download", get(download_backup))
         .route("/admin/backups/import", post(import_world))
         .route("/admin/server/wipe", post(wipe_server))
+        .route("/admin/mods/{workshop_id}/update", post(update_mod))
 }
 
 async fn wipe_server(
@@ -567,6 +565,14 @@ async fn remove_mod(
     Path(workshop_id): Path<String>,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(admin::remove_mod(&state, &workshop_id).await?))
+}
+
+async fn update_mod(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(workshop_id): Path<String>,
+) -> ApiResult<Json<Vec<admin::ModEntry>>> {
+    Ok(Json(admin::update_mod(&state, &workshop_id).await?))
 }
 
 #[derive(Deserialize)]

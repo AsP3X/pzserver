@@ -40,6 +40,8 @@ pub struct AppState {
     /// `backups_error`: uid 10001 writes the account-link, delivery, deposit,
     /// export and ticket files there and cannot repair the mount itself.
     pub lua_bridge_error: Option<Arc<str>>,
+    /// SteamCMD is not re-entrant. One Workshop download at a time.
+    pub workshop_update: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -97,6 +99,7 @@ impl AppState {
             map_tiles,
             backups_error,
             lua_bridge_error,
+            workshop_update: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }

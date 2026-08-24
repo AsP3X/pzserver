@@ -199,6 +199,12 @@ impl DockerClient {
     /// allow EXEC. A missing or denied API is reported as an error so the
     /// caller can fall back to the bind mount.
     pub async fn exec(&self, command: &[&str]) -> Result<i32, DockerError> {
+        Ok(self.exec_output(command).await?.0)
+    }
+
+    /// Same as [`exec`], but keeps stdout/stderr so SteamCMD errors can be
+    /// shown instead of a bare exit code.
+    pub async fn exec_output(&self, command: &[&str]) -> Result<(i32, String), DockerError> {
         let create_url = format!("{}/containers/{}/exec", self.base_url, self.container);
         let create = self
             .http
@@ -231,7 +237,8 @@ impl DockerClient {
                 status: start.status().as_u16(),
             });
         }
-        let _ = start.bytes().await;
+        let raw = start.bytes().await?;
+        let output = parse_docker_logs(&raw).join("\n");
 
         let inspect_url = format!("{}/exec/{}/json", self.base_url, created.id);
         let inspect = self.http.get(&inspect_url).send().await?;
@@ -241,7 +248,7 @@ impl DockerClient {
             });
         }
         let info: ExecInspect = inspect.json().await?;
-        Ok(info.exit_code)
+        Ok((info.exit_code, output))
     }
 
     /// Last `tail` lines of the container's stdout/stderr.

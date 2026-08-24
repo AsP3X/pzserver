@@ -132,6 +132,9 @@ services:
       # server.ini, for map name and player cap.
       # Writable: staff edit server.ini from the new admin panel.
       - ${PZ_DATA_HOST:-./data/zomboid}:/pz-data
+      # Workshop cache (mod.info + ACF). Read-only: SteamCMD writes it from
+      # inside the game container, the panel only reads versions from it.
+      - ${PZ_SERVER_HOST:-./data/server}/steamapps/workshop:/pz-workshop:ro
       # World archives. Same host folder the PHP stack writes to.
       - ${PZ_BACKUPS_HOST:-./data/backups}:/backups
       # Named volume on the VM's ext4, not a Windows bind. Random reads into a
@@ -160,6 +163,7 @@ services:
       GAME_SERVER_CONTAINER_NAME: ${GAME_SERVER_CONTAINER_NAME:-pz-game-server}
 
       PZ_DATA_PATH: /pz-data
+      PZ_WORKSHOP_PATH: /pz-workshop
       PZ_SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
       LUA_BRIDGE_PATH: /lua-bridge
       BACKUP_PATH: /backups

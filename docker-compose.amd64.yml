@@ -58,6 +58,7 @@ services:
       - ./game-server/configure-server.sh:/home/steam/configure-server.sh:ro
       - ./game-server/fix-heap.sh:/home/steam/fix-heap.sh:ro
       - ./game-server/steam-update-check.sh:/home/steam/steam-update-check.sh:ro
+      - ./game-server/workshop-update-item.sh:/home/steam/workshop-update-item.sh:ro
     healthcheck:
       # Check RCON TCP port in /proc/net — proves game server is fully loaded
       # (ss/netstat not available in renegademaster image)
