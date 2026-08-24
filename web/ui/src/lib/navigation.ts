@@ -94,7 +94,6 @@ export const PLAYER_NAV: NavGroup[] = [
     label: 'nav.group.holdings',
     items: [
       { to: '/me/wallet', label: 'nav.wallet', icon: Coins },
-      { to: '/shop', label: 'nav.store', icon: Store },
       { to: '/auctions', label: 'nav.auctions', icon: Tag },
       { to: '/me/vault', label: 'nav.vault', icon: Vault },
     ],

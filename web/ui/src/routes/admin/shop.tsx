@@ -25,7 +25,7 @@ const CATEGORIES: { id: string; label: TranslationKey }[] = [
 ]
 
 /**
- * Staff catalogue. What players see in the store.
+ * Staff catalogue. Players see these as staff lots in the auction house.
  */
 export function AdminShopPage() {
   const { t } = useTranslation()

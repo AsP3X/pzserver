@@ -45,7 +45,6 @@ import { SettingsPage } from '@/routes/me/settings'
 import { WalletPage } from '@/routes/me/wallet'
 import { VaultPage } from '@/routes/me/vault'
 import { AdminVaultPage } from '@/routes/admin/vault'
-import { ShopPage } from '@/routes/shop'
 import { AuctionsPage } from '@/routes/auctions'
 import { AdminAuctionsPage } from '@/routes/admin/auctions'
 import { AdminShopPage } from '@/routes/admin/shop'
@@ -162,12 +161,6 @@ const walletRoute = createRoute({
   getParentRoute: () => playerLayout,
   path: '/me/wallet',
   component: WalletPage,
-})
-
-const shopRoute = createRoute({
-  getParentRoute: () => playerLayout,
-  path: '/shop',
-  component: ShopPage,
 })
 
 const auctionsRoute = createRoute({
@@ -356,6 +349,7 @@ const adminSafeZonesRoute = createRoute({
 const movedRoutes = [
   { path: '/character', to: '/me/character' },
   { path: '/account', to: '/me/settings' },
+  { path: '/shop', to: '/auctions' },
 ].map(({ path, to }) =>
   createRoute({
     getParentRoute: () => rootRoute,
@@ -385,7 +379,6 @@ export const router = createRouter({
       inventoryRoute,
       mapRoute,
       walletRoute,
-      shopRoute,
       auctionsRoute,
       vaultRoute,
       reportsRoute,

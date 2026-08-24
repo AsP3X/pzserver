@@ -717,7 +717,7 @@ function ObjectiveDetail({
 }) {
   const { t } = useTranslation()
   const measure = item.measure ?? ''
-  const href = measure === 'spend' ? '/shop' : measure === 'trade' ? '/auctions' : null
+  const href = measure === 'spend' || measure === 'trade' ? '/auctions' : null
   const manual = measure === 'manual'
   const kind = KIND_LABELS[measure]
 
@@ -756,7 +756,7 @@ function ObjectiveDetail({
             to={href}
             className="self-start font-mono text-[0.6875rem] tracking-widest text-dust uppercase hover:text-hazard"
           >
-            {href === '/shop' ? t('nav.store') : t('nav.auctions')}
+            {t('nav.auctions')}
           </Link>
         ) : null}
         {manual && !item.claimed ? (
@@ -1089,7 +1089,7 @@ function TaskRow({
 }) {
   const { t } = useTranslation()
   const label = TASK_LABELS[task.id]
-  const href = task.id === 'spend' ? '/shop' : task.id === 'trade' ? '/auctions' : null
+  const href = task.id === 'spend' || task.id === 'trade' ? '/auctions' : null
 
   return (
     <li className="flex items-start justify-between gap-3 border-b border-fence px-5 py-4 md:odd:border-r">
@@ -1108,7 +1108,7 @@ function TaskRow({
             to={href}
             className="mt-2 inline-block font-mono text-[0.625rem] tracking-widest text-dust uppercase hover:text-hazard"
           >
-            {href === '/shop' ? t('nav.store') : t('nav.auctions')}
+            {t('nav.auctions')}
           </Link>
         ) : null}
       </span>
