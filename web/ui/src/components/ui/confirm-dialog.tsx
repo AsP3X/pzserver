@@ -64,6 +64,7 @@ export function ConfirmDialog({
       ref={dialog}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
+      closedby="closerequest"
       className={cn(
         'm-auto border border-fence-bright bg-ash p-0 text-bone backdrop:bg-void/80',
         size === 'xl'
@@ -78,7 +79,12 @@ export function ConfirmDialog({
           onClose()
         }
       }}
-      onClose={() => {
+      onClose={(event) => {
+        // Nested dialogs (or a picker portaled above this one) can fire
+        // `close` on the way down. Only this element's own close dismisses it.
+        if (event.target !== event.currentTarget) {
+          return
+        }
         if (open) {
           onClose()
         }

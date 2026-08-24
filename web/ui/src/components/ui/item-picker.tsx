@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,9 +21,10 @@ const MAX_ROWS = 100
  * Search over every item the game server has registered.
  *
  * Its own `<dialog>` rather than a `ConfirmDialog`, because the body is a live
- * filtering list and the confirm footer would have nothing to confirm. It
- * opens from inside the add-listing dialog, which is legal: the top layer is a
- * stack, so this sits above it and Escape reaches only the topmost.
+ * filtering list and the confirm footer would have nothing to confirm. Rendered
+ * into `document.body` so it is not nested inside the add-listing dialog: a
+ * nested `<dialog>` shares the parent's close, and picking a row would dismiss
+ * the listing form without keeping the item.
  */
 export function ItemPickerDialog({
   open,
@@ -96,7 +98,9 @@ export function ItemPickerDialog({
 
   function choose(item: CatalogItem) {
     onSelect(item)
-    onClose()
+    // Close on the next tick so this click cannot land on the listing
+    // dialog's backdrop and dismiss the form we just filled.
+    window.setTimeout(onClose, 0)
   }
 
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -115,10 +119,11 @@ export function ItemPickerDialog({
     }
   }
 
-  return (
+  const node = (
     <dialog
       ref={dialog}
       aria-labelledby={titleId}
+      closedby="closerequest"
       className={cn(
         'm-auto border border-fence-bright bg-ash p-0 text-bone backdrop:bg-void/80',
         'max-h-[min(44rem,calc(100vh-2rem))] w-[min(40rem,calc(100vw-2rem))]',
@@ -128,11 +133,16 @@ export function ItemPickerDialog({
         event.preventDefault()
         onClose()
       }}
-      onClose={() => {
+      onClose={(event) => {
+        if (event.target !== event.currentTarget) {
+          return
+        }
         if (open) {
           onClose()
         }
       }}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="shrink-0 border-b border-fence p-5">
         <h2 id={titleId} className="display text-2xl text-bone">
@@ -250,6 +260,12 @@ export function ItemPickerDialog({
       </div>
     </dialog>
   )
+
+  if (typeof document === 'undefined') {
+    return node
+  }
+
+  return createPortal(node, document.body)
 }
 
 /** Matched characters picked out, the way the log viewer does it. */
