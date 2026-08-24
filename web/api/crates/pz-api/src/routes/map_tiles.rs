@@ -11,7 +11,6 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::services::map_tile_jobs;
-use crate::services::map_tiles::TileMeta;
 use crate::state::AppState;
 
 /// A week. Not `immutable`: the client cache-busts with `?v=generated_at`.
@@ -23,7 +22,7 @@ pub fn routes() -> Router<AppState> {
         .route("/map-tiles/{z}/{tile}", get(tile))
 }
 
-async fn meta(State(state): State<AppState>) -> Json<TileMeta> {
+async fn meta(State(state): State<AppState>) -> impl IntoResponse {
     let mut meta = state.map_tiles.meta();
     let progress = map_tile_jobs::read_progress_file(&state.config.map_tiles_path);
     match map_tile_jobs::active_updating(&state.db, progress).await {
@@ -32,7 +31,10 @@ async fn meta(State(state): State<AppState>) -> Json<TileMeta> {
             tracing::warn!(%error, "map tile jobs unread; construction overlay empty");
         }
     }
-    Json(meta)
+    (
+        [(header::CACHE_CONTROL, "no-store, no-cache")],
+        Json(meta),
+    )
 }
 
 async fn tile(State(state): State<AppState>, Path((z, tile)): Path<(i64, String)>) -> Response {

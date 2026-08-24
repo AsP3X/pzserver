@@ -39,11 +39,20 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(sanction_expiry_loop(state.clone())),
         tokio::spawn(backup_schedule_loop(state.clone())),
         tokio::spawn(map_tile_world_loop(state.clone())),
+        tokio::spawn(map_tile_progress_loop(state.clone())),
         tokio::spawn(automation_loop(state.clone())),
         tokio::spawn(economy_loop(state.clone())),
         tokio::spawn(respawn_loop(state.clone())),
         tokio::spawn(safezone_loop(state)),
     ]
+}
+
+async fn map_tile_progress_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+    loop {
+        ticker.tick().await;
+        crate::services::map_tile_jobs::tick_dry_run(&state).await;
+    }
 }
 
 async fn map_tile_world_loop(state: AppState) {

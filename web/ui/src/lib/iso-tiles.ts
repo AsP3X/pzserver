@@ -139,7 +139,7 @@ export function refreshTileMeta(): Promise<TileMeta> {
 
 /** Read once, then again via `refreshTileMeta` while a job is running. */
 export function loadTileMeta(): Promise<TileMeta> {
-  metaRequest ??= fetch('/api/v1/map-tiles/meta')
+  metaRequest ??= fetch(`/api/v1/map-tiles/meta?t=${Date.now()}`, { cache: 'no-store' })
     .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
     .then((meta: TileMeta) => {
       if (meta.max_level !== null) {

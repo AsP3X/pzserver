@@ -209,6 +209,75 @@ fn parse_job_counts(line: &str) -> Option<(i32, i32)> {
     Some((done, total))
 }
 
+/// Stages a SQL-inserted running job walks when no renderer container exists.
+const SIM_STEPS: &[(&str, i32)] = &[
+    ("starting", 0),
+    ("plan", 8),
+    ("snapshot", 16),
+    ("restore", 24),
+    ("prepare", 32),
+    ("render", 40),
+    ("render", 55),
+    ("render", 70),
+    ("save", 80),
+    ("composite", 88),
+    ("pack", 96),
+];
+
+pub fn next_simulated_step(pct: Option<i32>) -> Option<(&'static str, i32)> {
+    let pct = pct.unwrap_or(-1);
+    SIM_STEPS.iter().copied().find(|(_, step)| *step > pct)
+}
+
+/// Advance running jobs that have no `pz-map-tiles` container. That is how a
+/// hand-inserted demo row animates instead of sitting on "Starting".
+pub async fn tick_dry_run(state: &AppState) {
+    if inspect_container(&state.config.docker_proxy_url).await == Some(200) {
+        return;
+    }
+    let rows: Vec<(Uuid, Option<i32>)> = match sqlx::query_as(
+        r#"SELECT id, progress_pct FROM map_tile_jobs
+           WHERE status = 'running'"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::debug!(%error, "dry-run tile jobs unread");
+            return;
+        }
+    };
+    for (id, pct) in rows {
+        if let Some((stage, next)) = next_simulated_step(pct) {
+            if let Err(error) = sqlx::query(
+                r#"UPDATE map_tile_jobs
+                   SET progress_stage = $2, progress_pct = $3
+                   WHERE id = $1 AND status = 'running'"#,
+            )
+            .bind(id)
+            .bind(stage)
+            .bind(next)
+            .execute(&state.db)
+            .await
+            {
+                tracing::debug!(%id, %error, "dry-run progress not stored");
+            }
+        } else if let Err(error) = sqlx::query(
+            r#"UPDATE map_tile_jobs
+               SET status = 'done', finished_at = now(),
+                   progress_stage = 'pack', progress_pct = 100
+               WHERE id = $1 AND status = 'running'"#,
+        )
+        .bind(id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::debug!(%id, %error, "dry-run job not finished");
+        }
+    }
+}
+
 fn stage_from_banner(head: &str) -> Option<String> {
     let key = head.to_ascii_lowercase();
     let stage = if key.starts_with("planning") {
@@ -359,17 +428,6 @@ async fn spawn_and_wait(
     squares: &[[i32; 4]],
     cells: &[[i32; 4]],
 ) -> Result<(), String> {
-    sqlx::query(
-        r#"UPDATE map_tile_jobs
-           SET status = 'running', started_at = now(),
-               progress_stage = 'starting', progress_pct = 0
-           WHERE id = $1"#,
-    )
-    .bind(id)
-    .execute(&state.db)
-    .await
-    .map_err(|error| error.to_string())?;
-
     let proxy = state.config.docker_proxy_url.trim_end_matches('/');
     let client = http_client(INSPECT_TIMEOUT);
     let body = serde_json::json!({
@@ -422,6 +480,17 @@ async fn spawn_and_wait(
         remove_container(proxy).await;
         return Err(format!("docker start failed ({start_status}): {text}"));
     }
+
+    sqlx::query(
+        r#"UPDATE map_tile_jobs
+           SET status = 'running', started_at = now(),
+               progress_stage = 'starting', progress_pct = 0
+           WHERE id = $1"#,
+    )
+    .bind(id)
+    .execute(&state.db)
+    .await
+    .map_err(|error| error.to_string())?;
 
     let wait = wait_container(proxy);
     tokio::pin!(wait);
@@ -632,6 +701,14 @@ job: 25/100 worker: 8/8
         assert_eq!((stage.as_str(), pct), ("render", Some(40)));
         let (stage, pct) = resolve_progress("running", None, None, None);
         assert_eq!((stage.as_str(), pct), ("starting", Some(0)));
+    }
+
+    #[test]
+    fn simulated_steps_climb_then_finish() {
+        assert_eq!(next_simulated_step(None), Some(("starting", 0)));
+        assert_eq!(next_simulated_step(Some(0)), Some(("plan", 8)));
+        assert_eq!(next_simulated_step(Some(42)), Some(("render", 55)));
+        assert_eq!(next_simulated_step(Some(96)), None);
     }
 
     #[test]
