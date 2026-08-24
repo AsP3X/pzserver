@@ -978,14 +978,15 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
         }
     }
 
-    let steam_times = match pz_bridge::workshop::published_times(&ids).await {
-        Ok(times) => times,
+    let steam = match pz_bridge::workshop::published_meta(&ids).await {
+        Ok(meta) => meta,
         Err(error) => {
             tracing::warn!(%error, "Steam Workshop lookup for mod versions failed");
             BTreeMap::new()
         }
     };
 
+    let game_version = state.config.pz_game_version.as_str();
     for entry in entries.iter_mut() {
         if entry.workshop_id.is_empty() {
             continue;
@@ -995,11 +996,19 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
             &entry.workshop_id,
             &entry.mod_id,
             &acf,
+            Some(game_version),
         );
-        entry.installed_version = install.version.clone();
+        entry.installed_version = install.version.clone().or_else(|| {
+            steam
+                .get(&entry.workshop_id)
+                .and_then(|row| row.version.clone())
+        });
         entry.cached = install.cached;
-        entry.update_available =
-            install.update_available(steam_times.get(&entry.workshop_id).copied());
+        entry.update_available = install.update_available(
+            steam
+                .get(&entry.workshop_id)
+                .and_then(|row| row.time_updated),
+        );
     }
 }
 

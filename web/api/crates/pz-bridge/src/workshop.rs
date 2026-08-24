@@ -38,6 +38,8 @@ pub struct WorkshopDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_updated: Option<u64>,
     #[serde(skip)]
+    pub description: String,
+    #[serde(skip)]
     pub collection: bool,
 }
 
@@ -129,23 +131,41 @@ pub async fn lookup_many(ids: &[String]) -> Result<Vec<WorkshopDetails>, reqwest
     Ok(items)
 }
 
-/// Steam `time_updated` per id, no HTML scrape. Used by the mod list so a
-/// missing Required-items sidebar cannot stall the page.
-pub async fn published_times(ids: &[String]) -> Result<BTreeMap<String, u64>, reqwest::Error> {
-    let mut times = BTreeMap::new();
+/// What Steam last published for a Workshop file, without scraping HTML.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkshopRemote {
+    pub time_updated: Option<u64>,
+    /// Best-effort version parsed from the Workshop description or title.
+    pub version: Option<String>,
+}
+
+/// Steam `time_updated` (and a version string when the description has one).
+/// Used by the mod list so a missing Required-items sidebar cannot stall it.
+pub async fn published_meta(
+    ids: &[String],
+) -> Result<BTreeMap<String, WorkshopRemote>, reqwest::Error> {
+    let mut out = BTreeMap::new();
     if ids.is_empty() {
-        return Ok(times);
+        return Ok(out);
     }
 
     let client = steam_client(std::time::Duration::from_secs(4))?;
     for chunk in ids.chunks(LOOKUP_BATCH) {
         for item in fetch_published_files(&client, chunk).await? {
-            if let Some(at) = item.time_updated {
-                times.insert(item.workshop_id, at);
+            if !item.found {
+                continue;
             }
+            out.insert(
+                item.workshop_id,
+                WorkshopRemote {
+                    time_updated: item.time_updated,
+                    version: parse_modversion(&item.title)
+                        .or_else(|| parse_modversion(&item.description)),
+                },
+            );
         }
     }
-    Ok(times)
+    Ok(out)
 }
 
 fn steam_client(timeout: std::time::Duration) -> Result<reqwest::Client, reqwest::Error> {
@@ -291,6 +311,7 @@ pub fn inspect_install(
     workshop_id: &str,
     mod_id: &str,
     acf: &WorkshopAcf,
+    game_version: Option<&str>,
 ) -> WorkshopInstall {
     if workshop_id.is_empty() {
         return WorkshopInstall::default();
@@ -309,12 +330,13 @@ pub fn inspect_install(
 
     let item = root.join("content").join(WORKSHOP_APP_ID).join(workshop_id);
     install.cached = item.join("mods").is_dir();
-    install.version = read_modversion(&item, mod_id);
+    install.version = read_modversion(&item, mod_id, game_version);
     install
 }
 
-fn read_modversion(item: &Path, mod_id: &str) -> Option<String> {
-    for path in mod_info_paths(item, mod_id) {
+fn read_modversion(item: &Path, mod_id: &str, game_version: Option<&str>) -> Option<String> {
+    let game = game_version.and_then(parse_dotted_version);
+    for path in ranked_mod_info_paths(item, mod_id, game.as_deref()) {
         let Ok(body) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -325,41 +347,227 @@ fn read_modversion(item: &Path, mod_id: &str) -> Option<String> {
     None
 }
 
-fn mod_info_paths(item: &Path, mod_id: &str) -> Vec<PathBuf> {
-    let mods = item.join("mods");
-    let mut dirs = Vec::new();
-    if !mod_id.is_empty() {
-        dirs.push(mods.join(mod_id));
-    } else if let Ok(entries) = std::fs::read_dir(&mods) {
+fn ranked_mod_info_paths(item: &Path, mod_id: &str, game: Option<&[u32]>) -> Vec<PathBuf> {
+    let mut ranked: Vec<(u8, Vec<u32>, PathBuf)> = Vec::new();
+    for dir in resolve_mod_dirs(item, mod_id) {
+        let root_info = dir.join("mod.info");
+        if root_info.is_file() {
+            ranked.push((1, Vec::new(), root_info));
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
-            if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-                dirs.push(entry.path());
-                break;
+            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                continue;
             }
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(folder) = parse_folder_version(name) else {
+                continue;
+            };
+            let info = entry.path().join("mod.info");
+            if !info.is_file() {
+                continue;
+            }
+            let too_new =
+                game.is_some_and(|game| cmp_version(&folder, game) == std::cmp::Ordering::Greater);
+            let rank = if too_new { 2 } else { 0 };
+            ranked.push((rank, folder, info));
         }
     }
 
+    ranked.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| cmp_version(&right.1, &left.1))
+    });
+    ranked.into_iter().map(|(_, _, path)| path).collect()
+}
+
+/// Directory for this Mods= token. The folder name often matches, but some
+/// Workshop items (Chuckleberry's alert system) ship a different directory
+/// and put the load-list id only inside `mod.info`.
+fn resolve_mod_dirs(item: &Path, mod_id: &str) -> Vec<PathBuf> {
+    let mods = item.join("mods");
+    if !mods.is_dir() {
+        return Vec::new();
+    }
+
+    if !mod_id.is_empty() {
+        let exact = mods.join(mod_id);
+        if exact.is_dir() {
+            return vec![exact];
+        }
+    }
+
+    let mut declared = Vec::new();
+    let mut all = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&mods) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        all.push(path.clone());
+        if !mod_id.is_empty() && dir_declares_mod_id(&path, mod_id) {
+            declared.push(path);
+        }
+    }
+    if !declared.is_empty() {
+        return declared;
+    }
+    if all.len() == 1 {
+        return all;
+    }
+    all
+}
+
+fn dir_declares_mod_id(dir: &Path, mod_id: &str) -> bool {
+    for path in immediate_mod_infos(dir) {
+        let Ok(body) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if parse_mod_id(&body).is_some_and(|id| id.eq_ignore_ascii_case(mod_id)) {
+            return true;
+        }
+    }
+    false
+}
+
+fn immediate_mod_infos(dir: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    for dir in dirs {
-        paths.push(dir.join("42").join("mod.info"));
-        paths.push(dir.join("mod.info"));
+    let root = dir.join("mod.info");
+    if root.is_file() {
+        paths.push(root);
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return paths;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let info = entry.path().join("mod.info");
+        if info.is_file() {
+            paths.push(info);
+        }
     }
     paths
 }
 
-/// First `modversion=` line, stripped of CR.
-pub fn parse_modversion(body: &str) -> Option<String> {
+fn parse_mod_id(body: &str) -> Option<String> {
     for line in body.lines() {
         let line = line.trim().trim_end_matches('\r');
-        let Some(rest) = line.strip_prefix("modversion=") else {
+        let Some(rest) = line.strip_prefix("id=") else {
             continue;
         };
-        let version = rest.trim();
-        if !version.is_empty() {
-            return Some(version.to_owned());
+        let id = rest.trim();
+        if !id.is_empty() {
+            return Some(id.to_owned());
         }
     }
     None
+}
+
+/// `42`, `42.19`, or a range like `42.0-42.12` (upper bound).
+pub fn parse_folder_version(name: &str) -> Option<Vec<u32>> {
+    let name = name.trim();
+    if let Some((left, right)) = name.split_once('-')
+        && looks_like_version(left)
+        && looks_like_version(right)
+    {
+        return parse_dotted_version(right);
+    }
+    parse_dotted_version(name).filter(|_| looks_like_version(name))
+}
+
+fn looks_like_version(value: &str) -> bool {
+    let mut saw_digit = false;
+    for ch in value.chars() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            continue;
+        }
+        if ch != '.' {
+            return false;
+        }
+    }
+    saw_digit
+}
+
+pub fn parse_dotted_version(value: &str) -> Option<Vec<u32>> {
+    let trimmed = value.trim().trim_start_matches('v').trim_start_matches('V');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for piece in trimmed.split('.') {
+        if piece.is_empty() {
+            return None;
+        }
+        parts.push(piece.parse().ok()?);
+    }
+    if parts.is_empty() { None } else { Some(parts) }
+}
+
+fn cmp_version(left: &[u32], right: &[u32]) -> std::cmp::Ordering {
+    let n = left.len().max(right.len());
+    for index in 0..n {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        match a.cmp(&b) {
+            std::cmp::Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// `modversion=` first, then a `version=` that is not `versionMin`, then a
+/// `Version:` line of the kind Workshop descriptions use.
+pub fn parse_modversion(body: &str) -> Option<String> {
+    let mut fallback = None;
+    for line in body.lines() {
+        let line = line.trim().trim_end_matches('\r');
+        if let Some(rest) = line.strip_prefix("modversion=") {
+            let version = rest.trim();
+            if !version.is_empty() {
+                return Some(version.to_owned());
+            }
+        }
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("version=") && !lower.starts_with("versionmin=") {
+            let version = line[8..].trim();
+            if !version.is_empty() && fallback.is_none() {
+                fallback = Some(version.to_owned());
+            }
+        }
+    }
+    if fallback.is_some() {
+        return fallback;
+    }
+    extract_labels(body, "Version")
+        .into_iter()
+        .chain(extract_labels(body, "Mod Version"))
+        .next()
+        .or_else(|| trailing_version(body))
+}
+
+/// Last token of a one-line title like `Neat Crafting 1.6.20`. Needs at least
+/// two numeric parts so a lone `42` in a sentence is not a mod version.
+fn trailing_version(body: &str) -> Option<String> {
+    if body.contains('\n') {
+        return None;
+    }
+    let last = body.split_whitespace().last()?;
+    let trimmed = last.trim_start_matches(['v', 'V']);
+    let parts = parse_dotted_version(trimmed)?;
+    (parts.len() >= 2).then(|| trimmed.to_owned())
 }
 
 fn quoted_values(line: &str) -> Vec<&str> {
@@ -469,6 +677,7 @@ fn parse_published_file(workshop_id: &str, file: &serde_json::Value) -> Workshop
         map_folders: extract_labels(description, "Map Folder"),
         required_workshop_ids: extract_children(file),
         time_updated: json_u64(&file["time_updated"]),
+        description: description.to_owned(),
         collection: file_type == COLLECTION_FILE_TYPE,
     }
 }
@@ -563,6 +772,7 @@ fn not_found(workshop_id: &str) -> WorkshopDetails {
         map_folders: Vec::new(),
         required_workshop_ids: Vec::new(),
         time_updated: None,
+        description: String::new(),
         collection: false,
     }
 }
@@ -635,6 +845,7 @@ mod tests {
             map_folders: Vec::new(),
             required_workshop_ids: required.iter().map(|value| (*value).to_owned()).collect(),
             time_updated: None,
+            description: String::new(),
             collection: false,
         }
     }
@@ -925,12 +1136,143 @@ mod tests {
         let mut acf = WorkshopAcf::default();
         acf.installed.insert("3777446787".into(), 100);
 
-        let install = inspect_install(Some(root.path()), "3777446787", "KnoxRelay", &acf);
+        let install = inspect_install(
+            Some(root.path()),
+            "3777446787",
+            "KnoxRelay",
+            &acf,
+            Some("42.20.0"),
+        );
         assert!(install.cached);
         assert!(install.readable);
         assert_eq!(install.version.as_deref(), Some("1.24"));
         assert_eq!(install.time_updated, Some(100));
         assert!(!install.update_available(Some(100)));
         assert!(install.update_available(Some(101)));
+    }
+
+    #[test]
+    fn inspect_install_prefers_the_folder_that_matches_the_game() {
+        let root = tempfile::tempdir().expect("scratch workshop root");
+        let mod_dir = root
+            .path()
+            .join("content")
+            .join("108600")
+            .join("3437629766")
+            .join("mods")
+            .join("CleanUI");
+        std::fs::create_dir_all(mod_dir.join("42.15")).expect("42.15");
+        std::fs::create_dir_all(mod_dir.join("42.19")).expect("42.19");
+        std::fs::write(
+            mod_dir.join("42.15").join("mod.info"),
+            "id=CleanUI\nmodversion=2.6.0\n",
+        )
+        .expect("old");
+        std::fs::write(
+            mod_dir.join("42.19").join("mod.info"),
+            "id=CleanUI\nmodversion=2.7.6\n",
+        )
+        .expect("new");
+
+        let install = inspect_install(
+            Some(root.path()),
+            "3437629766",
+            "CleanUI",
+            &WorkshopAcf::default(),
+            Some("42.20.0"),
+        );
+        assert_eq!(install.version.as_deref(), Some("2.7.6"));
+    }
+
+    #[test]
+    fn inspect_install_finds_a_mod_whose_folder_is_not_the_load_id() {
+        let root = tempfile::tempdir().expect("scratch workshop root");
+        let mod_dir = root
+            .path()
+            .join("content")
+            .join("108600")
+            .join("3077900375")
+            .join("mods")
+            .join("chuckleberryModdingAlertSystem")
+            .join("42.0");
+        std::fs::create_dir_all(&mod_dir).expect("mod dir");
+        std::fs::write(
+            mod_dir.join("mod.info"),
+            "id=ChuckleberryFinnAlertSystem\nname=Alert\nmodversion=1.3\n",
+        )
+        .expect("mod.info");
+
+        let install = inspect_install(
+            Some(root.path()),
+            "3077900375",
+            "ChuckleberryFinnAlertSystem",
+            &WorkshopAcf::default(),
+            Some("42.20.0"),
+        );
+        assert!(install.cached);
+        assert_eq!(install.version.as_deref(), Some("1.3"));
+    }
+
+    #[test]
+    fn folder_versions_read_ranges_and_skip_names() {
+        assert_eq!(
+            parse_folder_version("42.19").as_deref(),
+            Some(&[42, 19][..])
+        );
+        assert_eq!(
+            parse_folder_version("42.0-42.12").as_deref(),
+            Some(&[42, 12][..])
+        );
+        assert_eq!(parse_folder_version("42").as_deref(), Some(&[42][..]));
+        assert_eq!(parse_folder_version("common"), None);
+        assert_eq!(parse_folder_version("media"), None);
+    }
+
+    #[test]
+    fn parse_modversion_reads_workshop_description_lines() {
+        assert_eq!(
+            parse_modversion("A UI overhaul.\nVersion: 1.6.20\nMod ID: Neat_Crafting\n"),
+            Some("1.6.20".to_owned())
+        );
+        assert_eq!(parse_modversion("versionMin=42.15\n"), None);
+        assert_eq!(
+            parse_modversion("Neat Crafting 1.6.20"),
+            Some("1.6.20".to_owned())
+        );
+    }
+
+    #[test]
+    fn live_cache_reads_versioned_b42_folders() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/server/steamapps/workshop");
+        if !root.join("content/108600/3437629766").is_dir() {
+            return;
+        }
+        let acf = WorkshopAcf::default();
+        let clean = inspect_install(Some(&root), "3437629766", "CleanUI", &acf, Some("42.20.0"));
+        assert_eq!(
+            clean.version.as_deref(),
+            Some("2.7.6"),
+            "CleanUI ships modversion in 42.19/, not 42/"
+        );
+        let bags = inspect_install(
+            Some(&root),
+            "2996978365",
+            "LazoloDynamicBackpackUpgrades",
+            &acf,
+            Some("42.20.0"),
+        );
+        assert_eq!(bags.version.as_deref(), Some("1.0.2"));
+        let alert = inspect_install(
+            Some(&root),
+            "3077900375",
+            "ChuckleberryFinnAlertSystem",
+            &acf,
+            Some("42.20.0"),
+        );
+        assert!(
+            alert.cached,
+            "folder is chuckleberryModdingAlertSystem, id is ChuckleberryFinnAlertSystem"
+        );
     }
 }
