@@ -126,7 +126,9 @@ export function ItemPickerDialog({
       closedby="closerequest"
       className={cn(
         'm-auto border border-fence-bright bg-ash p-0 text-bone backdrop:bg-void/80',
-        'max-h-[min(44rem,calc(100vh-2rem))] w-[min(40rem,calc(100vw-2rem))]',
+        // A height, not only a max-height: `flex-1` on the list otherwise
+        // collapses to zero and both the browse list and the search hits vanish.
+        'h-[min(44rem,calc(100vh-2rem))] w-[min(40rem,calc(100vw-2rem))]',
         'open:flex open:flex-col',
       )}
       onCancel={(event) => {
@@ -185,6 +187,8 @@ export function ItemPickerDialog({
             <Skeleton className="h-10" />
             <Skeleton className="h-10" />
           </div>
+        ) : catalogue.isError ? (
+          <p className="p-5 text-sm text-blood">{t('auth.unexpected_error')}</p>
         ) : items.length === 0 ? (
           <p className="p-5 text-sm text-dust">{t('economy.item_catalog_empty')}</p>
         ) : shown.length === 0 ? (
