@@ -14,6 +14,12 @@
  */
 
 import { headBitmap } from '@/lib/player-look'
+import {
+  clusterPieces,
+  exposedEdges,
+  parseRect,
+  type WorldRect,
+} from '@/lib/updating-merge'
 
 /** Where the pack is served from. Copied in at build time, not fetched cold. */
 export const WORLDMAP_URL = '/map/vanilla.json'
@@ -302,10 +308,8 @@ export function drawMapOverlays(
   toScreen: (x: number, y: number) => { x: number; y: number },
   zoom: number,
 ): void {
-  for (const job of options.updating ?? []) {
-    for (const rect of job.rects) {
-      drawConstruction(ctx, rect, toScreen)
-    }
+  for (const job of mergeUpdating(options.updating ?? [])) {
+    drawConstructionSite(ctx, job, toScreen)
     drawJobBubble(ctx, job, toScreen, options.width, options.height)
   }
 
@@ -352,51 +356,68 @@ export function drawMapOverlays(
 const TAPE_YELLOW = '#f5c400'
 const TAPE_BLACK = '#1a1a1a'
 
+function mergeUpdating(jobs: UpdatingOverlay[]): UpdatingOverlay[] {
+  const pieces = jobs.flatMap((job) => job.rects.map((rect) => ({ rect, data: job })))
+  return clusterPieces(pieces).map((group) => {
+    const slowest = group.reduce((best, piece) => {
+      const a = piece.data.percent ?? 0
+      const b = best.data.percent ?? 0
+      return a < b ? piece : best
+    })
+    return {
+      ...slowest.data,
+      rects: group.map((piece) => piece.rect),
+    }
+  })
+}
+
 /**
- * Hazard-tape border around a world rectangle. The same four world corners
- * become a diamond on the isometric basemap and a box on the schematic one.
- * Stripe phase marches so the overlay reads as in-progress, not a painted zone.
+ * Fill every cell, tape only the outer boundary. Adjacent cells share no
+ * interior stripe so they read as one site.
  */
-function drawConstruction(
+function drawConstructionSite(
   ctx: CanvasRenderingContext2D,
-  rect: number[],
+  job: UpdatingOverlay,
   toScreen: (x: number, y: number) => { x: number; y: number },
 ): void {
-  if (rect.length < 4) {
-    return
-  }
-  const [x, y, w, h] = rect
-  if (!(w > 0) || !(h > 0)) {
-    return
-  }
-  const corners = [
-    toScreen(x, y),
-    toScreen(x + w, y),
-    toScreen(x + w, y + h),
-    toScreen(x, y + h),
-  ]
+  const parsed: WorldRect[] = []
   ctx.save()
-  ctx.beginPath()
-  ctx.moveTo(corners[0]!.x, corners[0]!.y)
-  for (let i = 1; i < corners.length; i += 1) {
-    ctx.lineTo(corners[i]!.x, corners[i]!.y)
-  }
-  ctx.closePath()
   ctx.fillStyle = 'rgba(245, 196, 0, 0.16)'
+  ctx.beginPath()
+  for (const raw of job.rects) {
+    const rect = parseRect(raw)
+    if (!rect) {
+      continue
+    }
+    parsed.push(rect)
+    const corners = [
+      toScreen(rect.x, rect.y),
+      toScreen(rect.x + rect.w, rect.y),
+      toScreen(rect.x + rect.w, rect.y + rect.h),
+      toScreen(rect.x, rect.y + rect.h),
+    ]
+    ctx.moveTo(corners[0]!.x, corners[0]!.y)
+    for (let i = 1; i < corners.length; i += 1) {
+      ctx.lineTo(corners[i]!.x, corners[i]!.y)
+    }
+    ctx.closePath()
+  }
   ctx.fill()
 
   const width = 7
-  ctx.lineJoin = 'miter'
-  ctx.miterLimit = 4
-  ctx.lineWidth = width + 2
-  ctx.strokeStyle = TAPE_BLACK
-  ctx.stroke()
-
   const stripe = 12
   const phase = -((Date.now() / 28) % (stripe * 2))
-  for (let i = 0; i < corners.length; i += 1) {
-    const a = corners[i]!
-    const b = corners[(i + 1) % corners.length]!
+  ctx.lineJoin = 'miter'
+  ctx.miterLimit = 4
+  for (const edge of exposedEdges(parsed)) {
+    const a = toScreen(edge.x0, edge.y0)
+    const b = toScreen(edge.x1, edge.y1)
+    ctx.lineWidth = width + 2
+    ctx.strokeStyle = TAPE_BLACK
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
     stripeEdge(ctx, a.x, a.y, b.x, b.y, width, stripe, phase)
   }
   ctx.restore()
