@@ -11,7 +11,8 @@ ACCESS.local.txt
 # PHP / Composer
 *.cache
 
-# Laravel
+# Laravel panel (parked; live UI is web/). Local leftovers only.
+/app/
 
 # IDE
 .idea/
