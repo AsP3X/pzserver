@@ -339,7 +339,7 @@ function Do-MapTilesRecompress {
 
 # Copy an existing host pack into the named volume. Run with web-api down, or
 # against an empty volume — overwriting a live open sqlite is the Windows
-# filename-reservation trap again.
+# filename-reservation trap again. Prints size / percent / ETA while it copies.
 function Do-MapTilesImport {
     $src = Join-Path (Get-Location) "data\map-tiles\tiles.sqlite"
     if (-not (Test-Path $src)) {
@@ -347,9 +347,37 @@ function Do-MapTilesImport {
         exit 1
     }
     $hostDir = (Resolve-Path "data\map-tiles").Path
+    $script = (Resolve-Path "web\tools\map-tiles\import.sh").Path
     Write-Host "Importing $src into volume pz-map-tiles-sqlite..." -ForegroundColor Cyan
     docker volume create pz-map-tiles-sqlite | Out-Null
-    docker run --rm -v pz-map-tiles-sqlite:/pack -v "${hostDir}:/src:ro" alpine:3.20 sh -c "cp /src/tiles.sqlite /pack/tiles.sqlite && chown 10001:10001 /pack /pack/tiles.sqlite && chmod 775 /pack && chmod 664 /pack/tiles.sqlite && ls -lh /pack/tiles.sqlite"
+    # -t only when this is a real console. That is what makes isatty(2) true
+    # inside Alpine so import.sh can rewrite one line instead of printing more.
+    $run = @("--rm")
+    if (-not [Console]::IsOutputRedirected) {
+        $run += "-t"
+    }
+    $cols = 80
+    try {
+        if ([Console]::WindowWidth -gt 0) {
+            $cols = [Console]::WindowWidth
+        }
+    } catch { }
+    $run += @("-e", "COLUMNS=$cols")
+    if ($env:NO_COLOR) {
+        $run += @("-e", "NO_COLOR=$($env:NO_COLOR)")
+    }
+    if ($env:TERM) {
+        $run += @("-e", "TERM=$($env:TERM)")
+    } else {
+        $run += @("-e", "TERM=xterm-256color")
+    }
+    $run += @(
+        "-v", "pz-map-tiles-sqlite:/pack",
+        "-v", "${hostDir}:/src:ro",
+        "-v", "${script}:/import.sh:ro",
+        "alpine:3.20", "sh", "/import.sh"
+    )
+    docker run @run
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -721,7 +749,7 @@ function Do-Help {
     Write-Host "    .\make.ps1 map-tiles-region x,y,w,h   Redraw cells (or squares=x,y,w,h) (minutes)"
     Write-Host "    .\make.ps1 map-tiles-detail x,y,w,h   Paint z21 for those cells (minutes)"
     Write-Host "    .\make.ps1 map-tiles-recompress  Re-encode packed JPEGs at quality 70"
-    Write-Host "    .\make.ps1 map-tiles-import Copy data\map-tiles\tiles.sqlite into the named volume"
+    Write-Host "    .\make.ps1 map-tiles-import Copy data\map-tiles\tiles.sqlite into the named volume (prints progress)"
     Write-Host "    .\make.ps1 stop             Stop without removing containers"
     Write-Host "    .\make.ps1 logs [svc...]    Follow logs (all services, or the named ones)"
     Write-Host "    .\make.ps1 ps               List running containers"

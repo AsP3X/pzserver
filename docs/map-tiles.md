@@ -86,7 +86,9 @@ make map-tiles-import
 ```
 
 Do that with `web-api` down, or against an empty volume. Overwriting a pack
-the API already has open is the Windows filename-reservation trap.
+the API already has open is the Windows filename-reservation trap. A 14–24 GB
+copy takes a while; the command rewrites one progress line (percent, rate, ETA)
+while it runs, or prints occasional lines if stdout is not a terminal.
 
 ### Regional / tile jobs
 

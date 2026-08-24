@@ -175,12 +175,25 @@ map-tiles-recompress:
 
 # Copy an existing host pack into the named volume. Run with web-api down, or
 # against an empty volume — overwriting a live open sqlite is the Windows
-# filename-reservation trap again.
+# filename-reservation trap again. Prints an in-place progress line while it
+# copies. -t is only passed when stdout is a real tty: that is what makes
+# isatty(2) true inside Alpine so the script can use CR instead of newlines.
+# $(shell [ -t 1 ]) is the wrong test — make captures $(shell) stdout, so
+# that is never a tty.
 map-tiles-import:
 	@test -f data/map-tiles/tiles.sqlite || { echo "no data/map-tiles/tiles.sqlite to import"; exit 1; }
-	docker volume create pz-map-tiles-sqlite
-	docker run --rm -v pz-map-tiles-sqlite:/pack -v "$(CURDIR)/data/map-tiles:/src:ro" alpine:3.20 \
-		sh -c 'cp /src/tiles.sqlite /pack/tiles.sqlite && chown 10001:10001 /pack /pack/tiles.sqlite && chmod 775 /pack && chmod 664 /pack/tiles.sqlite && ls -lh /pack/tiles.sqlite'
+	@docker volume create pz-map-tiles-sqlite >/dev/null
+	@tty=; \
+	if [ -t 1 ]; then tty=-t; fi; \
+	cols=$${COLUMNS:-$$(tput cols 2>/dev/null || echo 80)}; \
+	docker run --rm $$tty \
+		-e TERM \
+		-e NO_COLOR \
+		-e COLUMNS="$$cols" \
+		-v pz-map-tiles-sqlite:/pack \
+		-v "$(CURDIR)/data/map-tiles:/src:ro" \
+		-v "$(CURDIR)/web/tools/map-tiles/import.sh:/import.sh:ro" \
+		alpine:3.20 sh /import.sh
 
 # SVC limits these to named services, e.g. make logs SVC="game-server web-api"
 restart:
@@ -492,7 +505,7 @@ help:
 	@echo "    map-tiles-region CELLS=\"x,y,w,h\" or SQUARES=\"x,y,w,h\" - Redraw that region (minutes)"
 	@echo "    map-tiles-detail CELLS=\"x,y,w,h\" - Paint z21 for those cells (minutes)"
 	@echo "    map-tiles-recompress - Re-encode packed JPEGs at quality 70"
-	@echo "    map-tiles-import - Copy data/map-tiles/tiles.sqlite into the named volume"
+	@echo "    map-tiles-import - Copy data/map-tiles/tiles.sqlite into the named volume (prints progress)"
 	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
 	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""
