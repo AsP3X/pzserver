@@ -21,11 +21,18 @@ pub struct TileMeta {
     pub max_level: Option<i64>,
     pub game_version: Option<String>,
     pub generated_at: Option<String>,
-    /// World-square rects `[x, y, w, h]` currently being re-rendered. Empty
-    /// when no job is queued or running. The map paints a construction border
-    /// over these until the job finishes.
+    /// Jobs currently painting. Empty when none are queued or running.
     #[serde(default)]
-    pub updating: Vec<[i32; 4]>,
+    pub updating: Vec<UpdatingRegion>,
+}
+
+/// One tile job's footprint plus the progress the renderer last wrote.
+#[derive(Clone, Debug, Serialize)]
+pub struct UpdatingRegion {
+    /// World-square rects `[x, y, w, h]`.
+    pub rects: Vec<[i32; 4]>,
+    pub percent: Option<i32>,
+    pub stage: String,
 }
 
 impl TileMeta {

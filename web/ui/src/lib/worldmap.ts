@@ -191,8 +191,15 @@ interface DrawOptions {
     erase?: boolean
     cellSize?: number
   } | null
-  /** World-square rects `[x, y, w, h]` a tile job is painting right now. */
-  updating?: number[][]
+  /** Tile jobs in flight, with a translated label for the bubble. */
+  updating?: UpdatingOverlay[]
+}
+
+export interface UpdatingOverlay {
+  rects: number[][]
+  percent: number | null
+  stage: string
+  label: string
 }
 
 export interface MapRect {
@@ -294,8 +301,11 @@ export function drawMapOverlays(
   toScreen: (x: number, y: number) => { x: number; y: number },
   zoom: number,
 ): void {
-  for (const rect of options.updating ?? []) {
-    drawConstruction(ctx, rect, toScreen)
+  for (const job of options.updating ?? []) {
+    for (const rect of job.rects) {
+      drawConstruction(ctx, rect, toScreen)
+    }
+    drawJobBubble(ctx, job, toScreen, options.width, options.height)
   }
 
   if (options.marker) {
@@ -433,6 +443,131 @@ function stripeEdge(
     along += stripe
     yellow = !yellow
   }
+}
+
+function worldCentroid(rects: number[][]): { x: number; y: number } | null {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const rect of rects) {
+    if (rect.length < 4) {
+      continue
+    }
+    const [x, y, w, h] = rect
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x + w)
+    maxY = Math.max(maxY, y + h)
+  }
+  if (!Number.isFinite(minX)) {
+    return null
+  }
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+}
+
+/**
+ * Speech bubble above the cell, comic-style, with a percent bar. The tail
+ * points at the world centroid so it stays in the middle of the diamond.
+ */
+function drawJobBubble(
+  ctx: CanvasRenderingContext2D,
+  job: UpdatingOverlay,
+  toScreen: (x: number, y: number) => { x: number; y: number },
+  canvasW: number,
+  canvasH: number,
+): void {
+  const centre = worldCentroid(job.rects)
+  if (!centre) {
+    return
+  }
+  const anchor = toScreen(centre.x, centre.y)
+  const label = job.label
+  ctx.save()
+  ctx.font = '600 12px ui-monospace, "JetBrains Mono", monospace'
+  const textW = Math.ceil(ctx.measureText(label).width)
+  const padX = 12
+  const padY = 8
+  const barH = 5
+  const barGap = 6
+  const bodyW = Math.max(132, textW + padX * 2)
+  const bodyH = 16 + padY * 2 + barGap + barH
+  const tail = 9
+  let left = Math.round(anchor.x - bodyW / 2)
+  let top = Math.round(anchor.y - bodyH - tail - 6)
+  left = Math.min(Math.max(8, left), canvasW - bodyW - 8)
+  top = Math.min(Math.max(8, top), canvasH - bodyH - tail - 8)
+  const right = left + bodyW
+  const bottom = top + bodyH
+  const midX = Math.min(Math.max(left + 18, anchor.x), right - 18)
+
+  ctx.beginPath()
+  const r = 10
+  ctx.moveTo(left + r, top)
+  ctx.arcTo(right, top, right, bottom, r)
+  ctx.arcTo(right, bottom, left, bottom, r)
+  ctx.lineTo(midX + tail, bottom)
+  ctx.lineTo(midX, bottom + tail)
+  ctx.lineTo(midX - tail, bottom)
+  ctx.arcTo(left, bottom, left, top, r)
+  ctx.arcTo(left, top, right, top, r)
+  ctx.closePath()
+  ctx.fillStyle = '#f4efe2'
+  ctx.fill()
+  ctx.lineWidth = 2
+  ctx.strokeStyle = TAPE_BLACK
+  ctx.stroke()
+
+  ctx.fillStyle = TAPE_BLACK
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  ctx.fillText(label, left + bodyW / 2, top + padY)
+
+  const barLeft = left + padX
+  const barTop = top + padY + 16 + barGap
+  const barW = bodyW - padX * 2
+  ctx.fillStyle = '#d4cbb8'
+  roundBar(ctx, barLeft, barTop, barW, barH, 2)
+  ctx.fill()
+  if (job.percent === null || job.percent === undefined) {
+    const stripe = 16
+    const shift = (Date.now() / 18) % (stripe * 2)
+    ctx.save()
+    ctx.beginPath()
+    roundBar(ctx, barLeft, barTop, barW, barH, 2)
+    ctx.clip()
+    for (let x = barLeft - stripe * 2 + shift; x < barLeft + barW; x += stripe * 2) {
+      ctx.fillStyle = TAPE_YELLOW
+      ctx.fillRect(x, barTop, stripe, barH)
+    }
+    ctx.restore()
+  } else {
+    const fill = Math.max(0, Math.min(1, job.percent / 100)) * barW
+    if (fill > 0) {
+      ctx.fillStyle = TAPE_YELLOW
+      roundBar(ctx, barLeft, barTop, fill, barH, 2)
+      ctx.fill()
+    }
+  }
+  ctx.restore()
+}
+
+function roundBar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
 }
 
 function cellCorners(

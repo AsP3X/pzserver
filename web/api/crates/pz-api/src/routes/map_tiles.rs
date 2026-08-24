@@ -25,8 +25,9 @@ pub fn routes() -> Router<AppState> {
 
 async fn meta(State(state): State<AppState>) -> Json<TileMeta> {
     let mut meta = state.map_tiles.meta();
-    match map_tile_jobs::active_world_rects(&state.db).await {
-        Ok(rects) => meta.updating = rects,
+    let progress = map_tile_jobs::read_progress_file(&state.config.map_tiles_path);
+    match map_tile_jobs::active_updating(&state.db, progress).await {
+        Ok(regions) => meta.updating = regions,
         Err(error) => {
             tracing::warn!(%error, "map tile jobs unread; construction overlay empty");
         }

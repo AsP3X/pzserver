@@ -130,9 +130,10 @@ skips the tick. Set the scan interval to `0` to disable.
 `make map-tiles-detail` does not — that is a vanilla z21 fill.
 
 While a job is `queued` or `running`, `GET /api/v1/map-tiles/meta` includes
-those cells as `updating` world-square rects. The player map paints a
-yellow-and-black construction border over them and drops it when the job
-finishes (`generated_at` moves, tile URLs cache-bust).
+those cells as `updating` (rects, `stage`, `percent`). The player map paints a
+yellow-and-black construction border and a speech bubble with live progress.
+The renderer writes `/pack/job_progress.json` as it goes; the bubble drops
+when the job finishes (`generated_at` moves, tile URLs cache-bust).
 
 The scanner only starts a container when `PZ_DATA_HOST` (and the other
 renderer binds) are **absolute** host paths. Relative `./data/zomboid` is

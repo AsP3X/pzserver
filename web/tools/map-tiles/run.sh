@@ -15,12 +15,36 @@ TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segmen
 PACK=/pack/tiles.sqlite
 PACK_ARGS=""
 MAP_INFO_BAK=
+PROGRESS=/pack/job_progress.json
+PROGRESS_WATCH=
+set_progress() {
+    python /tools/progress.py write "$PROGRESS" "$1" "$2" || true
+}
+watch_progress() {
+    # stage base span logfile
+    stop_progress_watch
+    python /tools/progress.py watch "$PROGRESS" "$4" "$1" "$2" "$3" &
+    PROGRESS_WATCH=$!
+}
+stop_progress_watch() {
+    if [ -n "${PROGRESS_WATCH:-}" ]; then
+        kill "$PROGRESS_WATCH" 2>/dev/null || true
+        wait "$PROGRESS_WATCH" 2>/dev/null || true
+        PROGRESS_WATCH=
+    fi
+}
 restore_map_info() {
     if [ -n "$MAP_INFO_BAK" ] && [ -f "$MAP_INFO_BAK" ]; then
         cp "$MAP_INFO_BAK" "$TREE/map_info.json"
     fi
 }
-trap restore_map_info EXIT
+on_exit() {
+    stop_progress_watch
+    rm -f "$PROGRESS" "$PROGRESS.tmp"
+    restore_map_info
+}
+trap on_exit EXIT
+set_progress starting 1
 
 cd /opt/pzmap2dzi
 
@@ -113,6 +137,7 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     fi
 
     echo "==> planning regional re-render: $SQUARES"
+    set_progress plan 6
     read -r MIN_LEVEL MAX_LEVEL < <(python /tools/levels.py "$PACK")
     # z21 is omitted from a full county run (~80 GB). A region can write it
     # for just these cells: either a world-change redraw (dirty 0–21) or a
@@ -136,6 +161,7 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     # restored: pzmap2dzi treats a tile already on disk as done, so the hole is
     # what tells it to redraw.
     echo "==> restoring merge inputs from the pack"
+    set_progress restore 10
     python /tools/unpack.py "$PACK" "$TREE/layer0_files" --only /tmp/restore.txt
 
     # dzi_cell_range is left alone, so the pyramid's geometry -- and therefore
@@ -166,6 +192,7 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
         else
             SNAP="/out/save-snapshot/${SAVE_GAME}"
             echo "==> snapshot save $SAVE_GAME for overlay"
+            set_progress snapshot 4
             rm -rf "/out/save-snapshot"
             python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt
             if [ ! -f "$SNAP/WorldDictionary.bin" ]; then
@@ -187,9 +214,11 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
 fi
 
 echo "==> deploy"
+set_progress prepare 16
 python main.py -c "$CONF" deploy
 
 echo "==> unpack"
+set_progress prepare 18
 python main.py -c "$CONF" unpack
 
 # omit_levels: 1 writes z21, but the tree's map_info is from the omit 2 pack.
@@ -210,12 +239,19 @@ fi
 # Keep the render's own output so the cache gate below can read it. Losing it
 # is how a run with 13,000 destroyed tiles got mistaken for a good one.
 RENDER_LOG=/tmp/render.log
+: > "$RENDER_LOG"
+watch_progress render 20 50 "$RENDER_LOG"
 python main.py -c "$CONF" render base 2>&1 | tee "$RENDER_LOG"
+stop_progress_watch
+set_progress render 70
 
 if [ -n "${WANT_SAVE:-}" ]; then
     echo "==> render save overlay"
+    watch_progress save 70 15 "$RENDER_LOG"
     python main.py -c "$CONF" render save 2>&1 | tee -a "$RENDER_LOG"
+    stop_progress_watch
     echo "==> composite save onto base"
+    set_progress composite 88
     python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
 fi
 
@@ -232,6 +268,7 @@ echo "==> verify geometry"
 python /tools/verify.py "$TREE/map_info.json"
 
 echo "==> pack"
+set_progress pack 92
 python /tools/pack.py "$TREE/layer0_files" "$PACK" \
     "game_version=${PZ_GAME_VERSION:-42.20.0}" \
     "tile_size=2048" \
@@ -241,6 +278,7 @@ python /tools/pack.py "$TREE/layer0_files" "$PACK" \
     $PACK_ARGS
 
 echo "==> done"
+set_progress pack 100
 ls -lh "$PACK"
 restore_map_info
 MAP_INFO_BAK=

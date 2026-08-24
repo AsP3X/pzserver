@@ -118,8 +118,15 @@ export interface TileMeta {
   max_level: number | null
   game_version: string | null
   generated_at: string | null
-  /** World-square rects `[x, y, w, h]` a tile job is currently painting. */
-  updating?: number[][]
+  /** Jobs currently painting. */
+  updating?: UpdatingJob[]
+}
+
+export interface UpdatingJob {
+  /** World-square rects `[x, y, w, h]`. */
+  rects: number[][]
+  percent: number | null
+  stage: string
 }
 
 let metaRequest: Promise<TileMeta> | null = null

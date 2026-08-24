@@ -12,6 +12,7 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
+use crate::services::map_tiles::UpdatingRegion;
 use crate::state::AppState;
 
 const CONTAINER: &str = "pz-map-tiles";
@@ -97,17 +98,45 @@ fn json_rects(value: &serde_json::Value) -> Vec<[i32; 4]> {
     out
 }
 
-pub async fn active_world_rects(db: &PgPool) -> Result<Vec<[i32; 4]>, sqlx::Error> {
-    let rows: Vec<(serde_json::Value, serde_json::Value)> = sqlx::query_as(
-        r#"SELECT squares, cells FROM map_tile_jobs
+pub async fn active_updating(
+    db: &PgPool,
+    progress: Option<(String, i32)>,
+) -> Result<Vec<UpdatingRegion>, sqlx::Error> {
+    let rows: Vec<(serde_json::Value, serde_json::Value, String)> = sqlx::query_as(
+        r#"SELECT squares, cells, status FROM map_tile_jobs
            WHERE status IN ('queued', 'running')"#,
     )
     .fetch_all(db)
     .await?;
     Ok(rows
         .into_iter()
-        .flat_map(|(squares, cells)| world_rects(&squares, &cells))
+        .filter_map(|(squares, cells, status)| {
+            let rects = world_rects(&squares, &cells);
+            if rects.is_empty() {
+                return None;
+            }
+            let (stage, percent) = match (status.as_str(), progress.as_ref()) {
+                ("queued", _) => ("queued".to_owned(), Some(0)),
+                (_, Some((stage, pct))) => (stage.clone(), Some(*pct)),
+                _ => ("starting".to_owned(), None),
+            };
+            Some(UpdatingRegion {
+                rects,
+                percent,
+                stage,
+            })
+        })
         .collect())
+}
+
+/// Last sidecar the renderer wrote next to `tiles.sqlite`.
+pub fn read_progress_file(pack: &std::path::Path) -> Option<(String, i32)> {
+    let path = pack.parent()?.join("job_progress.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let stage = value.get("stage")?.as_str()?.to_owned();
+    let percent = value.get("percent")?.as_i64()? as i32;
+    Some((stage, percent.clamp(0, 100)))
 }
 
 fn format_rects(rects: &[[i32; 4]]) -> String {
@@ -442,6 +471,18 @@ mod tests {
     #[test]
     fn world_rects_ignore_junk() {
         assert!(world_rects(&serde_json::json!({}), &serde_json::json!([1, 2, 3])).is_empty());
+    }
+
+    #[test]
+    fn progress_file_reads_stage_and_percent() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("tiles.sqlite");
+        std::fs::write(dir.path().join("job_progress.json"), r#"{"stage":"render","percent":42}"#)
+            .unwrap();
+        assert_eq!(
+            read_progress_file(&pack),
+            Some(("render".to_owned(), 42))
+        );
     }
 
     #[test]

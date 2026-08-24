@@ -16,7 +16,7 @@ import {
   refreshTileMeta,
   worldToDzi,
 } from '@/lib/iso-tiles'
-import type { TileMeta } from '@/lib/iso-tiles'
+import type { TileMeta, UpdatingJob } from '@/lib/iso-tiles'
 import {
   clampView,
   drawMapOverlays,
@@ -34,7 +34,8 @@ import {
   type Worldmap,
 } from '@/lib/worldmap'
 import { mergePins, useMapLayers } from '@/lib/map-layers'
-import { useTranslation } from '@/i18n/use-translation'
+import { useTranslation, type Replacements } from '@/i18n/use-translation'
+import type { TranslationKey } from '@/i18n/locales'
 
 export type { MapPin, MapRect, MapZone }
 
@@ -92,7 +93,29 @@ const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
  * basemap needs nothing external and is what everyone falls back to meanwhile.
  */
 const ISO_BASEMAP: boolean = true
-const NO_UPDATING: number[][] = []
+const NO_UPDATING: UpdatingJob[] = []
+
+const JOB_STAGE_KEY: Record<string, TranslationKey> = {
+  queued: 'map.job.queued',
+  starting: 'map.job.starting',
+  snapshot: 'map.job.snapshot',
+  plan: 'map.job.plan',
+  restore: 'map.job.restore',
+  prepare: 'map.job.prepare',
+  render: 'map.job.render',
+  save: 'map.job.save',
+  composite: 'map.job.composite',
+  pack: 'map.job.pack',
+}
+
+function jobCaption(
+  t: (key: TranslationKey, vars?: Replacements) => string,
+  job: UpdatingJob,
+): string {
+  const percent = job.percent === null || job.percent === undefined ? '…' : job.percent
+  const key = JOB_STAGE_KEY[job.stage] ?? 'map.job.running'
+  return t(key, { percent })
+}
 
 function readMode(): MapBasemap {
   if (typeof window === 'undefined') {
@@ -223,7 +246,7 @@ export function WorldmapView({
       })
     }
     pull(false)
-    const id = window.setInterval(() => pull(true), 2500)
+    const id = window.setInterval(() => pull(true), 1000)
     return () => {
       live = false
       window.clearInterval(id)
@@ -388,7 +411,7 @@ export function WorldmapView({
                 cellSize: drawnZones[0]?.cellSize ?? 16,
               }
             : null,
-        updating,
+        updating: updating.map((job) => ({ ...job, label: jobCaption(t, job) })),
       }
 
       if (modeRef.current === 'iso') {
@@ -431,6 +454,7 @@ export function WorldmapView({
     drawnZones,
     updating,
     tapeTick,
+    t,
   ])
 
   const zoomAt = useCallback(
