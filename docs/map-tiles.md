@@ -532,12 +532,19 @@ on `PYTHONPATH`.
 square; a map cell is a diamond in that square. `render_cell_range` paints
 only the diamond, JPEG fills the unpainted corners with black, and packing
 the zoom-out parents freezes that black rectangle (town in the middle,
-original map around it). Three things now prevent it: covering cells use
-`floor(max)+1` so an exact cell boundary is not dropped; unpainted leaf
-corners are filled from the previous tile; ancestors are rebuilt from the
-finished leaves instead of merged mid-paint. Re-run
-`make map-tiles-region CELLS="x,y"` (game-server already up; the image
-rebuilds itself) to replace tiles already packed black.
+original map around it). The live volume cannot heal from itself once those
+bytes are packed. The original county pack at `data/map-tiles/tiles.sqlite`
+(left there after import) is the underlay: leaf corners are copied from it,
+and any ancestor that is still mostly black is replaced from it. Keep that
+file. To drop the black square immediately:
+
+```
+make map-tiles-heal CELLS="41,38"
+```
+
+That copies the original tiles over the region (seconds). Then
+`make map-tiles-region CELLS="41,38"` paints live save on top. Hard-refresh
+the player map.
 
 **`RCON save skipped: Connection refused`.** RCON only listens after the
 dedicated server has finished loading the world. `./deploy.sh` recreates

@@ -22,6 +22,11 @@ except ImportError:  # pragma: no cover
 # JPEG of a transparent pixel is (0,0,0). A little headroom covers chroma
 # noise without swallowing dark grass or roof tiles (those sit well above).
 BLACK = 12
+# A regional JPEG with unpainted corners is a sea of (0,0,0). Real Knox
+# County tiles are almost never 15% pure black — even night-dark roofs sit
+# well above this. Used to decide "this tile is the black rectangle, throw
+# it away and put the original back".
+BLACK_FRACTION = 0.15
 
 
 def parse_keys(text: str) -> list[tuple[int, int, int]]:
@@ -40,6 +45,18 @@ def _keep_mask(rgb) -> "Image.Image":
     gm = g.point(lambda p: 255 if p > BLACK else 0)
     bm = b.point(lambda p: 255 if p > BLACK else 0)
     return ImageChops.lighter(ImageChops.lighter(rm, gm), bm)
+
+
+def mostly_black(path: Path, fraction: float = BLACK_FRACTION) -> bool:
+    """True when `fraction` of pixels are JPEG-black (unpainted corners)."""
+    if Image is None or not path.is_file():
+        return False
+    im = Image.open(path)
+    hist = im.convert("L").histogram()
+    n = im.size[0] * im.size[1]
+    if n <= 0:
+        return False
+    return sum(hist[: BLACK + 1]) / n >= fraction
 
 
 def fill_one(new_path: Path, underlay_path: Path) -> bool:

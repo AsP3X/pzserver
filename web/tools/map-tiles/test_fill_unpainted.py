@@ -5,7 +5,7 @@ import pytest
 pil = pytest.importorskip("PIL")
 from PIL import Image  # noqa: E402
 
-from fill_unpainted import fill, fill_one
+from fill_unpainted import fill, fill_one, mostly_black
 
 
 def test_black_corners_come_back_from_the_underlay(tmp_path):
@@ -31,6 +31,23 @@ def test_black_corners_come_back_from_the_underlay(tmp_path):
     # Unpainted corner is the underlay green, not black.
     r, g, b = out.getpixel((2, 2))
     assert g > 100 and r < 80
+
+
+def test_mostly_black_detects_the_unpainted_jpeg_frame(tmp_path):
+    black = tmp_path / "black.jpg"
+    green = tmp_path / "green.jpg"
+    Image.new("RGB", (32, 32), (0, 0, 0)).save(black, quality=95)
+    Image.new("RGB", (32, 32), (0, 180, 0)).save(green, quality=95)
+    mixed = tmp_path / "mixed.jpg"
+    im = Image.new("RGB", (32, 32), (0, 0, 0))
+    for x in range(16, 32):
+        for y in range(16, 32):
+            im.putpixel((x, y), (0, 180, 0))
+    im.save(mixed, quality=95)
+    assert mostly_black(black) is True
+    assert mostly_black(green) is False
+    # 75% black is the DZI-tile frame; 15% is the gate.
+    assert mostly_black(mixed) is True
 
 
 def test_missing_underlay_is_a_no_op(tmp_path):

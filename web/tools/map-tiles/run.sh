@@ -18,6 +18,13 @@ TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segmen
 # render scratch (html tree, texture cache). Regional jobs update this same
 # file the API is serving.
 PACK=/pack/tiles.sqlite
+# Original county pack, left on the host bind after import. The live volume
+# may already hold JPEG-black frames from a previous region job; filling
+# corners from those is a no-op. Prefer this copy for underlay / heal.
+PRISTINE="$PACK"
+if [ -s /out/tiles.sqlite ] && [ /out/tiles.sqlite != "$PACK" ]; then
+    PRISTINE=/out/tiles.sqlite
+fi
 PACK_ARGS=""
 MAP_INFO_BAK=
 PROGRESS=/pack/job_progress.json
@@ -64,16 +71,18 @@ echo "==> PYTHONPATH=$PYTHONPATH"
 # and finishes with a blank map. verify.py cannot catch that — it reads
 # map_info.json, which is geometry, not pixels. So check the art up front.
 TEXTURES=/pz/media/texturepacks
-if [ -z "$(ls -A "$TEXTURES"/*.pack 2>/dev/null)" ]; then
-    echo "FAIL: no texture packs at $TEXTURES" >&2
-    echo >&2
-    echo "The dedicated server install does not ship them. Point" >&2
-    echo "PZ_TEXTUREPACKS_HOST at a PZ client install's media/texturepacks" >&2
-    echo "(about 527 MB), or copy that folder onto the server once." >&2
-    echo "Rendering without it produces a blank map. See docs/map-tiles.md." >&2
-    exit 1
+if [ -z "${PZ_MAP_HEAL_ONLY:-}" ]; then
+    if [ -z "$(ls -A "$TEXTURES"/*.pack 2>/dev/null)" ]; then
+        echo "FAIL: no texture packs at $TEXTURES" >&2
+        echo >&2
+        echo "The dedicated server install does not ship them. Point" >&2
+        echo "PZ_TEXTUREPACKS_HOST at a PZ client install's media/texturepacks" >&2
+        echo "(about 527 MB), or copy that folder onto the server once." >&2
+        echo "Rendering without it produces a blank map. See docs/map-tiles.md." >&2
+        exit 1
+    fi
+    echo "==> textures: $(ls "$TEXTURES"/*.pack | wc -l) packs found"
 fi
-echo "==> textures: $(ls "$TEXTURES"/*.pack | wc -l) packs found"
 
 if [ ! -d /pack ]; then
     echo "FAIL: /pack is not mounted. tiles.sqlite lives on the pz-map-tiles-sqlite volume," >&2
@@ -173,16 +182,44 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     # does *not* merge them from half-painted children — that merge is the
     # black rectangle at zoom-out. We rebuild them from the finished leaves
     # after paint.
-    echo "==> restoring merge inputs from the pack"
+    echo "==> restoring merge inputs from $PRISTINE"
+    if [ "$PRISTINE" = "$PACK" ]; then
+        echo "==> no /out/tiles.sqlite; live pack is the underlay (already-black tiles cannot heal)"
+    else
+        echo "==> pristine county pack $PRISTINE (live pack may already be black)"
+    fi
     set_progress restore 10
-    python /tools/unpack.py "$PACK" "$TREE/layer0_files" --only /tmp/restore.txt
+    python /tools/unpack.py "$PRISTINE" "$TREE/layer0_files" --only /tmp/restore.txt
     if [ -s /tmp/keep.txt ]; then
-        echo "==> restoring ancestors (rebuilt after paint)"
-        python /tools/unpack.py "$PACK" "$TREE/layer0_files" --only /tmp/keep.txt
+        echo "==> restoring ancestors from pristine (rebuilt after paint)"
+        python /tools/unpack.py "$PRISTINE" "$TREE/layer0_files" --only /tmp/keep.txt
     fi
     if [ -s /tmp/leaves.txt ]; then
-        echo "==> snapshot leaf tiles as underlay for unpainted corners"
-        python /tools/unpack.py "$PACK" /tmp/underlay --only /tmp/leaves.txt
+        echo "==> snapshot leaf tiles as underlay from pristine"
+        python /tools/unpack.py "$PRISTINE" /tmp/underlay --only /tmp/leaves.txt
+    fi
+
+    if [ -n "${PZ_MAP_HEAL_ONLY:-}" ]; then
+        if [ "$PRISTINE" = "$PACK" ]; then
+            echo "FAIL: heal-only needs the original county pack at /out/tiles.sqlite" >&2
+            echo "(data/map-tiles/tiles.sqlite on the host, left there after import)." >&2
+            exit 1
+        fi
+        echo "==> heal-only: copy pristine tiles over the black region (no re-render)"
+        python /tools/unpack.py "$PRISTINE" "$TREE/layer0_files" --only /tmp/dirty.txt
+        python /tools/pack.py "$TREE/layer0_files" "$PACK" \
+            "game_version=${PZ_GAME_VERSION:-42.20.0}" \
+            "tile_size=2048" \
+            "width=2318656" \
+            "height=1019040" \
+            "generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --replace --only /tmp/dirty.txt --wal
+        echo "==> healed; re-run without PZ_MAP_HEAL_ONLY to paint live save on top"
+        ls -lh "$PACK"
+        chown 10001:10001 "$PACK" "$(dirname "$PACK")" 2>/dev/null || true
+        chmod 664 "$PACK" 2>/dev/null || true
+        chmod 775 "$(dirname "$PACK")" 2>/dev/null || true
+        exit 0
     fi
 
     # dzi_cell_range is left alone, so the pyramid's geometry -- and therefore
@@ -309,6 +346,7 @@ set_progress render 70
 if [ -n "$REGION" ] && [ -s /tmp/leaves.txt ] && [ -d /tmp/underlay ]; then
     echo "==> fill unpainted leaf corners from underlay"
     python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay
+    python /tools/heal_black.py /tmp/leaves.txt "$TREE/layer0_files" "$PRISTINE"
 fi
 
 if [ -n "${WANT_SAVE:-}" ]; then
@@ -349,6 +387,8 @@ python /tools/verify.py "$TREE/map_info.json"
 if [ -n "$REGION" ] && [ -s /tmp/keep.txt ]; then
     echo "==> rebuild ancestor tiles from children"
     python /tools/rebuild_pyramid.py /tmp/keep.txt "$TREE/layer0_files"
+    echo "==> replace any still-black ancestors from pristine"
+    python /tools/heal_black.py /tmp/keep.txt "$TREE/layer0_files" "$PRISTINE"
 fi
 
 echo "==> pack"

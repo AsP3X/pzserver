@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-heal map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -169,6 +169,14 @@ map-tiles-region:
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
 	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_SAVE=1 map-tiles
+
+# Copy original tiles over a region that a previous job packed black.
+# Needs data/map-tiles/tiles.sqlite (the import copy). Seconds, not minutes.
+map-tiles-heal:
+	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-heal CELLS=\"41,38\""; exit 1; }
+	@test -s data/map-tiles/tiles.sqlite || { echo "need data/map-tiles/tiles.sqlite (original county pack after import)"; exit 1; }
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_HEAL_ONLY=1 map-tiles
 
 # Paint z21 for a region without redrawing z20…0. Minutes per cell, not hours.
 # Missing z21 tiles 404 and the client upscales from z20 until this lands.
@@ -513,6 +521,7 @@ help:
 	@echo "    rebuild-game   - Rebuild game-server only"
 	@echo "    map-tiles      - Render the isometric basemap locally (hours, ~15 GB)"
 	@echo "    map-tiles-region CELLS=\"x,y,w,h\" or SQUARES=\"x,y,w,h\" - Redraw that region (minutes)"
+	@echo "    map-tiles-heal CELLS=\"x,y\" - Copy original tiles over a black region (seconds)"
 	@echo "    map-tiles-detail CELLS=\"x,y,w,h\" - Paint z21 for those cells (minutes)"
 	@echo "    map-tiles-recompress - Re-encode packed JPEGs at quality 70"
 	@echo "    map-tiles-import - Copy data/map-tiles/tiles.sqlite into the named volume (prints progress)"
