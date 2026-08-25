@@ -106,7 +106,12 @@ function groupIcon(id: string): LucideIcon {
   return GROUP_ICONS[id] ?? MoreHorizontal
 }
 
-type ConfigTab = ConfigSource | 'debug'
+type ExtraTab = 'map' | 'debug'
+type ConfigTab = ConfigSource | ExtraTab
+
+function isIniTab(tab: ConfigTab): tab is ConfigSource {
+  return tab === 'server' || tab === 'sandbox'
+}
 
 type Row = {
   field: ConfigField
@@ -353,15 +358,15 @@ export function AdminConfigPage() {
 
   function selectGroup(next: string) {
     setGroup(next)
-    writeConfigHash(tab === 'debug' ? source : tab, next)
+    writeConfigHash(isIniTab(tab) ? tab : source, next)
   }
 
   function selectTab(next: ConfigTab) {
     setTab(next)
     setQuery('')
     setNotice(null)
-    if (next === 'debug') {
-      writeConfigHash('debug', 'featured')
+    if (!isIniTab(next)) {
+      writeConfigHash(next, 'featured')
       return
     }
     const nextGroup = 'featured'
@@ -425,11 +430,13 @@ export function AdminConfigPage() {
           <p className="mt-2 max-w-2xl text-sm text-smoke">
             {tab === 'debug'
               ? t('admin.config_debug_description')
-              : source === 'sandbox'
-                ? t('admin.config_sandbox_description')
-                : t('admin.config_description')}
+              : tab === 'map'
+                ? t('admin.config_map_description')
+                : source === 'sandbox'
+                  ? t('admin.config_sandbox_description')
+                  : t('admin.config_description')}
           </p>
-          <div className="mt-3 max-w-lg">
+          <div className="mt-3 max-w-xl">
             <TabStrip
               label={t('admin.config_title')}
               items={[
@@ -439,6 +446,7 @@ export function AdminConfigPage() {
                   label: t('admin.config_source_sandbox'),
                   count: sandbox.data?.fields.length,
                 },
+                { id: 'map', label: t('admin.config_source_map') },
                 { id: 'debug', label: t('admin.config_source_debug') },
               ]}
               active={tab}
@@ -447,7 +455,7 @@ export function AdminConfigPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {tab !== 'debug' ? (
+          {isIniTab(tab) ? (
             <p className="font-mono text-[0.6875rem] text-dust">
               {dirtyKeys.length > 0
                 ? t('admin.config_unsaved', { count: dirtyKeys.length })
@@ -470,8 +478,8 @@ export function AdminConfigPage() {
       ) : null}
       {error ? <FormError>{error}</FormError> : null}
 
-      {tab === 'debug' ? (
-        <DebugSettings />
+      {tab === 'map' || tab === 'debug' ? (
+        <ExtraSettings tab={tab} />
       ) : isPending ? (
         <Skeleton className="min-h-0 flex-1" />
       ) : isError ? (
@@ -1001,7 +1009,7 @@ function RichTextInput({
   )
 }
 
-function DebugSettings() {
+function ExtraSettings({ tab }: { tab: ExtraTab }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const query = useQuery(adminMapTileSettingsQuery)
@@ -1057,7 +1065,7 @@ function DebugSettings() {
           ) : null}
         </div>
       ) : null}
-      {settings ? (
+      {settings && tab === 'map' ? (
         <Panel bracketed className="shrink-0">
           <PanelHeader label={t('admin.map_tiles_settings')} />
           <div className="flex flex-col gap-3 p-4">
@@ -1070,15 +1078,6 @@ function DebugSettings() {
                 onChange={(event) => save.mutate({ auto_rerender: event.target.checked })}
               />
               {t('admin.map_tiles_auto')}
-            </label>
-            <label className="flex items-center gap-2 text-sm text-bone">
-              <input
-                type="checkbox"
-                checked={settings.debug_overlay}
-                disabled={save.isPending}
-                onChange={(event) => save.mutate({ debug_overlay: event.target.checked })}
-              />
-              {t('admin.map_tiles_debug')}
             </label>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
               <Field
@@ -1112,6 +1111,22 @@ function DebugSettings() {
                 {t('common.save')}
               </Button>
             </div>
+          </div>
+        </Panel>
+      ) : null}
+      {settings && tab === 'debug' ? (
+        <Panel bracketed className="shrink-0">
+          <PanelHeader label={t('admin.config_debug_overlay')} />
+          <div className="flex flex-col gap-3 p-4">
+            <label className="flex items-center gap-2 text-sm text-bone">
+              <input
+                type="checkbox"
+                checked={settings.debug_overlay}
+                disabled={save.isPending}
+                onChange={(event) => save.mutate({ debug_overlay: event.target.checked })}
+              />
+              {t('admin.map_tiles_debug')}
+            </label>
           </div>
         </Panel>
       ) : null}
@@ -1156,6 +1171,9 @@ function readConfigHash(): { tab: ConfigTab; group: string } {
   if (raw === 'debug' || raw.startsWith('debug/')) {
     return { tab: 'debug', group: 'featured' }
   }
+  if (raw === 'map' || raw.startsWith('map/')) {
+    return { tab: 'map', group: 'featured' }
+  }
   if (raw === 'sandbox' || raw.startsWith('sandbox/')) {
     const group = raw.split('/')[1] || 'featured'
     return {
@@ -1173,7 +1191,6 @@ function writeConfigHash(tab: ConfigTab, group: string) {
   if (typeof window === 'undefined') {
     return
   }
-  const hash =
-    tab === 'debug' ? 'debug' : tab === 'sandbox' ? `sandbox/${group}` : group
+  const hash = !isIniTab(tab) ? tab : tab === 'sandbox' ? `sandbox/${group}` : group
   window.history.replaceState(null, '', `#${hash}`)
 }
