@@ -6,19 +6,19 @@ the giant rectangle around a regional re-render. The original tile from the
 pack still has the vanilla terrain in those corners. Copy it back wherever
 the new JPEG is near-black and the underlay is not.
 
-Must run *before* the save overlay: punching an open door also leaves a
-near-black hole, and filling that from the underlay would put the closed
-door back.
+Runs *after* the save overlay is composited, so anything the live world
+draws is already on the tile and only genuinely unpainted pixels are left to
+recover. That ordering is what removed the old open-door mask: there is no
+longer a hole here that vanilla must be kept out of.
 """
 import sys
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageChops, ImageDraw
+    from PIL import Image, ImageChops
 except ImportError:  # pragma: no cover
     Image = None
     ImageChops = None
-    ImageDraw = None
 
 # JPEG of a transparent pixel is (0,0,0). A little headroom covers chroma
 # noise without swallowing dark grass or roof tiles (those sit well above).
@@ -60,28 +60,7 @@ def mostly_black(path: Path, fraction: float = BLACK_FRACTION) -> bool:
     return sum(hist[: BLACK + 1]) / n >= fraction
 
 
-def _keep_open_holes(mask, punch, z: int, tx: int, ty: int) -> None:
-    """Do not paste vanilla closed doors into skip/punch diamonds.
-
-    Base render leaves those squares unpainted (JPEG-black) so the save
-    overlay can own them. Filling from the underlay would put the closed
-    sprite back, and compositing an open-door hole on top of it is a no-op.
-    """
-    if ImageDraw is None or not punch:
-        return
-    from composite import square_diamond
-
-    geo, rects = punch
-    draw = ImageDraw.Draw(mask)
-    size = mask.size[0]
-    for wx, wy, w, h in rects:
-        pts = square_diamond(geo, wx, wy, w, h, z, tx, ty)
-        if not any(-size <= px <= size * 2 and -size <= py <= size * 2 for px, py in pts):
-            continue
-        draw.polygon(pts, fill=255)
-
-
-def fill_one(new_path: Path, underlay_path: Path, punch=None, z=None, x=None, y=None) -> bool:
+def fill_one(new_path: Path, underlay_path: Path) -> bool:
     if Image is None:
         raise RuntimeError("Pillow is required to fill unpainted tile corners")
     if not new_path.is_file() or not underlay_path.is_file():
@@ -90,39 +69,28 @@ def fill_one(new_path: Path, underlay_path: Path, punch=None, z=None, x=None, y=
     old = Image.open(underlay_path).convert("RGB")
     if old.size != new.size:
         old = old.resize(new.size, Image.Resampling.LANCZOS)
-    mask = _keep_mask(new)
-    if punch is not None and z is not None:
-        _keep_open_holes(mask, punch, z, x, y)
-    filled = Image.composite(new, old, mask)
+    filled = Image.composite(new, old, _keep_mask(new))
     filled.save(new_path, quality=70, optimize=True)
     return True
 
 
-def fill(keys, new_dir: Path, underlay_dir: Path, punch=None) -> int:
+def fill(keys, new_dir: Path, underlay_dir: Path) -> int:
     n = 0
     for z, x, y in keys:
         dest = new_dir / str(z) / f"{x}_{y}.jpg"
         src = underlay_dir / str(z) / f"{x}_{y}.jpg"
-        if fill_one(dest, src, punch=punch, z=z, x=x, y=y):
+        if fill_one(dest, src):
             n += 1
     return n
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (4, 6):
+    if len(sys.argv) != 4:
         print(
-            "usage: fill_unpainted.py <leaves.txt> <layer0_files> <underlay dir>"
-            " [map_info.json save_squares.txt]",
+            "usage: fill_unpainted.py <leaves.txt> <layer0_files> <underlay dir>",
             file=sys.stderr,
         )
         raise SystemExit(2)
     keys = parse_keys(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    punch = None
-    if len(sys.argv) == 6:
-        from cells import Geometry, parse_rects
-
-        geo = Geometry.from_map_info(Path(sys.argv[4]))
-        rects = parse_rects(Path(sys.argv[5]).read_text(encoding="utf-8"))
-        punch = (geo, rects)
-    n = fill(keys, Path(sys.argv[2]), Path(sys.argv[3]), punch=punch)
+    n = fill(keys, Path(sys.argv[2]), Path(sys.argv[3]))
     print(f"filled unpainted corners on {n} leaf tiles")

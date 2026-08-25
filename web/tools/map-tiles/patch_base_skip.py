@@ -1,35 +1,40 @@
-"""Do not paint vanilla lotpack on squares the save overlay owns.
+"""Do not paint the one vanilla sprite the save overrides.
 
 Applied at image build against pzmap2dzi's BaseRender.square.
+
+An earlier version returned from `square` outright, which dropped the floor
+and the wall along with the door and left a black notch the save layer could
+not fill — the save chunk stores the door, not the lotpack geometry. Filter
+the tile list instead.
 """
 from pathlib import Path
 
 TARGET = Path("/opt/pzmap2dzi/pzmap2dzi/render_impl/base.py")
 
-OLD = """    def square(self, im_getter, dzi, ox, oy, sx, sy, layer):
-        oy += dzi.sqr_height >> 1  # center -> bottom center
-        cx, subx = divmod(sx, dzi.cell_size)
+OLD = """        for t in tiles:
+            tex = self.tl.get_by_name(t)
 """
 
-NEW = """    def square(self, im_getter, dzi, ox, oy, sx, sy, layer):
-        oy += dzi.sqr_height >> 1  # center -> bottom center
-        try:
-            from save_skip import covers as _save_covers
-            if _save_covers(sx, sy):
-                return
+NEW = """        try:
+            from save_skip import suppressed as _save_suppressed
+            _drop = _save_suppressed(sx, sy)
         except Exception as error:
+            _drop = ()
             if not getattr(self, '_save_skip_warned', False):
                 print('save-square skip failed: {}'.format(error))
                 self._save_skip_warned = True
-        cx, subx = divmod(sx, dzi.cell_size)
+        for t in tiles:
+            if t in _drop:
+                continue
+            tex = self.tl.get_by_name(t)
 """
 
 
 def apply(text: str) -> str:
-    if "from save_skip import covers" in text:
+    if "from save_skip import suppressed" in text:
         return text
     if OLD not in text:
-        raise SystemExit("BaseRender.square not found — pzmap2dzi base render has changed")
+        raise SystemExit("BaseRender.square tile loop not found — pzmap2dzi base render has changed")
     return text.replace(OLD, NEW, 1)
 
 

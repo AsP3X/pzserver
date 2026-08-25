@@ -139,14 +139,31 @@ The county pack is vanilla map files. Player construction and environment
 damage live in the dedicated-server save
 (`Saves/Multiplayer/<name>/map/{x}/{y}.bin` on B42).
 
+> **The save overlay is currently off.** A world-change job re-renders the
+> region from vanilla map files and stops there — player construction, open
+> doors and covered windows do **not** reach the map yet. See
+> *[Why the overlay is off](#why-the-overlay-is-off)*. Everything below
+> describes the pipeline as it runs with `PZ_MAP_SAVE_SPRITES=1`.
+
 A **world-change job** is the same regional job, plus a save overlay:
 
 1. Snapshot the dirty cells' chunks (the live files stay with PZ).
-2. Paint vanilla `base` for those cells, then `render save`.
-3. Punch the isometric footprint of those chunks out of the vanilla tiles
-   (an open door is a hole — compositing it over the closed vanilla sprite
-   would leave the closed door showing), then composite the save PNGs.
-4. WAL-replace those rows in `tiles.sqlite`.
+2. Scan the snapshot for sprites the live world contradicts and write them to
+   `save_skip.txt` as `x,y,tile-name` — one **sprite**, not one square.
+3. Paint vanilla `base` for those cells, suppressing exactly those named
+   tiles, then `render save`.
+4. Alpha-composite the save PNGs over the base, unmasked; then fill any
+   still-unpainted cell-range corner from the pristine underlay.
+5. WAL-replace those rows in `tiles.sqlite`.
+
+Step 2 is per-sprite for a reason. A square carries its floor and its wall as
+well as its door, and a B42 save chunk only stores the door — so skipping the
+whole square leaves a black notch nothing can paint back, and skipping the
+whole 8-square block turns the cell black with a few doors floating on it.
+There is also deliberately **no pixel-space mask** in the composite: a PZ
+sprite is anchored bottom-centre and stands about three diamond heights above
+its square, so clipping the overlay to that square's ground diamond keeps the
+doorstep and throws the door away.
 
 Door, window and curtain sprites come from the save object's *state*
 (`open` / smashed / glass-removed), not the default `sprite_id`. PZ's
@@ -156,11 +173,40 @@ offset +2 and are not flagged Door — they are mostly a hole).
 Player-built doors are `IsoThumpable` (class 18), same idea on
 `bit_header`. Opening a door only updates Java memory until `save` —
 the renderer issues RCON `save` (and the API does too) and waits for
-chunk mtimes before the snapshot. Vanilla lotpack paint is skipped on
-those 8-square blocks so the closed sprite cannot show through the
-open-door hole. The panel job must pass `PYTHONPATH=/tools` into the
-renderer; without it the skip/sprite patches never load and the door
-stays shut on the map.
+chunk mtimes before the snapshot. Vanilla lotpack paint drops the one
+closed-door tile on that square so the closed sprite cannot show through
+the open-door hole; everything else on the square still paints. The panel
+job must pass `PYTHONPATH=/tools` into the renderer; without it the
+skip/sprite patches never load and the door stays shut on the map.
+
+#### Why the overlay is off
+
+A chunk stores each object's sprite as an **id**, and the renderer turns that
+id into a tile name through `load_tile_defs` plus the save's own
+`WorldDictionary`. On this world the second half is missing: the file parses
+(5103 items, 46 objects) but reports `num_sprites = 0`, so
+`load_world_dict_sprites` returns nothing.
+
+That leaves `load_tile_defs` as the whole map, and its key space starts at
+**110000** — `update_tile_defs` uses `index_offset = 110000` for
+`newtiledefinitions.tiles` and refuses `file_no <= 0`. The save writes ids
+like `17463` and `94229`, below that. So:
+
+- an id that misses is dropped (**3875** distinct `missing tiledef for sprite`
+  in one cell), and
+- an id that lands resolves into the **wrong sheet**.
+
+The result is window frames on roads and curtains on hedges, on every square.
+No compositing strategy repairs it. Clipping the overlay to each changed
+square's ground diamond only replaced the stray sprites with black notches,
+because a PZ sprite is anchored bottom-centre and stands about three diamond
+heights above its square — the clip keeps the doorstep and throws the door
+away.
+
+Fixing this means finding the id space these chunks actually use for this
+B42 build and teaching `load_tile_defs` its offsets. Until then a
+world-change job paints vanilla, which is correct, and
+`PZ_MAP_SAVE_SPRITES=1` turns the overlay back on for that work.
 
 The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
 (default 120). The first pass seeds `map_tile_blocks` and does not enqueue.

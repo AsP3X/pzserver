@@ -43,63 +43,45 @@ def test_save_pixels_cover_the_base(tmp_path):
     assert out.getpixel((48, 48))[0] > 200
 
 
-def test_punch_limits_overlay_to_those_squares(tmp_path):
-    """A full-cell save PNG must not replace vanilla outside the door hole."""
-    from cells import Geometry
-    from composite import composite_one, square_diamond
-
-    geo = Geometry(x0=1_040_384, y0=-139_296, sqr=128, cell_size=256)
-    wx, wy = 34 * 256 + 4, 30 * 256 + 4
-    z = 20
-    span = geo.span(z)
-    px, py = geo.world_to_dzi(wx, wy)
-    tx, ty = int(px // span), int(py // span)
-    pts = square_diamond(geo, wx, wy, 1, 1, z, tx, ty)
-    cx = int(sum(p[0] for p in pts) / 4)
-    cy = int(sum(p[1] for p in pts) / 4)
-    size = geo.tile_size
+def test_a_tall_sprite_survives_whole(tmp_path):
+    """A PZ sprite is anchored bottom-centre and stands about three diamond
+    heights above the square it sits on. Clipping the overlay to that square's
+    ground diamond -- which is what the old punch/mask did -- kept the doorstep
+    and threw the door away."""
+    dirty = tmp_path / "dirty.txt"
+    dirty.write_text("20/1_2\n", encoding="utf-8")
     base_dir = tmp_path / "base"
     save_dir = tmp_path / "save"
     (base_dir / "20").mkdir(parents=True)
     (save_dir / "20").mkdir(parents=True)
-    Image.new("RGB", (size, size), (255, 0, 0)).save(
-        base_dir / "20" / f"{tx}_{ty}.jpg", quality=95
-    )
-    Image.new("RGBA", (size, size), (0, 255, 0, 255)).save(
-        save_dir / "20" / f"{tx}_{ty}.png"
-    )
-    punch = (geo, [(wx, wy, 1, 1)])
-    assert composite_one(base_dir, save_dir, z, tx, ty, punch=punch)
-    out = Image.open(base_dir / "20" / f"{tx}_{ty}.jpg").convert("RGB")
-    ix, iy = min(size - 1, max(0, cx)), min(size - 1, max(0, cy))
-    g = out.getpixel((ix, iy))[1]
-    assert g > 100, (out.getpixel((ix, iy)), ix, iy)
-    far_x = 0 if cx > size // 2 else size - 1
-    far_y = 0 if cy > size // 2 else size - 1
-    assert out.getpixel((far_x, far_y))[0] > 200
+    Image.new("RGB", (128, 128), (255, 0, 0)).save(base_dir / "20" / "1_2.jpg", quality=95)
+
+    # Ground diamond is the bottom strip; the sprite towers over it.
+    overlay = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    for x in range(48, 80):
+        for y in range(16, 112):
+            overlay.putpixel((x, y), (0, 255, 0, 255))
+    overlay.save(save_dir / "20" / "1_2.png")
+
+    assert composite(dirty, base_dir, save_dir) == 1
+    out = Image.open(base_dir / "20" / "1_2.jpg").convert("RGB")
+    assert out.getpixel((64, 24))[1] > 200, "top of the sprite was clipped away"
+    assert out.getpixel((64, 100))[1] > 200, "bottom of the sprite is missing"
+    assert out.getpixel((8, 8))[0] > 200, "vanilla outside the sprite was punched"
 
 
-def test_punch_clears_vanilla_inside_a_save_chunk():
-    """Open-door sprites are mostly transparent. Without a punch the closed
-    vanilla door stays visible through the hole."""
-    from cells import Geometry
-    from composite import punch_save_footprint, square_diamond
+def test_a_transparent_overlay_leaves_vanilla_alone(tmp_path):
+    """The save layer is sparse -- a B42 chunk stores doors and containers, not
+    the lotpack. Where it has nothing, the town must come through untouched."""
+    dirty = tmp_path / "dirty.txt"
+    dirty.write_text("20/1_2\n", encoding="utf-8")
+    base_dir = tmp_path / "base"
+    save_dir = tmp_path / "save"
+    (base_dir / "20").mkdir(parents=True)
+    (save_dir / "20").mkdir(parents=True)
+    Image.new("RGB", (64, 64), (12, 200, 40)).save(base_dir / "20" / "1_2.jpg", quality=95)
+    Image.new("RGBA", (64, 64), (0, 0, 0, 0)).save(save_dir / "20" / "1_2.png")
 
-    geo = Geometry(x0=1_040_384, y0=-139_296, sqr=128, cell_size=256)
-    wx, wy = 34 * 256, 30 * 256
-    z = 20
-    span = geo.span(z)
-    px, py = geo.world_to_dzi(wx + 4, wy + 4)
-    tx, ty = int(px // span), int(py // span)
-    pts = square_diamond(geo, wx, wy, 8, 8, z, tx, ty)
-    cx = int(sum(p[0] for p in pts) / 4)
-    cy = int(sum(p[1] for p in pts) / 4)
-    size = geo.tile_size
-    assert 0 <= cx < size and 0 <= cy < size
-
-    base = Image.new("RGBA", (size, size), (255, 0, 0, 255))
-    punch_save_footprint(base, (geo, [(wx, wy, 8, 8)]), z, tx, ty)
-    assert base.getpixel((cx, cy))[3] == 0
-    far_x = 0 if cx > size // 2 else size - 1
-    far_y = 0 if cy > size // 2 else size - 1
-    assert base.getpixel((far_x, far_y))[0] == 255
+    assert composite(dirty, base_dir, save_dir) == 1
+    out = Image.open(base_dir / "20" / "1_2.jpg").convert("RGB")
+    assert out.getpixel((32, 32))[1] > 150

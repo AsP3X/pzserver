@@ -1,24 +1,26 @@
 """Alpha-composite save-layer tiles onto the vanilla base JPEGs.
 
-`render save` paints the live world's sprites onto a transparent PNG in the
-same DZI grid. Occupied squares cover the original building; empty squares
-stay transparent so never-visited land keeps the vanilla tile. Dirty keys
-only — merge siblings stay untouched.
+`render save` paints the live world's objects onto a transparent PNG in the
+same DZI grid. A B42 save chunk stores what the world changed -- doors,
+windows, containers, what players put down -- not the lotpack geometry, so
+the overlay is sparse: a handful of sprites per square at most, transparent
+everywhere else. Blending it straight over vanilla is therefore safe, and is
+all this does.
 
-Doors and windows are the exception: an open door sprite is mostly a hole,
-so compositing it over the vanilla closed door leaves the closed door
-showing. Before blending, punch the isometric footprint of every save
-chunk out of the vanilla tile so the overlay is the authority there.
+There is deliberately no pixel-space mask here. Clipping the overlay to the
+ground diamond of each changed square used to be the "keep the town" guard,
+but a PZ sprite is anchored bottom-centre and stands about three diamond
+heights tall, so the clip threw away everything but the doorstep. The closed
+door is suppressed one sprite at a time in the base render instead (see
+save_skip.py), which leaves nothing for a mask to do.
 """
 import sys
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw, ImageChops
+    from PIL import Image
 except ImportError:  # pragma: no cover
     Image = None
-    ImageDraw = None
-    ImageChops = None
 
 OVERLAY_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 
@@ -44,7 +46,7 @@ def parse_dirty(text: str) -> list[tuple[int, int, int]]:
     return keys
 
 
-def composite_one(base_dir: Path, save_dir: Path, z: int, x: int, y: int, punch=None) -> bool:
+def composite_one(base_dir: Path, save_dir: Path, z: int, x: int, y: int) -> bool:
     if Image is None:
         raise RuntimeError("Pillow is required to composite save tiles")
     overlay = overlay_path(save_dir, z, x, y)
@@ -57,9 +59,6 @@ def composite_one(base_dir: Path, save_dir: Path, z: int, x: int, y: int, punch=
         base = Image.open(dest).convert("RGBA")
         if ov.size != base.size:
             ov = ov.resize(base.size, Image.Resampling.LANCZOS)
-        if punch:
-            punch_save_footprint(base, punch, z, x, y)
-            ov = mask_overlay_to_punch(ov, punch, z, x, y)
         base.alpha_composite(ov)
         out = base
     else:
@@ -68,84 +67,19 @@ def composite_one(base_dir: Path, save_dir: Path, z: int, x: int, y: int, punch=
     return True
 
 
-def square_diamond(geo, wx: int, wy: int, w: int, h: int, level: int, tx: int, ty: int):
-    """Tile-pixel quadrilateral of a world-square rect (iso parallelogram)."""
-    span = geo.span(level)
-    scale = geo.tile_size / span
-    origin_x = tx * span
-    origin_y = ty * span
-    corners = (
-        (wx, wy),
-        (wx + w, wy),
-        (wx + w, wy + h),
-        (wx, wy + h),
-    )
-    pts = []
-    for sx, sy in corners:
-        px, py = geo.world_to_dzi(sx, sy)
-        pts.append(((px - origin_x) * scale, (py - origin_y) * scale))
-    return pts
-
-
-def mask_overlay_to_punch(ov, punch, z: int, tx: int, ty: int):
-    """Keep overlay alpha only inside punch diamonds.
-
-    A save render paints every square in the cell. Compositing that PNG
-    over vanilla replaces the town with whatever the save layer drew —
-    including a forest of 1-pixel-wide tree/fence sprites on every tile.
-    Door/window state only needs the squares we already punched.
-    """
-    if ImageDraw is None:
-        return ov
-    geo, rects = punch
-    keep = Image.new("L", ov.size, 0)
-    draw = ImageDraw.Draw(keep)
-    size = ov.size[0]
-    for wx, wy, w, h in rects:
-        pts = square_diamond(geo, wx, wy, w, h, z, tx, ty)
-        if not any(-size <= px <= size * 2 and -size <= py <= size * 2 for px, py in pts):
-            continue
-        draw.polygon(pts, fill=255)
-    r, g, b, a = ov.split()
-    a = ImageChops.multiply(a, keep)
-    return Image.merge("RGBA", (r, g, b, a))
-
-
-def punch_save_footprint(base, punch, z: int, tx: int, ty: int) -> None:
-    """Clear vanilla pixels under every save chunk's isometric footprint."""
-    if ImageDraw is None:
-        return
-    geo, rects = punch
-    size = base.size[0]
-    mask = Image.new("L", base.size, 0)
-    draw = ImageDraw.Draw(mask)
-    drew = False
-    for wx, wy, w, h in rects:
-        pts = square_diamond(geo, wx, wy, w, h, z, tx, ty)
-        if not any(-size <= px <= size * 2 and -size <= py <= size * 2 for px, py in pts):
-            continue
-        draw.polygon(pts, fill=255)
-        drew = True
-    if not drew:
-        return
-    clear = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    base.paste(clear, mask=mask)
-
-
-def composite(dirty: Path, base_dir: Path, save_dir: Path, punch=None) -> int:
+def composite(dirty: Path, base_dir: Path, save_dir: Path) -> int:
     keys = parse_dirty(dirty.read_text(encoding="utf-8"))
     painted = 0
     for z, x, y in keys:
-        if composite_one(base_dir, save_dir, z, x, y, punch=punch):
+        if composite_one(base_dir, save_dir, z, x, y):
             painted += 1
     return painted
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (4, 6):
+    if len(sys.argv) != 4:
         print(
-            "usage: composite.py <dirty.txt> <base layer0_files> <save layer0_files>"
-            " [map_info.json save_squares.txt]",
+            "usage: composite.py <dirty.txt> <base layer0_files> <save layer0_files>",
             file=sys.stderr,
         )
         raise SystemExit(2)
@@ -153,12 +87,5 @@ if __name__ == "__main__":
     if not save_dir.is_dir():
         print(f"save overlay missing at {save_dir}; packing vanilla tiles")
         raise SystemExit(0)
-    punch = None
-    if len(sys.argv) == 6:
-        from cells import Geometry, parse_rects
-
-        geo = Geometry.from_map_info(Path(sys.argv[4]))
-        rects = parse_rects(Path(sys.argv[5]).read_text(encoding="utf-8"))
-        punch = (geo, rects)
-    n = composite(dirty, base_dir, save_dir, punch=punch)
+    n = composite(dirty, base_dir, save_dir)
     print(f"composited {n} save tiles onto the base")

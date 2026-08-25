@@ -238,6 +238,29 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     # fills (z21 of the shipped map) skip this — they have no world state.
     SAVE_GAME="${PZ_SAVE_GAME:-}"
     WANT_SAVE="${PZ_MAP_SAVE:-}"
+
+    # The overlay is off until chunk sprite ids resolve to tile names.
+    #
+    # This world's WorldDictionary.bin parses (5103 items, 46 objects) but
+    # reports num_sprites = 0, so load_world_dict_sprites returns nothing and
+    # load_tile_defs is the whole map. Its key space starts at 110000 --
+    # update_tile_defs uses index_offset 110000 for newtiledefinitions.tiles
+    # and refuses file_no <= 0 -- while the save writes ids like 17463 and
+    # 94229. A miss is dropped (3875 distinct "missing tiledef for sprite" in
+    # one cell) and a hit lands in the wrong sheet, so fence posts render as
+    # window frames and hedges as curtains, on every square.
+    #
+    # No compositing strategy fixes that; clipping the overlay to the door's
+    # ground diamond only hid it behind black notches. Paint vanilla, which is
+    # correct, until the mapping is. PZ_MAP_SAVE_SPRITES=1 re-enables it for
+    # whoever is working on the id space.
+    if [ -n "$WANT_SAVE$SAVE_GAME" ] && [ -z "${PZ_MAP_SAVE_SPRITES:-}" ]; then
+        echo "==> save overlay off (chunk sprite ids do not resolve; see run.sh)"
+        echo "    region paints vanilla only; set PZ_MAP_SAVE_SPRITES=1 to work on it"
+        WANT_SAVE=
+        SAVE_GAME=
+    fi
+
     if [ -z "$DETAIL_ONLY" ] && { [ -n "$WANT_SAVE" ] || [ -n "$SAVE_GAME" ]; }; then
         SAVE_GAME="${SAVE_GAME:-Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}}"
         LIVE_SAVE="/saves/${SAVE_GAME}"
@@ -275,14 +298,13 @@ print(f'{newest}')
             set_progress snapshot 4
             rm -rf "/out/save-snapshot"
             python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt /tmp/save_chunks.txt
-            python /tools/open_squares.py "$SNAP" /tmp/save_skip.txt || true
-            # Skip/punch only open door/window squares, never whole 8x8 chunks
-            # (those JPEG as a black field). Overlay still uses the snapshot.
-            if [ -s /tmp/save_skip.txt ]; then
-                cp /tmp/save_skip.txt /tmp/save_squares.txt
-            else
-                : > /tmp/save_squares.txt
-            fi
+            # One sprite per line, not a square and never a whole 8x8 chunk.
+            # A square carries its floor and wall as well as its door, and the
+            # save chunk only stores the door: skip the square and nothing
+            # paints the rest back (black notches), skip the chunk and the
+            # whole cell goes black.
+            python /tools/open_squares.py "$SNAP" /tmp/save_skip.txt \
+                /pz /pz/steamapps/workshop/content/108600 || true
             if [ ! -f "$SNAP/WorldDictionary.bin" ]; then
                 echo "==> save has no WorldDictionary.bin; region will be vanilla tiles only"
                 WANT_SAVE=
@@ -342,21 +364,6 @@ if grep -q "map_info mismatch" "$RENDER_LOG" || grep -q "Render stopped" "$RENDE
 fi
 set_progress render 70
 
-# Before the save overlay punches open doors (those holes are real). JPEG of
-# unpainted cell-range corners is not — copy vanilla back from the underlay.
-if [ -n "$REGION" ] && [ -s /tmp/leaves.txt ] && [ -d /tmp/underlay ]; then
-    echo "==> fill unpainted leaf corners from underlay"
-    if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then
-        python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay \
-            "$TREE/map_info.json" /tmp/save_squares.txt
-        # Do not heal leaves from pristine here: that would paste closed
-        # doors into the skip holes the overlay is about to own.
-    else
-        python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay
-        python /tools/heal_black.py /tmp/leaves.txt "$TREE/layer0_files" "$PRISTINE"
-    fi
-fi
-
 if [ -n "${WANT_SAVE:-}" ]; then
     echo "==> render save overlay"
     # Leftover save tiles look "complete" to incremental mode and the overlay
@@ -376,18 +383,24 @@ if [ -n "${WANT_SAVE:-}" ]; then
     if [ -s /tmp/leaves.txt ]; then
         COMPOSITE_KEYS=/tmp/leaves.txt
     fi
-    if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then
-        COMP_OUT=$(python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files" \
-            "$TREE/map_info.json" /tmp/save_squares.txt)
-    else
-        COMP_OUT=$(python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files")
-    fi
+    COMP_OUT=$(python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files")
     echo "$COMP_OUT"
-    if [ -s /tmp/save_squares.txt ] && echo "$COMP_OUT" | grep -q "composited 0 "; then
+    if [ -s /tmp/save_skip.txt ] && echo "$COMP_OUT" | grep -q "composited 0 "; then
         echo "FAIL: save overlay painted nothing but open-square skip listed doors." >&2
         echo "The live door state was snapshotted and then dropped (unit-range filter)." >&2
         exit 1
     fi
+fi
+
+# After the overlay, not before. The live world is on the tile by now, so
+# whatever is still JPEG-black is a genuinely unpainted cell-range corner and
+# the vanilla underlay is the right thing to put there. Doing this first is
+# what forced the old open-door mask; there is no hole to protect any more.
+if [ -n "$REGION" ] && [ -s /tmp/leaves.txt ] && [ -d /tmp/underlay ]; then
+    echo "==> fill unpainted leaf corners from underlay"
+    set_progress composite 90
+    python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay
+    python /tools/heal_black.py /tmp/leaves.txt "$TREE/layer0_files" "$PRISTINE"
 fi
 
 # Before anything is packed. If the cache filled up, the render evicted tiles

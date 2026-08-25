@@ -1,39 +1,53 @@
-"""Skip vanilla lotpack paint on squares the save overlay will cover.
+"""Which vanilla sprites the save overrides, looked up per world square.
 
-Vanilla always draws the closed door. The save layer then draws the open
-sprite, which is mostly a hole, so the closed door shows through. Not
-painting vanilla in those 8-square blocks leaves the overlay as the only
-pixels there.
+Read by the patched `BaseRender.square` (see patch_base_skip.py) once per
+worker process. The file is `x,y,tile-name` lines from open_squares.py.
+
+Suppressing the named tile and nothing else is the point: the square keeps
+its floor and its wall, so the only thing missing from the vanilla paint is
+the closed door the save layer is about to redraw open.
 """
 from pathlib import Path
 
-_RECTS: list[tuple[int, int, int, int]] | None = None
+_MAP: dict[tuple[int, int], frozenset[str]] | None = None
 SQUARES_FILE = Path("/tmp/save_skip.txt")
 
 
-def load_rects(path: Path = SQUARES_FILE) -> list[tuple[int, int, int, int]]:
+def parse(text: str) -> dict[tuple[int, int], frozenset[str]]:
+    """`"10,20,walls_doors_01_12\\n"` -> `{(10, 20): {"walls_doors_01_12"}}`."""
+    out: dict[tuple[int, int], set[str]] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Split twice only: a tile name is free to contain commas.
+        parts = line.split(",", 2)
+        if len(parts) != 3:
+            raise ValueError(f"save-skip line must be x,y,name -- got {line!r}")
+        x, y, name = int(parts[0]), int(parts[1]), parts[2].strip()
+        if name:
+            out.setdefault((x, y), set()).add(name)
+    return {key: frozenset(names) for key, names in out.items()}
+
+
+def load_map(path: Path = SQUARES_FILE) -> dict[tuple[int, int], frozenset[str]]:
     if not path.is_file():
         print(f"save-square skip: {path} missing; vanilla closed doors will show")
-        return []
+        return {}
     text = path.read_text(encoding="utf-8").strip()
     if not text:
         print(f"save-square skip: {path} empty; vanilla closed doors will show")
-        return []
-    from cells import parse_rects
-
-    rects = parse_rects(text)
-    print(f"save-square skip: {len(rects)} chunk rect(s) from {path}")
-    return rects
+        return {}
+    mapping = parse(text)
+    print(f"save-square skip: {sum(len(v) for v in mapping.values())} sprite(s) on {len(mapping)} square(s) from {path}")
+    return mapping
 
 
-def covers(sx: int, sy: int, rects=None) -> bool:
-    """True when world square (sx, sy) sits in a snapshotted save chunk."""
-    global _RECTS
-    if rects is None:
-        if _RECTS is None:
-            _RECTS = load_rects()
-        rects = _RECTS
-    for x, y, w, h in rects:
-        if x <= sx < x + w and y <= sy < y + h:
-            return True
-    return False
+def suppressed(sx: int, sy: int, mapping=None) -> frozenset[str]:
+    """Tile names vanilla must not paint at world square (sx, sy)."""
+    global _MAP
+    if mapping is None:
+        if _MAP is None:
+            _MAP = load_map()
+        mapping = _MAP
+    return mapping.get((sx, sy), frozenset())
