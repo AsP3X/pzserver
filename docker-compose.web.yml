@@ -290,6 +290,15 @@ services:
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
       PZ_SERVER_NAME: ${PZ_SERVER_NAME:-ZomboidServer}
       PZ_SAVE_GAME: Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}
+      # Flush loaded chunks (open doors) before the snapshot. game-server DNS
+      # only exists on pzserver-internal; proxy-network is the path out for
+      # pzdataspec download.
+      PZ_RCON_HOST: game-server
+      PZ_RCON_PORT: ${PZ_RCON_PORT:-27015}
+      PZ_RCON_PASSWORD: ${PZ_RCON_PASSWORD:-}
+    networks:
+      - pzserver-internal
+      - proxy-network
 
 # The one named volume in this stack. tiles.sqlite is a 24 GB random-read
 # database; on Windows a bind of that file through Docker Desktop's 9p is

@@ -450,6 +450,9 @@ async fn spawn_and_wait(
             "PZ_MAP_DETAIL=21".to_owned(),
             // Paint the live save on top of vanilla for those cells.
             "PZ_MAP_SAVE=1".to_owned(),
+            format!("PZ_RCON_HOST={}", state.config.rcon.host),
+            format!("PZ_RCON_PORT={}", state.config.rcon.port),
+            format!("PZ_RCON_PASSWORD={}", state.config.rcon.password),
         ],
         "HostConfig": renderer_host_config(
             &state.config.pz_server_host,
@@ -474,6 +477,11 @@ async fn spawn_and_wait(
         let text = create.text().await.unwrap_or_default();
         return Err(format!("docker create failed ({create_status}): {text}"));
     }
+
+    // Default bridge cannot resolve `game-server` for the RCON flush, and
+    // pzserver-internal cannot reach GitHub for pzdataspec. Join both.
+    connect_network(proxy, "pzserver-internal").await;
+    connect_network(proxy, "proxy-network").await;
 
     let start = client
         .post(format!("{proxy}/containers/{CONTAINER}/start"))
@@ -586,6 +594,22 @@ async fn container_logs(proxy: &str) -> Vec<String> {
         return Vec::new();
     };
     pz_bridge::parse_docker_logs(&raw)
+}
+
+async fn connect_network(proxy: &str, network: &str) {
+    let url = format!(
+        "{}/networks/{network}/connect",
+        proxy.trim_end_matches('/')
+    );
+    let body = serde_json::json!({ "Container": CONTAINER });
+    if let Err(error) = http_client(INSPECT_TIMEOUT)
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+    {
+        tracing::warn!(network, %error, "map-tiles network join skipped");
+    }
 }
 
 async fn remove_container(proxy: &str) {

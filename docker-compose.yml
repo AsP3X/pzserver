@@ -91,6 +91,8 @@ services:
       LOG: 1
       # Wipe needs to delete game-owned save trees from inside the container.
       EXEC: 1
+      # Tile jobs join pzserver-internal (RCON save) and proxy-network (pzdataspec).
+      NETWORKS: 1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

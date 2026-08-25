@@ -123,9 +123,11 @@ A **world-change job** is the same regional job, plus a save overlay:
 4. WAL-replace those rows in `tiles.sqlite`.
 
 Door, window and curtain sprites come from the save object's *state*
-(`open` / smashed / glass-removed), not the default `sprite_id`. The API
-issues an RCON `save` before the snapshot so chunk files match what players
-just did.
+(`open` / smashed / glass-removed), not the default `sprite_id`. Opening a
+door only updates Java memory — the renderer issues RCON `save` (and the
+API does too) before the snapshot so chunk files match what players just
+did. Vanilla lotpack paint is skipped on those 8-square blocks so the
+closed sprite cannot show through the open-door hole.
 
 The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
 (default 120). The first pass seeds `map_tile_blocks` and does not enqueue.

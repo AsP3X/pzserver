@@ -191,6 +191,13 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
             echo "==> no save at $LIVE_SAVE; region will be vanilla tiles only"
         else
             SNAP="/out/save-snapshot/${SAVE_GAME}"
+            echo "==> flush live chunks so door/window state is on disk"
+            set_progress snapshot 2
+            if python /tools/rcon_save.py; then
+                sleep 2
+            else
+                echo "==> continuing without RCON save; open doors may still be closed on disk"
+            fi
             echo "==> snapshot save $SAVE_GAME for overlay"
             set_progress snapshot 4
             rm -rf "/out/save-snapshot"
