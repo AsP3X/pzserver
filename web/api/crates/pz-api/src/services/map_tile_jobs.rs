@@ -692,10 +692,9 @@ fn renderer_env(
         format!("PZ_GAME_VERSION={game_version}"),
         format!("PZ_SAVE_GAME={save_game}"),
         format!("PZ_SERVER_NAME={server_name}"),
-        // Regional jobs write z21 for these cells. A full county of z21
-        // is tens of GB; this is how it accumulates, one job at a time.
-        "PZ_MAP_DETAIL=21".to_owned(),
-        // Paint the live save on top of vanilla for those cells.
+        // Paint the live save at packed depth (z20). z21 is not in the county
+        // pack; merging z20 from missing z21 children paints a black square.
+        // Fill z21 later with `make map-tiles-detail`.
         "PZ_MAP_SAVE=1".to_owned(),
         format!("PZ_RCON_HOST={rcon_host}"),
         format!("PZ_RCON_PORT={rcon_port}"),

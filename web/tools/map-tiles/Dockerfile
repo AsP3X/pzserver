@@ -19,7 +19,8 @@ ARG PZMAP2DZI_REF=main
 RUN git clone --depth 1 --branch "${PZMAP2DZI_REF}" \
         https://github.com/cff29546/pzmap2dzi.git /opt/pzmap2dzi \
     && pip install --no-cache-dir -r /opt/pzmap2dzi/requirements.txt \
-    && pip install --no-cache-dir lark
+    && pip install --no-cache-dir lark \
+    && git clone --depth 1 https://github.com/cff29546/pzdataspec.git /opt/pzdataspec
 
 WORKDIR /opt/pzmap2dzi
 
@@ -28,9 +29,9 @@ WORKDIR /opt/pzmap2dzi
 # to sit beside vanilla.txt, default_b42.txt and mod/ — putting it anywhere else
 # makes the render fail looking for map descriptions that are not there.
 COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
-COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py chunks.py set_save_game.py snapshot_save.py composite.py progress.py run.sh patch_scheduler.py chunk_sprites.py patch_save_render.py rcon_save.py save_skip.py patch_base_skip.py wait_save.py ensure_map_info.py /tools/
+COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py chunks.py set_save_game.py snapshot_save.py composite.py progress.py run.sh patch_scheduler.py chunk_sprites.py patch_save_render.py rcon_save.py save_skip.py patch_base_skip.py wait_save.py ensure_map_info.py open_squares.py /tools/
 # region.py and set_render_range.py import cells.py by name.
-ENV PYTHONPATH=/tools
+ENV PYTHONPATH=/tools:/opt/pzdataspec
 # omit_levels + cache eviction paints black holes; pin children until merged.
 # Save overlay must paint live door/window sprites, not vanilla closed ones.
 RUN python /tools/patch_scheduler.py && python /tools/patch_save_render.py && python /tools/patch_base_skip.py

@@ -145,10 +145,16 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     set_progress plan 6
     read -r MIN_LEVEL MAX_LEVEL < <(python /tools/levels.py "$PACK")
     # z21 is omitted from a full county run (~80 GB). A region can write it
-    # for just these cells: either a world-change redraw (dirty 0–21) or a
-    # detail-only fill (paint z21, restore z20…0 so they skip).
+    # for just these cells with --detail-only. A world-change job must paint
+    # at the packed depth (z20): omit_levels 1 merges z20 from z21 children,
+    # and those siblings are not in the pack, so parents come out black.
     DETAIL="${PZ_MAP_DETAIL:-}"
     DETAIL_ONLY="${PZ_MAP_DETAIL_ONLY:-}"
+    WANT_SAVE="${PZ_MAP_SAVE:-}"
+    if [ -z "$DETAIL_ONLY" ] && { [ -n "$WANT_SAVE" ] || [ -n "${PZ_SAVE_GAME:-}" ]; } && [ -n "$DETAIL" ]; then
+        echo "==> world-change paint at packed level $MAX_LEVEL (not z$DETAIL: those tiles are not in the pack)"
+        DETAIL=
+    fi
     if [ -n "$DETAIL_ONLY" ]; then
         DETAIL="${DETAIL:-21}"
         echo "==> detail-only fill: level $DETAIL"
@@ -220,7 +226,15 @@ print(f'{newest}')
             echo "==> snapshot save $SAVE_GAME for overlay"
             set_progress snapshot 4
             rm -rf "/out/save-snapshot"
-            python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt /tmp/save_squares.txt
+            python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt /tmp/save_chunks.txt
+            python /tools/open_squares.py "$SNAP" /tmp/save_skip.txt || true
+            # Skip/punch only open door/window squares, never whole 8x8 chunks
+            # (those JPEG as a black field). Overlay still uses the snapshot.
+            if [ -s /tmp/save_skip.txt ]; then
+                cp /tmp/save_skip.txt /tmp/save_squares.txt
+            else
+                : > /tmp/save_squares.txt
+            fi
             if [ ! -f "$SNAP/WorldDictionary.bin" ]; then
                 echo "==> save has no WorldDictionary.bin; region will be vanilla tiles only"
                 WANT_SAVE=

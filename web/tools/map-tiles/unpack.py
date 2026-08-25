@@ -39,6 +39,7 @@ def unpack(db_path: Path, tiles_dir: Path, skip: set | None = None,
         (level_dir / f"{x}_{y}.jpg").write_bytes(data)
         written += 1
 
+    missing = 0
     if only is not None:
         # Look each one up by key. Scanning the table instead would pull every
         # blob off disk to keep a handful of them -- on a 24 GB pack over a
@@ -51,6 +52,8 @@ def unpack(db_path: Path, tiles_dir: Path, skip: set | None = None,
             ).fetchone()
             if row is not None:
                 emit(z, x, y, row[0])
+            else:
+                missing += 1
     else:
         for z, x, y, data in con.execute("SELECT z, x, y, data FROM tiles ORDER BY z, x, y"):
             if (z, x, y) in skip:
@@ -58,6 +61,13 @@ def unpack(db_path: Path, tiles_dir: Path, skip: set | None = None,
             emit(z, x, y, data)
 
     con.close()
+    if only is not None and missing:
+        print(
+            f"WARNING: {missing} merge siblings were not in the pack "
+            "(z21 is never stored on a full county run). Painting those "
+            "parents would merge black quadrants.",
+            file=sys.stderr,
+        )
     return written
 
 

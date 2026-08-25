@@ -8,7 +8,7 @@ pixels there.
 from pathlib import Path
 
 _RECTS: list[tuple[int, int, int, int]] | None = None
-SQUARES_FILE = Path("/tmp/save_squares.txt")
+SQUARES_FILE = Path("/tmp/save_skip.txt")
 
 
 def load_rects(path: Path = SQUARES_FILE) -> list[tuple[int, int, int, int]]:

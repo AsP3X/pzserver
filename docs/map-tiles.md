@@ -518,6 +518,14 @@ A seeded ISO_DZI file is a few hundred pixels off. Current `run.sh` deletes
 The map-tiles image installs it. Rebuild that image (`make map-tiles-region`
 already does).
 
+**Giant black square after a region job.** Two causes, both fixed: (1) a
+world-change job used omit_levels 1 / z21, but the county pack has no z21
+tiles, so z20 parents merged missing children as black; world-change now
+paints at packed z20. (2) vanilla paint was skipped on every 8×8 save
+chunk, and JPEG filled the holes with black; skip/punch is only 1×1 open
+door squares. Re-run `make map-tiles-region CELLS="x,y"` to replace the
+black tiles.
+
 **`RCON save skipped: Connection refused`.** RCON only listens after the
 dedicated server has finished loading the world. `./deploy.sh` recreates
 `game-server`, so a region job started immediately will refuse until the
