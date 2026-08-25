@@ -156,7 +156,7 @@ map-tiles:
 	@# reaches the texture check.
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" map-tiles
+	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" map-tiles
 
 # Redraw part of the map instead of all of it, for when the world has changed:
 #   make map-tiles-region SQUARES="8704,7680,256,256"  x, y, width, height in world squares
@@ -168,7 +168,7 @@ map-tiles-region:
 	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-region SQUARES=\"8704,7680,256,256\""; exit 1; }
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_SAVE=1 map-tiles
+	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_SAVE=1 map-tiles
 
 # Paint z21 for a region without redrawing z20…0. Minutes per cell, not hours.
 # Missing z21 tiles 404 and the client upscales from z20 until this lands.
@@ -176,12 +176,12 @@ map-tiles-detail:
 	@test -n "$(CELLS)$(SQUARES)" || { echo "set CELLS= or SQUARES=, e.g. make map-tiles-detail CELLS=\"34,30\""; exit 1; }
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_DETAIL_ONLY=1 -e PZ_MAP_DETAIL=21 map-tiles
+	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_DETAIL_ONLY=1 -e PZ_MAP_DETAIL=21 map-tiles
 
 # Re-encode packed JPEGs at quality 70 in place (WAL). Does not VACUUM.
 map-tiles-recompress:
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm --entrypoint python map-tiles /tools/recompress.py /pack/tiles.sqlite
+	$(COMPOSE) --profile tools run --rm --no-deps --entrypoint python map-tiles /tools/recompress.py /pack/tiles.sqlite
 
 # Copy an existing host pack into the named volume. Run with web-api down, or
 # against an empty volume — overwriting a live open sqlite is the Windows

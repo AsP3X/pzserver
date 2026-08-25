@@ -16,11 +16,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ARG PZMAP2DZI_REF=main
+# The GitHub *source* tree of pzdataspec has KSY files under data_spec/spec/.
+# The *release zip* has compiled parsers at pzdataspec/spec/v249/. Importing
+# the source tree (PYTHONPATH=/opt/pzdataspec) shadows the zip and crashes:
+# FileNotFoundError: .../pzdataspec/spec
+ARG PZDATASPEC_ZIP=https://github.com/cff29546/pzdataspec/releases/download/v1.12.249/pzdataspec-v1.12.249.zip
 RUN git clone --depth 1 --branch "${PZMAP2DZI_REF}" \
         https://github.com/cff29546/pzmap2dzi.git /opt/pzmap2dzi \
     && pip install --no-cache-dir -r /opt/pzmap2dzi/requirements.txt \
     && pip install --no-cache-dir lark \
-    && git clone --depth 1 https://github.com/cff29546/pzdataspec.git /opt/pzdataspec
+    && python -c "import io,os,urllib.request,zipfile; z=zipfile.ZipFile(io.BytesIO(urllib.request.urlopen('$PZDATASPEC_ZIP').read())); z.extractall('/opt')"
 
 WORKDIR /opt/pzmap2dzi
 
@@ -31,7 +36,7 @@ WORKDIR /opt/pzmap2dzi
 COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
 COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py chunks.py set_save_game.py snapshot_save.py composite.py progress.py run.sh patch_scheduler.py chunk_sprites.py patch_save_render.py rcon_save.py save_skip.py patch_base_skip.py wait_save.py ensure_map_info.py open_squares.py /tools/
 # region.py and set_render_range.py import cells.py by name.
-ENV PYTHONPATH=/tools:/opt/pzdataspec
+ENV PYTHONPATH=/tools:/opt
 # omit_levels + cache eviction paints black holes; pin children until merged.
 # Save overlay must paint live door/window sprites, not vanilla closed ones.
 RUN python /tools/patch_scheduler.py && python /tools/patch_save_render.py && python /tools/patch_base_skip.py

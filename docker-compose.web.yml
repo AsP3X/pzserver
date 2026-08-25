@@ -244,9 +244,8 @@ services:
     pull_policy: build
     container_name: pz-map-tiles
     profiles: ["tools"]
-    depends_on:
-      game-server:
-        condition: service_healthy
+    # Do not depends_on game-server. `compose run` would rebuild/start it.
+    # RCON is retried in rcon_save.py; the dedicated server is already up.
     # pzmap2dzi renders through a multiprocessing pool that passes 2048x2048
     # RGBA tiles between workers in POSIX shared memory, which is /dev/shm.
     # Docker's default /dev/shm is 64 MB; one such buffer is 16 MB, and

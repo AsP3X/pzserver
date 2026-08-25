@@ -518,6 +518,11 @@ A seeded ISO_DZI file is a few hundred pixels off. Current `run.sh` deletes
 The map-tiles image installs it. Rebuild that image (`make map-tiles-region`
 already does).
 
+**Save overlay: `No such file .../pzdataspec/spec`.** The GitHub *source*
+clone is not importable (parsers live in the *release zip*). The image
+installs `pzdataspec-v1.12.249.zip` under `/opt`. Do not put the git tree
+on `PYTHONPATH`.
+
 **Giant black square after a region job.** Two causes, both fixed: (1) a
 world-change job used omit_levels 1 / z21, but the county pack has no z21
 tiles, so z20 parents merged missing children as black; world-change now
