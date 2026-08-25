@@ -81,6 +81,13 @@ def pack(tiles_dir: Path, db_path: Path, meta: dict, replace: bool = False,
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         list(meta.items()),
     )
+    info = tiles_dir.parent / "map_info.json"
+    if info.is_file():
+        con.execute(
+            "INSERT INTO meta (key, value) VALUES ('map_info', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (info.read_text(encoding="utf-8"),),
+        )
     con.commit()
 
     if wal:

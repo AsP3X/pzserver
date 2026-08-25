@@ -644,6 +644,19 @@ sed \
     -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
     "$ROOT_TEMPLATE" > .env
 
+# Docker API spawn needs absolute host binds. Relative ./data/... works for
+# compose; the panel cannot start a map-tiles job with it.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+sed -i \
+    -e "s|^PZ_DATA_HOST=./data/zomboid|PZ_DATA_HOST=${REPO_ROOT}/data/zomboid|" \
+    -e "s|^PZ_SERVER_HOST=./data/server|PZ_SERVER_HOST=${REPO_ROOT}/data/server|" \
+    -e "s|^PZ_BACKUPS_HOST=./data/backups|PZ_BACKUPS_HOST=${REPO_ROOT}/data/backups|" \
+    -e "s|^PZ_MAP_TILES_HOST=./data/map-tiles|PZ_MAP_TILES_HOST=${REPO_ROOT}/data/map-tiles|" \
+    -e "s|^PZ_TEXTUREPACKS_HOST=./data/server/media/texturepacks|PZ_TEXTUREPACKS_HOST=${REPO_ROOT}/data/server/media/texturepacks|" \
+    -e "s|^PZ_POSTGRES_HOST=./data/postgres|PZ_POSTGRES_HOST=${REPO_ROOT}/data/postgres|" \
+    -e "s|^PZ_REDIS_HOST=./data/redis|PZ_REDIS_HOST=${REPO_ROOT}/data/redis|" \
+    .env
+
 # app/.env was generated here for the Laravel panel. The app tree was removed
 # along with it; the root .env above is now the only env file the stack reads.
 
@@ -652,9 +665,16 @@ sed \
 # ══════════════════════════════════════════════════════════════════════════════
 echo "Ensuring host data directories (./data/*)..."
 mkdir -p \
-    data/zomboid/Lua data/server data/backups data/map-tiles \
+    data/zomboid/Lua data/server/media/texturepacks data/backups \
+    data/map-tiles/html/map_data/base \
     data/postgres data/redis \
     data/caddy-data data/caddy-config
+if [ ! -f data/map-tiles/html/map_data/base/map_info.json ] && \
+   [ -f web/tools/map-tiles/map_info.vanilla.json ]; then
+    cp web/tools/map-tiles/map_info.vanilla.json \
+        data/map-tiles/html/map_data/base/map_info.json
+fi
+bash scripts/prepare-map-tiles.sh
 # Containers may run as various UIDs — make host dirs writable.
 # Do NOT chmod -R all of ./data (map-tiles / postgres can be huge and hang setup).
 for _d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config; do

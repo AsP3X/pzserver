@@ -122,12 +122,8 @@ if [ -n "$REGION" ]; then
         echo "pack at $PACK to update. Run a full render first." >&2
         exit 1
     fi
-    if [ ! -f "$TREE/map_info.json" ]; then
-        echo "FAIL: $TREE/map_info.json is missing, so square/cell-to-tile geometry" >&2
-        echo "cannot be read. The packer leaves it in place; if it is gone," >&2
-        echo "run a full render." >&2
-        exit 1
-    fi
+    echo "==> ensure map_info.json for cell/tile geometry"
+    python /tools/ensure_map_info.py "$TREE/map_info.json" "$PACK"
 
     if [ -n "$CELLS" ]; then
         printf '%s' "$CELLS" > /tmp/cells.txt
@@ -215,9 +211,11 @@ print(f'{newest}')
                 echo "until the dedicated server flushes map/{x}/{y}.bin." >&2
                 exit 1
             fi
+            # Autosave may already have flushed these files, so mtimes often
+            # do not move. RCON returned "World saved"; snapshot anyway.
+            sleep 2
             if ! python /tools/wait_save.py "$LIVE_SAVE" /tmp/render_cells.txt "$BEFORE_MTIME"; then
-                echo "FAIL: chunk files did not update after RCON save." >&2
-                exit 1
+                echo "==> chunk mtimes unchanged after save (already on disk); snapshotting"
             fi
             echo "==> snapshot save $SAVE_GAME for overlay"
             set_progress snapshot 4

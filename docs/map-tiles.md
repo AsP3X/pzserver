@@ -61,21 +61,46 @@ A correct run says so before it starts:
 ==> textures: 24 packs found
 ```
 
-## Generating the tiles
+## First-time deploy
+
+`make init` (or `make up` on an already-configured host) is the stack. It does
+**not** spend hours rendering Knox County. The isometric pack is optional:
+
+1. **Vector map works immediately.** No tiles required.
+2. **Isometric map** needs `tiles.sqlite` on the `pz-map-tiles-sqlite` volume
+   **and** PZ client texture packs in `data/server/media/texturepacks/`.
+
+Pick one for the pack:
+
+| How | Command |
+|-----|---------|
+| Generate on this machine (hours, ~24 GB, needs texture packs first) | `make map-tiles` |
+| Upload a pack built elsewhere | copy it to `data/map-tiles/tiles.sqlite`, then `make up` (imports into the volume if empty) or `make map-tiles-import` |
 
 ```bash
-make map-tiles
+# One-command stack. Drop tiles.sqlite in place first if you have one.
+make init          # wizard + up, first machine
+make up            # afterwards
+
+# Texture packs (once, ~527 MB, from a PZ client)
+# <Steam>/steamapps/common/ProjectZomboid/media/texturepacks/*.pack
+# → data/server/media/texturepacks/
+
+# Regional redraw after the pack exists (minutes)
+make map-tiles-region CELLS="41,38"
 ```
 
-```powershell
-.\make.ps1 map-tiles
-```
+`make init` writes **absolute** `PZ_DATA_HOST` / `PZ_SERVER_HOST` /
+`PZ_MAP_TILES_HOST` / `PZ_TEXTUREPACKS_HOST` so the panel can spawn render
+jobs. Relative `./data/...` is enough for compose and for `make map-tiles-region`.
 
-That builds the render image and runs it once. Both wrap a build and a
-`--profile tools run --rm map-tiles`. The service lives in
-`docker-compose.web.yml` behind the `tools` profile, so a normal `make up` never
-starts it. The packed `tiles.sqlite` is written to the `pz-map-tiles-sqlite`
-volume, not `./data/map-tiles`. To move an existing host pack onto the volume:
+`make up` seeds `data/map-tiles/html/map_data/base/map_info.json` (pyramid
+geometry) and creates the empty texture-pack directory. Regional jobs no
+longer depend on leftover HTML from a previous full render.
+
+Do **not** insert rows into `map_tile_jobs` by hand. `status='running'` is a
+dry-run animation. A real job is `POST /api/v1/admin/map-tiles/rerender` or
+`make map-tiles-region`.
 
 ```bash
 make map-tiles-import
@@ -85,7 +110,7 @@ make map-tiles-import
 .\make.ps1 map-tiles-import
 ```
 
-Do that with `web-api` down, or against an empty volume. Overwriting a pack
+Import with `web-api` down, or against an empty volume. Overwriting a pack
 the API already has open is the Windows filename-reservation trap. A 14–24 GB
 copy takes a while; the command rewrites one progress line (percent, rate, ETA)
 while it runs, or prints occasional lines if stdout is not a terminal.
@@ -482,6 +507,11 @@ is discovering a blank map after several hours.
 `/pz/media/texturepacks`.** Docker cannot create a mountpoint inside a read-only
 bind mount, and `/pz` is one. `mkdir -p data/server/media/texturepacks` on the
 host; both `make map-tiles` targets already do this for you.
+
+**Regional job fails with `map_info.json is missing`.** Fixed in current
+`run.sh` (reconstructs from the pack or `map_info.vanilla.json`). `make up`
+also seeds that file. If you are on an older image, `git pull` and rerun
+`make map-tiles-region`.
 
 **The render says it cannot find the game files.** On Windows, a hand-run
 `docker run` needs `MSYS_NO_PATHCONV=1` from Git Bash or the bind mount silently

@@ -28,6 +28,17 @@ def test_pack_moves_every_tile_and_removes_the_tree(tmp_path):
     assert list((tree / "base" / "layer0_files").rglob("*.jpg")) == []
 
 
+def test_pack_stores_sibling_map_info_in_meta(tmp_path):
+    tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
+    build_tree(tree)
+    info = tree / "base" / "map_info.json"
+    info.write_text('{"x0": 1040384, "skip": 2}\n', encoding="utf-8")
+    pack(tree / "base" / "layer0_files", db, {})
+    con = sqlite3.connect(db)
+    stored = con.execute("SELECT value FROM meta WHERE key='map_info'").fetchone()[0]
+    assert "1040384" in stored
+
+
 def test_pack_resumes_without_duplicating(tmp_path):
     tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
     build_tree(tree)

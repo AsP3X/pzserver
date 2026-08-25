@@ -88,6 +88,8 @@ function Ensure-DataDirs {
         "data\server",
         "data\backups",
         "data\map-tiles",
+        "data\map-tiles\html\map_data\base",
+        "data\server\media\texturepacks",
         "data\postgres",
         "data\redis",
         "data\caddy-data",
@@ -98,6 +100,11 @@ function Ensure-DataDirs {
         if (-not (Test-Path $d)) {
             New-Item -ItemType Directory -Force -Path $d | Out-Null
         }
+    }
+    $info = "data\map-tiles\html\map_data\base\map_info.json"
+    $vanilla = "web\tools\map-tiles\map_info.vanilla.json"
+    if (-not (Test-Path $info) -and (Test-Path $vanilla)) {
+        Copy-Item $vanilla $info
     }
 }
 

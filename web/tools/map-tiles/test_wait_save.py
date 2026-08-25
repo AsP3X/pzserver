@@ -33,3 +33,12 @@ def test_wait_returns_once_mtime_moves(tmp_path):
     assert ok
     assert count == 1
     assert newest > before
+
+
+def test_wait_times_out_when_mtime_does_not_move(tmp_path):
+    blob = _chunk(tmp_path, 100, 200)
+    before = blob.stat().st_mtime
+    ok, count, newest = wait(tmp_path, [(3, 6, 1, 1)], before, timeout=0.2, interval=0.05)
+    assert ok is False
+    assert count == 1
+    assert newest == before

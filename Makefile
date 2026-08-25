@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-detail map-tiles-recompress map-tiles-import restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -84,15 +84,25 @@ info:
 
 # Host bind-mount dirs (all persistent data lives under ./data/)
 ensure-data-dirs:
-	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
+	@mkdir -p data/zomboid/Lua data/server/media/texturepacks data/backups \
+		data/map-tiles/html/map_data/base \
 		data/postgres data/redis \
 		data/caddy-data data/caddy-config data/web-postgres
+	@if [ ! -f data/map-tiles/html/map_data/base/map_info.json ] && [ -f web/tools/map-tiles/map_info.vanilla.json ]; then \
+		cp web/tools/map-tiles/map_info.vanilla.json data/map-tiles/html/map_data/base/map_info.json; \
+	fi
 
 # Public edge network is external; create if the host does not already have it
 ensure-networks:
 	@docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network >/dev/null
 
-up: ensure-data-dirs ensure-networks
+# Drop data/map-tiles/tiles.sqlite on the host and this copies it into the
+# named volume when that volume is still empty. `make up` never renders the
+# county (~hours, ~24 GB); generate with `make map-tiles` or upload the file.
+map-tiles-maybe-import:
+	@bash scripts/prepare-map-tiles.sh
+
+up: ensure-data-dirs ensure-networks map-tiles-maybe-import
 	$(COMPOSE) up -d --build --remove-orphans
 
 down:
