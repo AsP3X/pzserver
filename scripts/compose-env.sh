@@ -77,14 +77,19 @@ pz_compose() {
 pz_ensure_data_dirs() {
   mkdir -p \
     "${PZ_REPO_ROOT}/data/zomboid/Lua" \
-    "${PZ_REPO_ROOT}/data/server" \
+    "${PZ_REPO_ROOT}/data/server/media/texturepacks" \
     "${PZ_REPO_ROOT}/data/backups" \
-    "${PZ_REPO_ROOT}/data/map-tiles" \
+    "${PZ_REPO_ROOT}/data/map-tiles/html/map_data/base" \
     "${PZ_REPO_ROOT}/data/postgres" \
     "${PZ_REPO_ROOT}/data/redis" \
     "${PZ_REPO_ROOT}/data/caddy-data" \
     "${PZ_REPO_ROOT}/data/caddy-config" \
     "${PZ_REPO_ROOT}/data/web-postgres"
+  local info="${PZ_REPO_ROOT}/data/map-tiles/html/map_data/base/map_info.json"
+  local vanilla="${PZ_REPO_ROOT}/web/tools/map-tiles/map_info.vanilla.json"
+  if [[ ! -f "$info" && -f "$vanilla" ]]; then
+    cp "$vanilla" "$info"
+  fi
 
   # Never chmod -R the whole ./data tree: map-tiles (DZI pyramids) and postgres
   # can contain hundreds of thousands of files and make deploy look "stuck".
@@ -158,6 +163,8 @@ pz_up() {
   echo "→ Ensuring data directories..."
   pz_ensure_db_volume
   pz_ensure_data_dirs
+  echo "→ Preparing isometric map scratch / optional tiles.sqlite import..."
+  bash "${PZ_REPO_ROOT}/scripts/prepare-map-tiles.sh"
   echo "→ Ensuring Docker networks..."
   pz_ensure_networks
   pz_load_web_mode
