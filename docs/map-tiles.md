@@ -203,12 +203,15 @@ fine for `make map-tiles-region`; the API spawn cannot use it.
    the cells it is handed. A tile that straddles the edge comes back
    part-drawn and part-black. `expand_to_whole_tiles` is mandatory. Measured:
    tile `20/134_59` went from 12.5% black to 62.4% when this was skipped.
-3. **Dirty every packed ancestor.** A level-20 change without rebuilding
-   19…0 leaves zoom-out stale or black. Dirty set is the covering tiles at
-   max packed level plus every parent down to 0.
-4. **Restore merge siblings, never dirty tiles.** Parents merge four children
-   from disk. Missing siblings → three-quarters black. Dirty tiles must stay
-   *absent* so pzmap2dzi does not skip them.
+3. **Dirty every packed ancestor, but do not let pzmap2dzi merge them.** A
+   level-20 change without rebuilding 19…0 leaves zoom-out stale. Restore
+   those ancestors so the renderer skips them, paint the leaves, then
+   `rebuild_pyramid.py` writes each parent from its four children. Letting
+   pzmap2dzi merge during paint bakes JPEG-black corners into every zoom.
+4. **Restore merge siblings and ancestors; leave leaves absent.** Missing
+   siblings → three-quarters black. Dirty *leaf* tiles must stay absent so
+   pzmap2dzi redraws them. After paint, `fill_unpainted.py` copies vanilla
+   back into any JPEG-black corner from a snapshot of the previous leaf.
 5. **Pack only dirty keys.** `--replace --only dirty.txt`. Restored siblings
    are already correct; rewriting them is wasted I/O and can unlink files the
    next merge still needs if a run is interrupted.
@@ -236,8 +239,10 @@ fine for `make map-tiles-region`; the API spawn cannot use it.
    filename reservation trap. In-place UPDATE only.
 3. **Do not VACUUM a region.** VACUUM rebuilds the 24 GB file beside itself.
    It is for a full first pack only.
-4. **Do not restore dirty tiles.** pzmap2dzi treats an existing `.jpg` as
-   done. Restoring the hole makes the run a no-op.
+4. **Do not restore dirty *leaf* tiles.** pzmap2dzi treats an existing `.jpg`
+   as done. Restoring the hole makes the run a no-op. Dirty ancestors *are*
+   restored so the renderer skips them; `rebuild_pyramid.py` overwrites them
+   after the leaves are finished.
 5. **Do not pack restored siblings.** They are merge inputs, not outputs.
 6. **Do not change `dzi_cell_range` on a region.** Pyramid geometry and every
    client tile index are fixed by the first full render. `verify.py` still
@@ -523,13 +528,16 @@ clone is not importable (parsers live in the *release zip*). The image
 installs `pzdataspec-v1.12.249.zip` under `/opt`. Do not put the git tree
 on `PYTHONPATH`.
 
-**Giant black square after a region job.** Two causes, both fixed: (1) a
-world-change job used omit_levels 1 / z21, but the county pack has no z21
-tiles, so z20 parents merged missing children as black; world-change now
-paints at packed z20. (2) vanilla paint was skipped on every 8×8 save
-chunk, and JPEG filled the holes with black; skip/punch is only 1×1 open
-door squares. Re-run `make map-tiles-region CELLS="x,y"` to replace the
-black tiles.
+**Giant black square after a region job.** A DZI tile is an axis-aligned
+square; a map cell is a diamond in that square. `render_cell_range` paints
+only the diamond, JPEG fills the unpainted corners with black, and packing
+the zoom-out parents freezes that black rectangle (town in the middle,
+original map around it). Three things now prevent it: covering cells use
+`floor(max)+1` so an exact cell boundary is not dropped; unpainted leaf
+corners are filled from the previous tile; ancestors are rebuilt from the
+finished leaves instead of merged mid-paint. Re-run
+`make map-tiles-region CELLS="x,y"` (game-server already up; the image
+rebuilds itself) to replace tiles already packed black.
 
 **`RCON save skipped: Connection refused`.** RCON only listens after the
 dedicated server has finished loading the world. `./deploy.sh` recreates

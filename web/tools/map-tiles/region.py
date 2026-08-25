@@ -15,6 +15,7 @@ from cells import (
     cell_rect_to_tiles,
     covering_cells_for_tiles,
     dirty_pyramid,
+    inflate_cell_rects,
     merge_inputs,
     parse_rects,
     square_rect_to_tiles,
@@ -22,7 +23,7 @@ from cells import (
 
 
 def cover_each(geo: Geometry, square_rects, level: int) -> list:
-    """One cell box per input rect.
+    """One cell box per input rect, padded so tile corners cannot go black.
 
     `covering_cells_for_tiles` is a single AABB. Two towns would otherwise
     become one rectangle of forest between them.
@@ -31,7 +32,7 @@ def cover_each(geo: Geometry, square_rects, level: int) -> list:
     for rect in square_rects:
         leaves = square_rect_to_tiles(geo, [rect], [level])
         boxes.extend(covering_cells_for_tiles(geo, leaves, level))
-    return boxes
+    return inflate_cell_rects(boxes, pad=1)
 
 
 def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
@@ -39,6 +40,11 @@ def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
 
     `square_rects` are world squares. Cell callers convert with
     `cells_as_squares` first.
+
+    Ancestors (`keep`) are packed after we rebuild them from the new leaves.
+    They are restored onto disk before the render so pzmap2dzi does not
+    merge them from half-painted children (that merge is the black rectangle
+    at zoom-out).
     """
     render_cells = cover_each(geo, square_rects, max_level)
     leaves = (
@@ -48,7 +54,8 @@ def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
     )
     targets = dirty_pyramid(leaves, max_level, min_level)
     restore = merge_inputs(targets, deepest=max_level)
-    return targets, restore, render_cells
+    keep = {t for t in targets if t[0] < max_level}
+    return targets, restore, render_cells, keep
 
 
 def plan_detail(geo: Geometry, square_rects, detail_level: int):
@@ -82,18 +89,24 @@ if __name__ == "__main__":
 
     info, rects, lo, hi, out = sys.argv[1:6]
     geo = Geometry.from_map_info(Path(info))
+    keep = set()
     if len(sys.argv) == 7:
         targets, restore, render_cells = plan_detail(geo, parse_rects(rects), int(hi))
+        leaves = set(targets)
     else:
-        targets, restore, render_cells = plan(geo, parse_rects(rects), int(lo), int(hi))
+        targets, restore, render_cells, keep = plan(geo, parse_rects(rects), int(lo), int(hi))
+        leaves = {t for t in targets if t[0] == int(hi)}
 
     out = Path(out)
     write(out / "dirty.txt", targets)
     write(out / "restore.txt", restore)
+    write(out / "keep.txt", keep)
+    write(out / "leaves.txt", leaves)
     spec = ";".join(f"{x},{y},{w},{h}" for x, y, w, h in render_cells)
     (out / "render_cells.txt").write_text(spec, encoding="utf-8")
 
     print(
         f"region {rects}: widened to cells {spec} to cover whole tiles; "
-        f"{len(targets)} dirty tiles, {len(restore)} to restore as merge inputs"
+        f"{len(targets)} dirty tiles, {len(restore)} to restore as merge inputs, "
+        f"{len(keep)} ancestors kept for rebuild"
     )

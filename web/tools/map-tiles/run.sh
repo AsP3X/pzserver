@@ -168,12 +168,22 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
         python /tools/region.py "$TREE/map_info.json" "$SQUARES" "$MIN_LEVEL" "$MAX_LEVEL" /tmp
     fi
 
-    # Only the siblings the merges need. The target tiles are deliberately NOT
-    # restored: pzmap2dzi treats a tile already on disk as done, so the hole is
-    # what tells it to redraw.
+    # Only the siblings the merges need, plus the dirty *ancestors*. Leaves
+    # stay absent so pzmap2dzi redraws them. Ancestors go back on disk so it
+    # does *not* merge them from half-painted children — that merge is the
+    # black rectangle at zoom-out. We rebuild them from the finished leaves
+    # after paint.
     echo "==> restoring merge inputs from the pack"
     set_progress restore 10
     python /tools/unpack.py "$PACK" "$TREE/layer0_files" --only /tmp/restore.txt
+    if [ -s /tmp/keep.txt ]; then
+        echo "==> restoring ancestors (rebuilt after paint)"
+        python /tools/unpack.py "$PACK" "$TREE/layer0_files" --only /tmp/keep.txt
+    fi
+    if [ -s /tmp/leaves.txt ]; then
+        echo "==> snapshot leaf tiles as underlay for unpainted corners"
+        python /tools/unpack.py "$PACK" /tmp/underlay --only /tmp/leaves.txt
+    fi
 
     # dzi_cell_range is left alone, so the pyramid's geometry -- and therefore
     # every tile index the client computes -- is identical to a full render.
@@ -294,6 +304,13 @@ if grep -q "map_info mismatch" "$RENDER_LOG" || grep -q "Render stopped" "$RENDE
 fi
 set_progress render 70
 
+# Before the save overlay punches open doors (those holes are real). JPEG of
+# unpainted cell-range corners is not — copy vanilla back from the underlay.
+if [ -n "$REGION" ] && [ -s /tmp/leaves.txt ] && [ -d /tmp/underlay ]; then
+    echo "==> fill unpainted leaf corners from underlay"
+    python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay
+fi
+
 if [ -n "${WANT_SAVE:-}" ]; then
     echo "==> render save overlay"
     watch_progress save 70 15 "$RENDER_LOG"
@@ -305,11 +322,15 @@ if [ -n "${WANT_SAVE:-}" ]; then
     fi
     echo "==> composite save onto base"
     set_progress composite 88
+    COMPOSITE_KEYS=/tmp/dirty.txt
+    if [ -s /tmp/leaves.txt ]; then
+        COMPOSITE_KEYS=/tmp/leaves.txt
+    fi
     if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then
-        python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files" \
+        python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files" \
             "$TREE/map_info.json" /tmp/save_squares.txt
     else
-        python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
+        python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
     fi
 fi
 
@@ -324,6 +345,11 @@ python /tools/check_cache.py "$RENDER_LOG" "${CACHE_LIMIT:-0}"
 
 echo "==> verify geometry"
 python /tools/verify.py "$TREE/map_info.json"
+
+if [ -n "$REGION" ] && [ -s /tmp/keep.txt ]; then
+    echo "==> rebuild ancestor tiles from children"
+    python /tools/rebuild_pyramid.py /tmp/keep.txt "$TREE/layer0_files"
+fi
 
 echo "==> pack"
 set_progress pack 92

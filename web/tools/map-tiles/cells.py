@@ -147,7 +147,16 @@ def dirty_pyramid(leaves: set, max_level: int, min_level: int) -> set:
 
 
 def covering_cells_for_tiles(geo: Geometry, tiles, level: int) -> list:
-    """Cell box that fully covers every tile's footprint at `level`."""
+    """Cell box that fully covers every tile's footprint at `level`.
+
+    A DZI tile is an axis-aligned square; a cell is a diamond in that same
+    pixel space. The box is the world AABB of the tile's four corners, so
+    the diamond we paint contains the square (corners of the tile sit on
+    the diamond's sides). `math.ceil` on an exact cell boundary is not
+    enough: cell `N.0` belongs to cell N, and `ceil(N.0) == N` drops it.
+    JPEG then fills the unpainted corner with black, which is the giant
+    rectangle on a regional re-render.
+    """
     if not tiles:
         return []
 
@@ -156,8 +165,11 @@ def covering_cells_for_tiles(geo: Geometry, tiles, level: int) -> list:
     for z, tx, ty in tiles:
         if z != level:
             continue
-        for px in (tx * span, (tx + 1) * span):
-            for py in (ty * span, (ty + 1) * span):
+        # Inclusive far edge (last pixel of this tile) *and* the exclusive
+        # boundary it shares with the next tile, so a point that sits exactly
+        # on the grid is counted in both neighbouring cells.
+        for px in (tx * span, (tx + 1) * span - 1, (tx + 1) * span):
+            for py in (ty * span, (ty + 1) * span - 1, (ty + 1) * span):
                 wx, wy = dzi_to_world(geo, px, py)
                 cells_x.append(wx / geo.cell_size)
                 cells_y.append(wy / geo.cell_size)
@@ -166,10 +178,27 @@ def covering_cells_for_tiles(geo: Geometry, tiles, level: int) -> list:
         return []
 
     lo_x = max(0, math.floor(min(cells_x)))
-    hi_x = math.ceil(max(cells_x))
+    hi_x = math.floor(max(cells_x)) + 1
     lo_y = max(0, math.floor(min(cells_y)))
-    hi_y = math.ceil(max(cells_y))
+    hi_y = math.floor(max(cells_y)) + 1
     return [(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y)]
+
+
+def inflate_cell_rects(rects, pad: int = 1) -> list:
+    """Grow each cell box by `pad` cells on every side.
+
+    Jumbo-tree sprites hang over the square they sit on, and a DZI tile's
+    far edge is an exact cell boundary more often than not. One extra cell
+    is cheap; a black JPEG corner is not.
+    """
+    if pad <= 0:
+        return [tuple(r) for r in rects]
+    out = []
+    for x, y, w, h in rects:
+        nx = max(0, x - pad)
+        ny = max(0, y - pad)
+        out.append((nx, ny, w + (x - nx) + pad, h + (y - ny) + pad))
+    return out
 
 
 def expand_to_whole_tiles(geo: Geometry, rects, level: int) -> list:
