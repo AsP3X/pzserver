@@ -117,8 +117,15 @@ A **world-change job** is the same regional job, plus a save overlay:
 
 1. Snapshot the dirty cells' chunks (the live files stay with PZ).
 2. Paint vanilla `base` for those cells, then `render save`.
-3. Composite the save PNGs onto the base JPEGs for dirty keys only.
+3. Punch the isometric footprint of those chunks out of the vanilla tiles
+   (an open door is a hole — compositing it over the closed vanilla sprite
+   would leave the closed door showing), then composite the save PNGs.
 4. WAL-replace those rows in `tiles.sqlite`.
+
+Door, window and curtain sprites come from the save object's *state*
+(`open` / smashed / glass-removed), not the default `sprite_id`. The API
+issues an RCON `save` before the snapshot so chunk files match what players
+just did.
 
 The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
 (default 120). The first pass seeds `map_tile_blocks` and does not enqueue.

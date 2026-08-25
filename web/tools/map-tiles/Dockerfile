@@ -27,11 +27,11 @@ WORKDIR /opt/pzmap2dzi
 # to sit beside vanilla.txt, default_b42.txt and mod/ — putting it anywhere else
 # makes the render fail looking for map descriptions that are not there.
 COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
-COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py chunks.py set_save_game.py snapshot_save.py composite.py progress.py run.sh patch_scheduler.py /tools/
+COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py chunks.py set_save_game.py snapshot_save.py composite.py progress.py run.sh patch_scheduler.py chunk_sprites.py patch_save_render.py /tools/
 # region.py and set_render_range.py import cells.py by name.
 ENV PYTHONPATH=/tools
 # omit_levels + cache eviction paints black holes; pin children until merged.
-RUN python /tools/patch_scheduler.py
+RUN python /tools/patch_scheduler.py && python /tools/patch_save_render.py
 # run.sh pipes the render through tee so check_cache.py can read its output.
 # A pipe makes Python block-buffer stdout, which strands progress lines for
 # minutes at a time and blinds anything watching the log live.

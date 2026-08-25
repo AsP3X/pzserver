@@ -194,7 +194,7 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
             echo "==> snapshot save $SAVE_GAME for overlay"
             set_progress snapshot 4
             rm -rf "/out/save-snapshot"
-            python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt
+            python /tools/snapshot_save.py "$LIVE_SAVE" "$SNAP" /tmp/render_cells.txt /tmp/save_squares.txt
             if [ ! -f "$SNAP/WorldDictionary.bin" ]; then
                 echo "==> save has no WorldDictionary.bin; region will be vanilla tiles only"
                 WANT_SAVE=
@@ -252,7 +252,12 @@ if [ -n "${WANT_SAVE:-}" ]; then
     stop_progress_watch
     echo "==> composite save onto base"
     set_progress composite 88
-    python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
+    if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then
+        python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files" \
+            "$TREE/map_info.json" /tmp/save_squares.txt
+    else
+        python /tools/composite.py /tmp/dirty.txt "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
+    fi
 fi
 
 # Before anything is packed. If the cache filled up, the render evicted tiles

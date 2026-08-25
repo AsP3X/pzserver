@@ -428,6 +428,13 @@ async fn spawn_and_wait(
     squares: &[[i32; 4]],
     cells: &[[i32; 4]],
 ) -> Result<(), String> {
+    // Door/window state lives in chunk files that often lag the action until
+    // a save. Flush first so the snapshot is not a closed-door vanilla copy.
+    match crate::services::admin::save_world(state).await {
+        Ok(_) => tokio::time::sleep(Duration::from_secs(2)).await,
+        Err(error) => tracing::warn!(%error, "world save before tile job skipped"),
+    }
+
     let proxy = state.config.docker_proxy_url.trim_end_matches('/');
     let client = http_client(INSPECT_TIMEOUT);
     let body = serde_json::json!({
