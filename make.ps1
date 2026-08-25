@@ -305,17 +305,50 @@ function Do-RebuildGame {
 
 # Renders the isometric basemap from the game files into data\map-tiles.
 # Takes hours and about 15 GB. Safe to interrupt; re-run to resume.
+# Cells/squares for a regional job, from the args after the command.
+#
+# NOT the automatic $Args: this script has an explicit param() block, so $Args
+# is always empty here and the region targets silently rendered the whole
+# county (hours, ~15 GB, overwrites the pack) instead of one cell. The
+# Makefile refuses an empty CELLS/SQUARES; do the same rather than fall
+# through to a full render.
+function Get-RegionArg {
+    param([string]$Target)
+    # PowerShell's argument mode treats an unquoted `41,38` as an array, so the
+    # rect reaches here either as several elements or as one space-joined
+    # string ("41 38"). Both mean the same thing the Makefile spells CELLS=41,38.
+    # Put the commas back; a quoted "41,38;42,39" has no whitespace and passes
+    # through untouched.
+    $joined = ($script:PassthruArgs -join ",")
+    $joined = ($joined -replace '\s+', ',') -replace ',+', ','
+    $joined = $joined.Trim(',')
+    if ([string]::IsNullOrWhiteSpace($joined)) {
+        Write-Host "set cells or squares, e.g. .\make.ps1 $Target 41,38" -ForegroundColor Red
+        Write-Host "                      or  .\make.ps1 $Target squares=8704,7680,256,256" -ForegroundColor Red
+        exit 1
+    }
+    return $joined
+}
+
 function Do-MapTiles {
     param(
         [string]$Cells = "",
         [string]$Squares = "",
         [string]$Detail = "",
-        [switch]$DetailOnly
+        [switch]$DetailOnly,
+        [switch]$HealOnly
     )
+
+    if ($HealOnly -and -not (Test-Path "data\map-tiles\tiles.sqlite")) {
+        Write-Host "need data\map-tiles\tiles.sqlite (the original county pack, left there after import)" -ForegroundColor Red
+        exit 1
+    }
 
     if ($Squares -or $Cells) {
         $what = if ($Squares) { "squares $Squares" } else { "cells $Cells" }
-        if ($DetailOnly) {
+        if ($HealOnly) {
+            Write-Host "Copying original tiles over $what (seconds; no re-render)..." -ForegroundColor Cyan
+        } elseif ($DetailOnly) {
             Write-Host "Filling z21 for $what (minutes; leaves z20 in place)..." -ForegroundColor Cyan
         } else {
             Write-Host "Redrawing map $what from the live save (minutes; updates the existing pack)..." -ForegroundColor Cyan
@@ -328,8 +361,14 @@ function Do-MapTiles {
     # reaches the texture check.
     New-Item -ItemType Directory -Force "data\server\media\texturepacks" | Out-Null
     Invoke-Compose @("--profile", "tools", "build", "map-tiles")
-    $run = @("--profile", "tools", "run", "--rm", "-e", "PZ_MAP_CELLS=$Cells", "-e", "PZ_MAP_SQUARES=$Squares")
-    if ($DetailOnly) {
+    # --no-deps --use-aliases matches the Makefile: compose must not start
+    # game-server, and the render container needs the service's network alias
+    # to reach it over RCON.
+    $run = @("--profile", "tools", "run", "--rm", "--no-deps", "--use-aliases",
+             "-e", "PZ_MAP_CELLS=$Cells", "-e", "PZ_MAP_SQUARES=$Squares")
+    if ($HealOnly) {
+        $run += @("-e", "PZ_MAP_HEAL_ONLY=1")
+    } elseif ($DetailOnly) {
         $run += @("-e", "PZ_MAP_DETAIL_ONLY=1", "-e", "PZ_MAP_DETAIL=21")
     } elseif ($Detail) {
         $run += @("-e", "PZ_MAP_DETAIL=$Detail", "-e", "PZ_MAP_SAVE=1")
@@ -337,7 +376,13 @@ function Do-MapTiles {
         $run += @("-e", "PZ_MAP_DETAIL=21", "-e", "PZ_MAP_SAVE=1")
     }
     $run += @("map-tiles")
-    Invoke-Compose @run
+    # `Invoke-Compose $run`, NOT `@run`. Invoke-Compose is a PowerShell
+    # function taking one [string[]]; splatting a plain array into it binds
+    # only the first element and drops the rest into the automatic $args,
+    # where they are silently ignored. That shipped `docker compose -f ...
+    # --profile` with nothing after it -- "flag needs an argument: --profile"
+    # -- so every regional render died before it started a container.
+    Invoke-Compose $run
 }
 
 function Do-MapTilesRecompress {
@@ -757,6 +802,7 @@ function Do-Help {
     Write-Host "    .\make.ps1 map-tiles        Render the isometric basemap locally (hours, ~15 GB)"
     Write-Host "    .\make.ps1 map-tiles-region x,y,w,h   Redraw cells (or squares=x,y,w,h) (minutes)"
     Write-Host "    .\make.ps1 map-tiles-detail x,y,w,h   Paint z21 for those cells (minutes)"
+    Write-Host "    .\make.ps1 map-tiles-heal x,y         Copy original tiles over a damaged region (seconds)"
     Write-Host "    .\make.ps1 map-tiles-recompress  Re-encode packed JPEGs at quality 70"
     Write-Host "    .\make.ps1 map-tiles-import Copy data\map-tiles\tiles.sqlite into the named volume (prints progress)"
     Write-Host "    .\make.ps1 stop             Stop without removing containers"
@@ -809,7 +855,7 @@ switch ($Command) {
     "map-tiles-import" { Do-MapTilesImport }
     "map-tiles-recompress" { Do-MapTilesRecompress }
     "map-tiles-detail" {
-        $joined = $Args -join ";"
+        $joined = Get-RegionArg "map-tiles-detail"
         if ($joined -match '^squares=') {
             Do-MapTiles -Squares ($joined -replace '^squares=','') -DetailOnly
         } else {
@@ -817,11 +863,19 @@ switch ($Command) {
         }
     }
     "map-tiles-region" {
-        $joined = $Args -join ";"
+        $joined = Get-RegionArg "map-tiles-region"
         if ($joined -match '^squares=') {
             Do-MapTiles -Squares ($joined -replace '^squares=','') -Detail "21"
         } else {
             Do-MapTiles -Cells $joined -Detail "21"
+        }
+    }
+    "map-tiles-heal" {
+        $joined = Get-RegionArg "map-tiles-heal"
+        if ($joined -match '^squares=') {
+            Do-MapTiles -Squares ($joined -replace '^squares=','') -HealOnly
+        } else {
+            Do-MapTiles -Cells $joined -HealOnly
         }
     }
     "stop"           { Do-Stop }
