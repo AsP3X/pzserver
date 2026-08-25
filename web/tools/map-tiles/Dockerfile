@@ -18,7 +18,8 @@ RUN apt-get update \
 ARG PZMAP2DZI_REF=main
 RUN git clone --depth 1 --branch "${PZMAP2DZI_REF}" \
         https://github.com/cff29546/pzmap2dzi.git /opt/pzmap2dzi \
-    && pip install --no-cache-dir -r /opt/pzmap2dzi/requirements.txt
+    && pip install --no-cache-dir -r /opt/pzmap2dzi/requirements.txt \
+    && pip install --no-cache-dir lark
 
 WORKDIR /opt/pzmap2dzi
 

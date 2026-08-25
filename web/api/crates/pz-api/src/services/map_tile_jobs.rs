@@ -100,9 +100,23 @@ fn json_rects(value: &serde_json::Value) -> Vec<[i32; 4]> {
     out
 }
 
+#[derive(Debug, Clone)]
+pub struct FileProgress {
+    pub stage: String,
+    pub percent: i32,
+    pub squares: serde_json::Value,
+    pub cells: serde_json::Value,
+}
+
+impl FileProgress {
+    fn stage_pct(&self) -> (String, i32) {
+        (self.stage.clone(), self.percent)
+    }
+}
+
 pub async fn active_updating(
     db: &PgPool,
-    file_progress: Option<(String, i32)>,
+    file_progress: Option<FileProgress>,
 ) -> Result<Vec<UpdatingRegion>, sqlx::Error> {
     let rows: Vec<(
         serde_json::Value,
@@ -117,7 +131,8 @@ pub async fn active_updating(
     )
     .fetch_all(db)
     .await?;
-    Ok(rows
+    let file_tuple = file_progress.as_ref().map(FileProgress::stage_pct);
+    let mut out: Vec<UpdatingRegion> = rows
         .into_iter()
         .filter_map(|(squares, cells, status, row_stage, row_pct)| {
             let rects = world_rects(&squares, &cells);
@@ -126,7 +141,7 @@ pub async fn active_updating(
             }
             let (stage, percent) = resolve_progress(
                 &status,
-                file_progress.as_ref(),
+                file_tuple.as_ref(),
                 row_stage.as_deref(),
                 row_pct,
             );
@@ -136,7 +151,22 @@ pub async fn active_updating(
                 stage,
             })
         })
-        .collect())
+        .collect();
+    // `make map-tiles-region` writes job_progress.json but never inserts a
+    // row. Still show the construction overlay from the sidecar.
+    if out.is_empty() {
+        if let Some(file) = file_progress {
+            let rects = world_rects(&file.squares, &file.cells);
+            if !rects.is_empty() {
+                out.push(UpdatingRegion {
+                    rects,
+                    percent: Some(file.percent),
+                    stage: file.stage,
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn resolve_progress(
@@ -305,13 +335,18 @@ fn stage_from_banner(head: &str) -> Option<String> {
 }
 
 /// Last sidecar the renderer wrote next to `tiles.sqlite`.
-pub fn read_progress_file(pack: &std::path::Path) -> Option<(String, i32)> {
+pub fn read_progress_file(pack: &std::path::Path) -> Option<FileProgress> {
     let path = pack.parent()?.join("job_progress.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let stage = value.get("stage")?.as_str()?.to_owned();
     let percent = value.get("percent")?.as_i64()? as i32;
-    Some((stage, percent.clamp(0, 100)))
+    Some(FileProgress {
+        stage,
+        percent: percent.clamp(0, 100),
+        squares: value.get("squares").cloned().unwrap_or(serde_json::json!([])),
+        cells: value.get("cells").cloned().unwrap_or(serde_json::json!([])),
+    })
 }
 
 fn format_rects(rects: &[[i32; 4]]) -> String {
@@ -543,7 +578,7 @@ async fn spawn_and_wait(
 }
 
 async fn refresh_job_progress(state: &AppState, id: Uuid, proxy: &str) {
-    let from_file = read_progress_file(&state.config.map_tiles_path);
+    let from_file = read_progress_file(&state.config.map_tiles_path).map(|p| (p.stage, p.percent));
     let from_logs = parse_progress_from_logs(&container_logs(proxy).await.join("\n"));
     let Some((stage, pct)) = from_file.or(from_logs) else {
         return;
@@ -776,9 +811,24 @@ job: 25/100 worker: 8/8
         let pack = dir.path().join("tiles.sqlite");
         std::fs::write(dir.path().join("job_progress.json"), r#"{"stage":"render","percent":42}"#)
             .unwrap();
+        let got = read_progress_file(&pack).expect("sidecar");
+        assert_eq!(got.stage, "render");
+        assert_eq!(got.percent, 42);
+    }
+
+    #[test]
+    fn progress_file_with_cells_becomes_updating_rects() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("tiles.sqlite");
+        std::fs::write(
+            dir.path().join("job_progress.json"),
+            r#"{"stage":"render","percent":20,"cells":[[41,38,1,1]]}"#,
+        )
+        .unwrap();
+        let file = read_progress_file(&pack).unwrap();
         assert_eq!(
-            read_progress_file(&pack),
-            Some(("render".to_owned(), 42))
+            world_rects(&file.squares, &file.cells),
+            vec![[41 * 256, 38 * 256, 256, 256]]
         );
     }
 

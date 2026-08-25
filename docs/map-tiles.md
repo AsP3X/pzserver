@@ -100,7 +100,8 @@ longer depend on leftover HTML from a previous full render.
 
 Do **not** insert rows into `map_tile_jobs` by hand. `status='running'` is a
 dry-run animation. A real job is `POST /api/v1/admin/map-tiles/rerender` or
-`make map-tiles-region`.
+`make map-tiles-region`. CLI region jobs write `job_progress.json` (including
+the cell rects) so the player map still shows the construction overlay.
 
 ```bash
 make map-tiles-import
@@ -508,10 +509,14 @@ is discovering a blank map after several hours.
 bind mount, and `/pz` is one. `mkdir -p data/server/media/texturepacks` on the
 host; both `make map-tiles` targets already do this for you.
 
-**Regional job fails with `map_info.json is missing`.** Fixed in current
-`run.sh` (reconstructs from the pack or `map_info.vanilla.json`). `make up`
-also seeds that file. If you are on an older image, `git pull` and rerun
-`make map-tiles-region`.
+**Regional job fails with `map_info mismatch` / `Render stopped`.** pzmap2dzi
+compares on-disk `w`/`h`/`skip` to the size it computes from the game files.
+A seeded ISO_DZI file is a few hundred pixels off. Current `run.sh` deletes
+`map_info.json` after planning so pzmap2dzi can write a matching one.
+
+**Save overlay: `No module named 'lark'`.** The pzdataspec zip needs `lark`.
+The map-tiles image installs it. Rebuild that image (`make map-tiles-region`
+already does).
 
 **The render says it cannot find the game files.** On Windows, a hand-run
 `docker run` needs `MSYS_NO_PATHCONV=1` from Git Bash or the bind mount silently

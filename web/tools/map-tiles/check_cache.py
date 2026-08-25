@@ -34,6 +34,15 @@ def main(log_path: str, limit_mb: int) -> int:
     peaks = PEAK.findall(text)
 
     if not peaks:
+        if "map_info mismatch" in text or "Render stopped" in text:
+            print(
+                "FAIL: pzmap2dzi stopped before painting (map_info mismatch).\n"
+                "The on-disk map_info.json w/h/skip did not match the size it\n"
+                "computed from the game files. run.sh now drops that file before\n"
+                "render so it can write a fresh one.",
+                file=sys.stderr,
+            )
+            return 1
         print(
             "FAIL: the render never reported its peak cache use.\n"
             "Without it there is no way to tell whether tiles were evicted and\n"

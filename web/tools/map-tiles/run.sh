@@ -256,6 +256,11 @@ if [ -n "${DETAIL:-}${DETAIL_ONLY:-}" ] && [ -f "$TREE/map_info.json" ]; then
     cp "$TREE/map_info.json" "$MAP_INFO_BAK"
     python /tools/align_map_info_skip.py "$TREE/map_info.json" 1
 fi
+# pzmap2dzi compares on-disk w/h/skip to the size it just computed from the
+# lotheaders. A seeded ISO_DZI file (or skip-aligned copy) is a few hundred
+# pixels off and it stops. Planning already used x0/y0/sqr; let it write a
+# fresh map_info for this omit_levels.
+rm -f "$TREE/map_info.json"
 
 if [ -n "$REGION" ]; then
     echo "==> render region"
@@ -269,6 +274,10 @@ RENDER_LOG=/tmp/render.log
 watch_progress render 20 50 "$RENDER_LOG"
 python main.py -c "$CONF" render base 2>&1 | tee "$RENDER_LOG"
 stop_progress_watch
+if grep -q "map_info mismatch" "$RENDER_LOG" || grep -q "Render stopped" "$RENDER_LOG"; then
+    echo "FAIL: pzmap2dzi refused the base render (map_info mismatch)." >&2
+    exit 1
+fi
 set_progress render 70
 
 if [ -n "${WANT_SAVE:-}" ]; then
@@ -276,6 +285,10 @@ if [ -n "${WANT_SAVE:-}" ]; then
     watch_progress save 70 15 "$RENDER_LOG"
     python main.py -c "$CONF" render save 2>&1 | tee -a "$RENDER_LOG"
     stop_progress_watch
+    if grep -q "Failed to load parser utils" "$RENDER_LOG"; then
+        echo "FAIL: save overlay parser did not load (need lark in the image)." >&2
+        exit 1
+    fi
     echo "==> composite save onto base"
     set_progress composite 88
     if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then

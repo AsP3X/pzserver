@@ -16,9 +16,35 @@ from pathlib import Path
 JOB_RE = re.compile(r"job:\s*(\d+)\s*/\s*(\d+)")
 
 
+def parse_env_rects(text: str) -> list[list[int]]:
+    """`41,38` or `41,38,1,1;40,12` from PZ_MAP_CELLS / PZ_MAP_SQUARES."""
+    out = []
+    for chunk in (text or "").split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = [int(p) for p in chunk.split(",") if p.strip() != ""]
+        if len(parts) == 2:
+            out.append([parts[0], parts[1], 1, 1])
+        elif len(parts) == 4 and parts[2] > 0 and parts[3] > 0:
+            out.append(parts)
+    return out
+
+
+def extra_from_env() -> dict:
+    extra = {}
+    cells = parse_env_rects(os.environ.get("PZ_MAP_CELLS", ""))
+    squares = parse_env_rects(os.environ.get("PZ_MAP_SQUARES", ""))
+    if cells:
+        extra["cells"] = cells
+    if squares:
+        extra["squares"] = squares
+    return extra
+
+
 def write(path: Path, stage: str, percent: float) -> None:
     percent_i = max(0, min(100, int(round(percent))))
-    payload = {"stage": stage, "percent": percent_i}
+    payload = {"stage": stage, "percent": percent_i, **extra_from_env()}
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(payload), encoding="utf-8")

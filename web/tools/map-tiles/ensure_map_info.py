@@ -11,15 +11,18 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from verify import CELL_RECTS, EXACT, FULL_H, FULL_W
+from verify import CELL_RECTS, EXACT
 
-# Full county pack uses omit_levels: 2. Stored w/h are the full pyramid
-# divided by 2^skip.
+# Full county pack uses omit_levels: 2. w/h must match what pzmap2dzi
+# computes from the game files (slightly smaller than ISO_DZI), or it
+# aborts with "map_info mismatch" rather than mixing pyramids.
 DEFAULT_SKIP = 2
+PZMAP_SKIP2_W = 579616
+PZMAP_SKIP2_H = 253944
 
 
 def canonical(skip: int = DEFAULT_SKIP) -> dict:
-    scale = 2**skip
+    scale = 2 ** (DEFAULT_SKIP - skip)
     return {
         "x0": EXACT["x0"],
         "y0": EXACT["y0"],
@@ -27,8 +30,8 @@ def canonical(skip: int = DEFAULT_SKIP) -> dict:
         "cell_size": 256,
         "tile_size": 2048,
         "skip": skip,
-        "w": FULL_W // scale,
-        "h": FULL_H // scale,
+        "w": PZMAP_SKIP2_W * scale,
+        "h": PZMAP_SKIP2_H * scale,
         "cell_rects": [list(r) for r in CELL_RECTS],
     }
 

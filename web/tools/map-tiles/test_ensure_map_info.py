@@ -22,6 +22,8 @@ def test_ensure_writes_canonical_when_missing(tmp_path):
     info = json.loads(dest.read_text(encoding="utf-8"))
     assert info["x0"] == 1_040_384
     assert info["skip"] == 2
+    assert info["w"] == 579616
+    assert info["h"] == 253944
     assert check(info) == []
 
 
