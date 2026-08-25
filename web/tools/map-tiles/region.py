@@ -23,16 +23,35 @@ from cells import (
 
 
 def cover_each(geo: Geometry, square_rects, level: int) -> list:
-    """One cell box per input rect, padded so tile corners cannot go black.
-
-    `covering_cells_for_tiles` is a single AABB. Two towns would otherwise
-    become one rectangle of forest between them.
+    """Whole-tile cell boxes per input rect. Used for z21 detail fills
+    where there is no underlay to recover unpainted corners.
     """
     boxes = []
     for rect in square_rects:
         leaves = square_rect_to_tiles(geo, [rect], [level])
         boxes.extend(covering_cells_for_tiles(geo, leaves, level))
     return inflate_cell_rects(boxes, pad=1)
+
+
+def squares_to_cell_boxes(geo: Geometry, square_rects) -> list:
+    """Cell boxes that cover each square rect, no DZI-tile pad.
+
+    Expanding to whole tiles (then +1 cell) re-paints neighbors. Those
+    fresh JPEGs never pixel-match the original pack — half-cell seams and
+    floating tree stamps. Unpainted corners of the *requested* tiles are
+    filled from the pristine underlay instead.
+    """
+    s = geo.cell_size
+    boxes = []
+    for x, y, w, h in square_rects:
+        if w <= 0 or h <= 0:
+            continue
+        cx = x // s
+        cy = y // s
+        cx2 = (x + w - 1) // s
+        cy2 = (y + h - 1) // s
+        boxes.append((cx, cy, cx2 - cx + 1, cy2 - cy + 1))
+    return boxes
 
 
 def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
@@ -46,7 +65,7 @@ def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
     merge them from half-painted children (that merge is the black rectangle
     at zoom-out).
     """
-    render_cells = cover_each(geo, square_rects, max_level)
+    render_cells = squares_to_cell_boxes(geo, square_rects)
     leaves = (
         cell_rect_to_tiles(geo, render_cells, [max_level])
         if render_cells

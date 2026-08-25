@@ -199,10 +199,10 @@ fine for `make map-tiles-region`; the API spawn cannot use it.
 1. **Speak squares (or cells as a helper).** Public contract is a game-world
    rectangle in squares — the same coords as pins. A cell is
    `x*256, y*256, 256, 256`. Both become DZI tiles internally.
-2. **Expand to whole tiles before rendering.** `render_cell_range` paints only
-   the cells it is handed. A tile that straddles the edge comes back
-   part-drawn and part-black. `expand_to_whole_tiles` is mandatory. Measured:
-   tile `20/134_59` went from 12.5% black to 62.4% when this was skipped.
+2. **Paint only the requested cells.** Expanding to whole DZI tiles (then
+   +1 cell) re-renders neighbors; those JPEGs never pixel-match the original
+   pack (half-cell seams, floating tree stamps). Unpainted corners of the
+   tiles that *do* straddle the request are filled from the pristine underlay.
 3. **Dirty every packed ancestor, but do not let pzmap2dzi merge them.** A
    level-20 change without rebuilding 19…0 leaves zoom-out stale. Restore
    those ancestors so the renderer skips them, paint the leaves, then

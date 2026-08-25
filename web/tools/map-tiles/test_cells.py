@@ -182,7 +182,7 @@ def test_plan_from_squares_dirties_every_packed_level():
     assert {z for z, _, _ in targets} == set(range(0, 21))
     assert restore
     assert restore.isdisjoint(targets)
-    assert render_cells
+    assert render_cells == [(34, 30, 1, 1)]
     assert keep
     assert keep == {t for t in targets if t[0] < 20}
     assert keep.isdisjoint(restore)
@@ -265,6 +265,17 @@ def test_exact_cell_boundary_uses_floor_plus_one_not_ceil():
     assert hi(41.25) == 42
     assert hi(42.0) == 43
     assert math.ceil(42.0) == 42, "ceil is the bug this formula replaces"
+
+
+def test_world_change_plan_does_not_repaint_neighbour_cells():
+    """A 5×5 expansion re-rendered cell 42,37 when we asked for 41,38 —
+    new tiles that never lined up with the original pack."""
+    from region import plan
+    from cells import cells_as_squares
+
+    squares = cells_as_squares(GEO, [(41, 38, 1, 1)])
+    _targets, _restore, render_cells, _keep = plan(GEO, squares, min_level=0, max_level=20)
+    assert render_cells == [(41, 38, 1, 1)]
 
 
 def test_inflate_grows_a_cell_box_without_going_negative():

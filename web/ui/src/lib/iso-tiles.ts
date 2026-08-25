@@ -602,7 +602,21 @@ export function drawIsoTiles(
 
     const ready = isoTiles.get(tile)
     if (ready) {
-      ctx.drawImage(ready, destX, destY, destW, destH)
+      // pzmap2dzi crops edge tiles smaller than tileSize. Stretching that
+      // JPEG to the full DZI rectangle turns trees into a shifted stamp.
+      const nw = ready.naturalWidth || ready.width
+      const nh = ready.naturalHeight || ready.height
+      if (nw > 0 && nh > 0 && (nw < ISO_DZI.tileSize || nh < ISO_DZI.tileSize)) {
+        ctx.drawImage(
+          ready,
+          destX,
+          destY,
+          destW * (nw / ISO_DZI.tileSize),
+          destH * (nh / ISO_DZI.tileSize),
+        )
+      } else {
+        ctx.drawImage(ready, destX, destY, destW, destH)
+      }
       continue
     }
 
