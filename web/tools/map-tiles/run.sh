@@ -345,8 +345,15 @@ set_progress render 70
 # unpainted cell-range corners is not — copy vanilla back from the underlay.
 if [ -n "$REGION" ] && [ -s /tmp/leaves.txt ] && [ -d /tmp/underlay ]; then
     echo "==> fill unpainted leaf corners from underlay"
-    python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay
-    python /tools/heal_black.py /tmp/leaves.txt "$TREE/layer0_files" "$PRISTINE"
+    if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then
+        python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay \
+            "$TREE/map_info.json" /tmp/save_squares.txt
+        # Do not heal leaves from pristine here: that would paste closed
+        # doors into the skip holes the overlay is about to own.
+    else
+        python /tools/fill_unpainted.py /tmp/leaves.txt "$TREE/layer0_files" /tmp/underlay
+        python /tools/heal_black.py /tmp/leaves.txt "$TREE/layer0_files" "$PRISTINE"
+    fi
 fi
 
 if [ -n "${WANT_SAVE:-}" ]; then

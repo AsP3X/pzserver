@@ -88,6 +88,29 @@ def test_open_thumpable_door_uses_open_sprite():
     assert visual_sprite_id(door) == 200
 
 
+def test_thumpable_open_is_bit_zero_of_header_when_open_field_missing():
+    """pzdataspec's IsoThumpable often has bit_header and no decoded `.open`."""
+    door = _obj(
+        100,
+        is_door=True,
+        bit_header=1 | 32 | 64 | 512,
+        open_sprite_id=200,
+        closed_sprite_id=100,
+    )
+    assert visual_sprite_id(door) == 200
+
+
+def test_thumpable_closed_header_without_open_field():
+    door = _obj(
+        100,
+        is_door=True,
+        bit_header=32 | 64 | 512,
+        open_sprite_id=200,
+        closed_sprite_id=100,
+    )
+    assert visual_sprite_id(door) == 100
+
+
 def test_closed_thumpable_door_uses_closed_sprite():
     door = _obj(
         100,

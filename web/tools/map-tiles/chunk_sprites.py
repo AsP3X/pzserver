@@ -54,7 +54,7 @@ def visual_sprite_id(obj):
     if hasattr(sub, "curtain_flags") and (
         hasattr(sub, "open_sprite_id") or hasattr(sub, "closed_sprite_id")
     ):
-        if _flag(getattr(sub, "open", 0)):
+        if _is_open(sub):
             sid = getattr(sub, "open_sprite_id", None)
             if _usable(sid):
                 return sid
@@ -66,8 +66,9 @@ def visual_sprite_id(obj):
 
     # Player-built door/window: IsoThumpable (class 18). `open` is bit 0 of
     # bit_header; sprite ids are only present when their bits were written.
+    # pzdataspec often exposes only bit_header, not a decoded `.open`.
     if hasattr(sub, "is_door") or hasattr(sub, "bit_header"):
-        if _flag(getattr(sub, "open", 0)):
+        if _is_open(sub):
             sid = getattr(sub, "open_sprite_id", None)
             if _usable(sid):
                 return sid
@@ -80,11 +81,31 @@ def visual_sprite_id(obj):
     # Curtain: sprite_id is one state, other_sprite_id the other. `open`
     # selects the alternate.
     if hasattr(sub, "other_sprite_id") and hasattr(sub, "barricade_strength"):
-        if _flag(getattr(sub, "open", 0)) and _usable(sub.other_sprite_id):
+        if _is_open(sub) and _usable(sub.other_sprite_id):
             return sub.other_sprite_id
         return default
 
     return default
+
+
+def _header_int(value):
+    if hasattr(value, "value") and not isinstance(value, (int, float, bool, str, bytes)):
+        value = value.value
+    return value if isinstance(value, int) else None
+
+
+def _is_open(sub) -> bool:
+    """IsoDoor writes `open`; IsoThumpable packs it as bit 0 of `bit_header`.
+
+    Prefer the header when both exist: pzdataspec often leaves `.open` at 0
+    on class 18 even when the door is open.
+    """
+    header = _header_int(getattr(sub, "bit_header", None))
+    if header is not None:
+        return (header & 1) != 0
+    if hasattr(sub, "open"):
+        return _flag(sub.open)
+    return False
 
 
 def _flag(value) -> bool:
