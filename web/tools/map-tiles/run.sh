@@ -18,9 +18,19 @@ TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segmen
 # render scratch (html tree, texture cache). Regional jobs update this same
 # file the API is serving.
 PACK=/pack/tiles.sqlite
-# Original county pack, left on the host bind after import. The live volume
-# may already hold JPEG-black frames from a previous region job; filling
-# corners from those is a no-op. Prefer this copy for underlay / heal.
+# Underlay: the pack we are updating, not the shipped one.
+#
+# A leaf tile straddles cells. Painting cell 41,39 leaves the part that
+# belongs to 41,38 unpainted, and fill_unpainted recovers it from here. Take
+# that from the original county pack and every job silently reverts whatever
+# its neighbours fixed on the shared boundary tile -- redrawing region by
+# region would never converge, and the redraw that fixed a clipped tree in
+# 41,38 was undone by the very next job on 41,39. The live pack already holds
+# every fix so far, and for z21 the county pack holds nothing at all.
+UNDERLAY="$PACK"
+# Original county pack, left on the host bind after import. Kept only for
+# heal_black and PZ_MAP_HEAL_ONLY: a pack that packed a black frame cannot
+# heal itself, because there the underlay *is* the black rectangle.
 PRISTINE="$PACK"
 if [ -s /out/tiles.sqlite ] && [ /out/tiles.sqlite != "$PACK" ]; then
     PRISTINE=/out/tiles.sqlite
@@ -184,21 +194,21 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     # does *not* merge them from half-painted children — that merge is the
     # black rectangle at zoom-out. We rebuild them from the finished leaves
     # after paint.
-    echo "==> restoring merge inputs from $PRISTINE"
+    echo "==> restoring merge inputs from the live pack $UNDERLAY"
     if [ "$PRISTINE" = "$PACK" ]; then
-        echo "==> no /out/tiles.sqlite; live pack is the underlay (already-black tiles cannot heal)"
+        echo "==> no /out/tiles.sqlite; a tile that packed black cannot be healed"
     else
-        echo "==> pristine county pack $PRISTINE (live pack may already be black)"
+        echo "==> original county pack $PRISTINE kept for heal_black"
     fi
     set_progress restore 10
-    python /tools/unpack.py "$PRISTINE" "$TREE/layer0_files" --only /tmp/restore.txt
+    python /tools/unpack.py "$UNDERLAY" "$TREE/layer0_files" --only /tmp/restore.txt
     if [ -s /tmp/keep.txt ]; then
-        echo "==> restoring ancestors from pristine (rebuilt after paint)"
-        python /tools/unpack.py "$PRISTINE" "$TREE/layer0_files" --only /tmp/keep.txt
+        echo "==> restoring ancestors from the live pack (rebuilt after paint)"
+        python /tools/unpack.py "$UNDERLAY" "$TREE/layer0_files" --only /tmp/keep.txt
     fi
     if [ -s /tmp/leaves.txt ]; then
-        echo "==> snapshot leaf tiles as underlay from pristine"
-        python /tools/unpack.py "$PRISTINE" /tmp/underlay --only /tmp/leaves.txt
+        echo "==> snapshot leaf tiles as underlay from the live pack"
+        python /tools/unpack.py "$UNDERLAY" /tmp/underlay --only /tmp/leaves.txt
     fi
 
     if [ -n "${PZ_MAP_HEAL_ONLY:-}" ]; then
