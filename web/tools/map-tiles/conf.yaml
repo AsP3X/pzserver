@@ -35,6 +35,31 @@ render_conf:
     # built on it. verify.py enforces this.
     tile_size: 2048
 
+    # How far outside a tile to look for squares whose sprite reaches into it,
+    # as [left, top, right, bottom] in grid units (64 px across, 32 px down).
+    #
+    # pzmap2dzi offers two named sizes and both are too small for B42. They are
+    # derived from an assumed texture: 'normal' from 128x256, giving
+    # (0, 0, 0, 6) -- no horizontal reach at all -- and 'large' from 384x512,
+    # giving (-2, 0, 2, 14). Measured against this install's texture packs:
+    #
+    #   vegetation_trees_01_3    115 x 176   offset (-63, -194)
+    #   jumbo_tree_01_0          110 x 227   offset (-58, -238)
+    #   e_redmapleJUMBO_1_3      229 x 449   offset (-115, -462)
+    #   e_redmapleJUMBOXL_1_3    515 x 727   offset (-259, -729)
+    #
+    # Knox County places JUMBOXL trees directly in the lotpack (cell 41,38 has
+    # one at square 10723,9765). At 515x727 it reaches 259 px left and 729 px
+    # up from its square -- 5 grid columns and 23 grid rows. Under either named
+    # margin the renderer never considers that square while painting the tiles
+    # its canopy covers, so the canopy is chopped along a straight line: the
+    # rectangle-over-a-tree. Sized here for JUMBOXL with a column and two rows
+    # of headroom (320 px across, 800 px up). Costs render time, not pack size.
+    #
+    # BaseRender.update_options overwrites whatever conf says, so
+    # patch_render_margin.py turns that into a default and this line wins.
+    render_margin: [-5, 0, 5, 25]
+
     # Only building layer 0. The client requests layer0_files exclusively, and
     # rendering the upper floors would multiply the work for tiles nothing asks
     # for. Range is half-open: [0, 1] is layer 0 alone.

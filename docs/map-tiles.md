@@ -179,6 +179,41 @@ the open-door hole; everything else on the square still paints. The panel
 job must pass `PYTHONPATH=/tools` into the renderer; without it the
 skip/sprite patches never load and the door stays shut on the map.
 
+#### Render margin: the rectangle over a tree
+
+`render_conf.render_margin` decides how far outside a tile pzmap2dzi looks for
+squares whose sprite reaches into it. Get it too small and a tree standing
+just outside the tile is never considered, so its canopy is chopped along a
+straight line — a rectangle sitting over the tree.
+
+pzmap2dzi offers two named sizes, both derived from an assumed texture, and
+**both are too small for B42**:
+
+| margin | assumed texture | `[left, top, right, bottom]` |
+|---|---|---|
+| `normal` | 128×256 | `[0, 0, 0, 6]` — no horizontal reach at all |
+| `large` | 384×512 | `[-2, 0, 2, 14]` |
+
+Measured against this install's texture packs:
+
+| texture | size | offset |
+|---|---|---|
+| `vegetation_trees_01_3` | 115×176 | (-63, -194) |
+| `jumbo_tree_01_0` | 110×227 | (-58, -238) |
+| `e_redmapleJUMBO_1_3` | 229×449 | (-115, -462) |
+| `e_redmapleJUMBOXL_1_3` | **515×727** | **(-259, -729)** |
+
+Knox County puts JUMBOXL trees straight in the lotpack — cell 41,38 has one at
+square 10723,9765. It reaches 259 px left and 729 px up, past `large` in both
+axes. So `conf.yaml` sets an explicit numeric margin instead,
+`[-5, 0, 5, 25]` (320 px across, 800 px up), and `patch_render_margin.py`
+stops `BaseRender.update_options` from overwriting it.
+
+**The shipped county pack was rendered without this**, so the chopped canopies
+are baked into it everywhere. Only cells that get redrawn pick up the fix — a
+`map-tiles-region` on the cells you care about, or a full `map-tiles` run
+(hours) to clear it county-wide.
+
 #### Why the overlay is off
 
 A chunk stores each object's sprite as an **id**, and the renderer turns that

@@ -63,6 +63,7 @@ python /tools/patch_scheduler.py
 python /tools/patch_save_render.py
 python /tools/patch_base_skip.py
 python /tools/patch_unit_range.py
+python /tools/patch_render_margin.py
 echo "==> PYTHONPATH=$PYTHONPATH"
 
 # Fail before the hours, not after them.
