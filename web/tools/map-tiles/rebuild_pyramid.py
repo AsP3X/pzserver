@@ -48,7 +48,9 @@ def merge_parent(tiles_dir: Path, z: int, x: int, y: int, tile_size: int = 2048)
         # sliver to 2048x2048 turns trees into a vertical barcode. Paste at
         # native size in the quadrant, same as merge_tile.
         canvas.paste(im, (dx * tile_size, dy * tile_size))
-    parent = canvas.resize((tile_size, tile_size), Image.Resampling.LANCZOS)
+    # BOX is the 2x2 average for an exact 2x downsample. LANCZOS rings at
+    # child boundaries and paints a 1-pixel bright line every 512 rows.
+    parent = canvas.resize((tile_size, tile_size), Image.Resampling.BOX)
     dest = child_path(tiles_dir, z, x, y)
     dest.parent.mkdir(parents=True, exist_ok=True)
     parent.save(dest, quality=70, optimize=True)

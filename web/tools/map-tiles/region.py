@@ -36,10 +36,9 @@ def cover_each(geo: Geometry, square_rects, level: int) -> list:
 def squares_to_cell_boxes(geo: Geometry, square_rects) -> list:
     """Cell boxes that cover each square rect, no DZI-tile pad.
 
-    Expanding to whole tiles (then +1 cell) re-paints neighbors. Those
-    fresh JPEGs never pixel-match the original pack — half-cell seams and
-    floating tree stamps. Unpainted corners of the *requested* tiles are
-    filled from the pristine underlay instead.
+    Dirty tiles are taken from these boxes only. `plan` pads
+    `render_cell_range` separately so a tree in the next cell can still
+    paint its canopy onto this cell's tiles.
     """
     s = geo.cell_size
     boxes = []
@@ -65,12 +64,17 @@ def plan(geo: Geometry, square_rects, min_level: int, max_level: int):
     merge them from half-painted children (that merge is the black rectangle
     at zoom-out).
     """
-    render_cells = squares_to_cell_boxes(geo, square_rects)
+    asked = squares_to_cell_boxes(geo, square_rects)
+    # Pack only the asked cells' tiles. Pad render_cell_range by one cell so
+    # a tree whose square sits in the neighbour still paints onto tiles that
+    # straddle the boundary. Packing those neighbour tiles is the old 5×5
+    # expansion: fresh JPEGs that never lined up with the pack.
     leaves = (
-        cell_rect_to_tiles(geo, render_cells, [max_level])
-        if render_cells
+        cell_rect_to_tiles(geo, asked, [max_level])
+        if asked
         else square_rect_to_tiles(geo, square_rects, [max_level])
     )
+    render_cells = inflate_cell_rects(asked, pad=1)
     targets = dirty_pyramid(leaves, max_level, min_level)
     restore = merge_inputs(targets, deepest=max_level)
     keep = {t for t in targets if t[0] < max_level}

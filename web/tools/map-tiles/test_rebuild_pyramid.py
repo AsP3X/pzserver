@@ -40,6 +40,22 @@ def test_missing_child_leaves_the_restored_parent_alone(tmp_path):
     assert Image.open(tiles / "19" / "4_6.jpg").getpixel((0, 0)) == (10, 10, 10)
 
 
+def test_child_boundary_does_not_ring(tmp_path):
+    """LANCZOS overshoots a hard edge; BOX must not invent a brighter line."""
+    tiles = tmp_path / "layer0_files"
+    dark = (40, 40, 40)
+    light = (200, 200, 200)
+    _tile(tiles / "20" / "8_12.jpg", dark)
+    _tile(tiles / "20" / "9_12.jpg", light)
+    _tile(tiles / "20" / "8_13.jpg", dark)
+    _tile(tiles / "20" / "9_13.jpg", light)
+    assert merge_parent(tiles, 19, 4, 6, tile_size=32)
+    out = Image.open(tiles / "19" / "4_6.jpg").convert("RGB")
+    pixels = [out.getpixel((x, y))[0] for y in range(32) for x in range(32)]
+    assert max(pixels) <= light[0] + 8
+    assert min(pixels) >= dark[0] - 8
+
+
 def test_rebuild_walks_deepest_first(tmp_path):
     tiles = tmp_path / "layer0_files"
     # Two levels: z20 children → z19, then that z19 plus cousins → z18.

@@ -139,11 +139,12 @@ The county pack is vanilla map files. Player construction and environment
 damage live in the dedicated-server save
 (`Saves/Multiplayer/<name>/map/{x}/{y}.bin` on B42).
 
-> **The save overlay is currently off.** A world-change job re-renders the
-> region from vanilla map files and stops there — player construction, open
-> doors and covered windows do **not** reach the map yet. See
-> *[Why the overlay is off](#why-the-overlay-is-off)*. Everything below
-> describes the pipeline as it runs with `PZ_MAP_SAVE_SPRITES=1`.
+> **Save-sprite paint is off; open-door skip is on.** A world-change job
+> re-renders the region from vanilla map files and drops the lotpack tiles
+> the live save contradicts (an opened door, a smashed window). It does
+> **not** composite save-chunk sprites on top — those ids still resolve to
+> the wrong sheets. See *[Why save-sprite paint is off](#why-save-sprite-paint-is-off)*.
+> `PZ_MAP_SAVE_SPRITES=1` turns the (broken) paint path back on.
 
 A **world-change job** is the same regional job, plus a save overlay:
 
@@ -214,34 +215,20 @@ are baked into it everywhere. Only cells that get redrawn pick up the fix — a
 `map-tiles-region` on the cells you care about, or a full `map-tiles` run
 (hours) to clear it county-wide.
 
-#### Why the overlay is off
+#### Why save-sprite paint is off
 
-A chunk stores each object's sprite as an **id**, and the renderer turns that
-id into a tile name through `load_tile_defs` plus the save's own
-`WorldDictionary`. On this world the second half is missing: the file parses
-(5103 items, 46 objects) but reports `num_sprites = 0`, so
-`load_world_dict_sprites` returns nothing.
+A chunk stores each object's sprite as an **id**. `load_tile_defs` numbers
+B42 `newtiledefinitions.tiles` from **110000** (page size 1000). The save
+writes the old file-0 ids: `fixtures_doors_01_0` is **11264** in the chunk
+and **122000** in the tiledef file. WorldDictionary.bin parses (5103 items,
+46 objects) but reports `num_sprites = 0`, so it cannot fill the gap.
 
-That leaves `load_tile_defs` as the whole map, and its key space starts at
-**110000** — `update_tile_defs` uses `index_offset = 110000` for
-`newtiledefinitions.tiles` and refuses `file_no <= 0`. The save writes ids
-like `17463` and `94229`, below that. So:
-
-- an id that misses is dropped (**3875** distinct `missing tiledef for sprite`
-  in one cell), and
-- an id that lands resolves into the **wrong sheet**.
-
-The result is window frames on roads and curtains on hedges, on every square.
-No compositing strategy repairs it. Clipping the overlay to each changed
-square's ground diamond only replaced the stray sprites with black notches,
-because a PZ sprite is anchored bottom-centre and stands about three diamond
-heights above its square — the clip keeps the doorstep and throws the door
-away.
-
-Fixing this means finding the id space these chunks actually use for this
-B42 build and teaching `load_tile_defs` its offsets. Until then a
-world-change job paints vanilla, which is correct, and
-`PZ_MAP_SAVE_SPRITES=1` turns the overlay back on for that work.
+Using the id map paints the wrong sheet — window frames on roads. The
+lotpack already has the closed leaf's *name* on that square, so a
+world-change job skips that name during the vanilla paint and does not
+composite save sprites. The open-door tile is a hole; dropping the closed
+leaf is enough. `PZ_MAP_SAVE_SPRITES=1` turns id-based save paint back on
+for whoever is working on the mapping.
 
 The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
 (default 120). The first pass seeds `map_tile_blocks` and does not enqueue.

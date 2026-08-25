@@ -250,26 +250,18 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     SAVE_GAME="${PZ_SAVE_GAME:-}"
     WANT_SAVE="${PZ_MAP_SAVE:-}"
 
-    # The overlay is off until chunk sprite ids resolve to tile names.
-    #
-    # This world's WorldDictionary.bin parses (5103 items, 46 objects) but
-    # reports num_sprites = 0, so load_world_dict_sprites returns nothing and
-    # load_tile_defs is the whole map. Its key space starts at 110000 --
-    # update_tile_defs uses index_offset 110000 for newtiledefinitions.tiles
-    # and refuses file_no <= 0 -- while the save writes ids like 17463 and
-    # 94229. A miss is dropped (3875 distinct "missing tiledef for sprite" in
-    # one cell) and a hit lands in the wrong sheet, so fence posts render as
-    # window frames and hedges as curtains, on every square.
-    #
-    # No compositing strategy fixes that; clipping the overlay to the door's
-    # ground diamond only hid it behind black notches. Paint vanilla, which is
-    # correct, until the mapping is. PZ_MAP_SAVE_SPRITES=1 re-enables it for
-    # whoever is working on the id space.
-    if [ -n "$WANT_SAVE$SAVE_GAME" ] && [ -z "${PZ_MAP_SAVE_SPRITES:-}" ]; then
-        echo "==> save overlay off (chunk sprite ids do not resolve; see run.sh)"
-        echo "    region paints vanilla only; set PZ_MAP_SAVE_SPRITES=1 to work on it"
-        WANT_SAVE=
-        SAVE_GAME=
+    # Paint-the-save overlay stays off: chunk sprite ids still do not match
+    # load_tile_defs, and compositing them puts window frames on roads.
+    # Open doors are handled by skipping the lotpack *name* of the closed
+    # leaf during the vanilla paint (open_squares.py). The open tile is a
+    # hole; dropping the closed leaf is enough. PZ_MAP_SAVE_SPRITES=1 turns
+    # the (still broken) save paint back on for whoever is working on ids.
+    PAINT_SAVE=
+    if [ -n "${PZ_MAP_SAVE_SPRITES:-}" ]; then
+        PAINT_SAVE=1
+    else
+        echo "==> save overlay paint off (chunk sprite ids do not resolve)"
+        echo "    skip list still runs from lotpack names so open doors vanish"
     fi
 
     if [ -z "$DETAIL_ONLY" ] && { [ -n "$WANT_SAVE" ] || [ -n "$SAVE_GAME" ]; }; then
@@ -315,12 +307,15 @@ print(f'{newest}')
             # paints the rest back (black notches), skip the chunk and the
             # whole cell goes black.
             python /tools/open_squares.py "$SNAP" /tmp/save_skip.txt \
-                /pz /pz/steamapps/workshop/content/108600 || true
-            if [ ! -f "$SNAP/WorldDictionary.bin" ]; then
-                echo "==> save has no WorldDictionary.bin; region will be vanilla tiles only"
+                /pz /pz/steamapps/workshop/content/108600 \
+                "/pz/media/maps/Muldraugh, KY" || true
+            if [ -z "$PAINT_SAVE" ]; then
+                WANT_SAVE=
+            elif [ ! -f "$SNAP/WorldDictionary.bin" ]; then
+                echo "==> save has no WorldDictionary.bin; skip list only, no save paint"
                 WANT_SAVE=
             elif [ ! -d "$SNAP/map" ] && [ -z "$(ls "$SNAP"/map_*_*.bin 2>/dev/null)" ]; then
-                echo "==> those cells have no save chunks; region will be vanilla tiles only"
+                echo "==> those cells have no save chunks; skip list only, no save paint"
                 WANT_SAVE=
             else
                 python /tools/set_save_game.py "$CONF" /out/save-snapshot "$SAVE_GAME"
