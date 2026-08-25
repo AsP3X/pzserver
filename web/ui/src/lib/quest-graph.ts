@@ -199,21 +199,46 @@ export function port(node: GraphNode, side: 'in' | 'out'): { x: number; y: numbe
   }
 }
 
-export function wirePath(from: { x: number; y: number }, to: { x: number; y: number }): string {
-  const mid = Math.max(40, Math.abs(to.x - from.x) * 0.45)
+export interface Point {
+  x: number
+  y: number
+}
+
+/** How far a wire leaves its pin horizontally before it starts bending. */
+function bend(from: Point, to: Point): number {
+  return Math.max(40, Math.abs(to.x - from.x) * 0.45)
+}
+
+export function wirePath(from: Point, to: Point): string {
+  const mid = bend(from, to)
   return `M ${from.x} ${from.y} C ${from.x + mid} ${from.y}, ${to.x - mid} ${to.y}, ${to.x} ${to.y}`
 }
 
 /** Where the cut-the-wire handle sits: the midpoint of that curve. */
-export function wireMid(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): { x: number; y: number } {
-  const mid = Math.max(40, Math.abs(to.x - from.x) * 0.45)
+export function wireMid(from: Point, to: Point): Point {
+  const mid = bend(from, to)
   // Bezier at t = 0.5 reduces to this average of the four control points.
   return {
     x: (from.x + 3 * (from.x + mid) + 3 * (to.x - mid) + to.x) / 8,
     y: (from.y + 3 * from.y + 3 * to.y + to.y) / 8,
+  }
+}
+
+/**
+ * The box a wire cannot leave, so the layer drawing it knows how big to be.
+ *
+ * A cubic stays inside the hull of its four control points, and the two middle
+ * ones sit a bend either side of the pins — a wire drawn back towards its own
+ * source bows well past both ends, so its endpoints alone are not the extent.
+ */
+export function wireBox(from: Point, to: Point): { minX: number; minY: number; maxX: number; maxY: number } {
+  const mid = bend(from, to)
+  const xs = [from.x, from.x + mid, to.x - mid, to.x]
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(from.y, to.y),
+    maxX: Math.max(...xs),
+    maxY: Math.max(from.y, to.y),
   }
 }
 

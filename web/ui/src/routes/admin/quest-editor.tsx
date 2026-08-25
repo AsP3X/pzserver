@@ -53,6 +53,7 @@ import {
   summarise,
   totalPayout,
   uid,
+  wireBox,
   wireMid,
   wirePath,
   type GraphNode,
@@ -83,6 +84,9 @@ const TONES: Record<NodeCategory, { bar: string; text: string; border: string }>
 
 const ZOOM_MIN = 0.3
 const ZOOM_MAX = 1.6
+
+/** Breathing room around the wire layer, so a stroke never ends on its edge. */
+const MARGIN = 64
 
 type Selection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null
 
@@ -751,15 +755,57 @@ function Board({
   >(null)
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
 
+  const linking = drag.current?.kind === 'wire' ? drag.current.from : null
+  // Only the loose end of a wire being dragged has to stretch the layer; the
+  // pointer wandering across an idle board does not.
+  const reach = linking ? cursor : null
+
+  /**
+   * The rectangle the wire layer covers, in board coordinates.
+   *
+   * An `<svg>` clips to its own viewport, so this cannot simply start at the
+   * board origin and run to the far side of the last node: a node dragged left
+   * of the origin, or a wire pulled out into empty board, would be sliced off
+   * at an edge with nothing on screen to explain it. Every wire reports the box
+   * it needs, negative coordinates included, and the layer is the union.
+   */
   const world = useMemo(() => {
-    let width = 1200
-    let height = 700
-    for (const node of graph.nodes) {
-      width = Math.max(width, node.x + NODE_W + 240)
-      height = Math.max(height, node.y + NODE_H + 240)
+    let minX = 0
+    let minY = 0
+    let maxX = 1200
+    let maxY = 700
+
+    function cover(box: { minX: number; minY: number; maxX: number; maxY: number }) {
+      minX = Math.min(minX, box.minX)
+      minY = Math.min(minY, box.minY)
+      maxX = Math.max(maxX, box.maxX)
+      maxY = Math.max(maxY, box.maxY)
     }
-    return { width, height }
-  }, [graph.nodes])
+
+    for (const node of graph.nodes) {
+      cover({ minX: node.x, minY: node.y, maxX: node.x + NODE_W, maxY: node.y + NODE_H })
+    }
+
+    for (const edge of graph.edges) {
+      const from = graph.nodes.find((node) => node.id === edge.from)
+      const to = graph.nodes.find((node) => node.id === edge.to)
+      if (from && to) {
+        cover(wireBox(port(from, 'out'), port(to, 'in')))
+      }
+    }
+
+    const source = reach ? graph.nodes.find((node) => node.id === linking) : null
+    if (source && reach) {
+      cover(wireBox(port(source, 'out'), reach))
+    }
+
+    return {
+      x: minX - MARGIN,
+      y: minY - MARGIN,
+      width: maxX - minX + MARGIN * 2,
+      height: maxY - minY + MARGIN * 2,
+    }
+  }, [graph, linking, reach])
 
   function local(event: { clientX: number; clientY: number }) {
     const box = ref.current?.getBoundingClientRect()
@@ -802,13 +848,14 @@ function Board({
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const point = local(event)
-    setCursor(point)
     const current = drag.current
     if (!current) {
       return
     }
-    if (current.kind === 'pan') {
+    const point = local(event)
+    if (current.kind === 'wire') {
+      setCursor(point)
+    } else if (current.kind === 'pan') {
       onView((state) => ({
         ...state,
         x: current.ox + (event.clientX - current.x),
@@ -857,8 +904,6 @@ function Board({
         : { ...state, edges: [...state.edges, { id: uid('e'), from: current.from, to }] },
     )
   }
-
-  const linking = drag.current?.kind === 'wire' ? drag.current.from : null
 
   return (
     <div
@@ -917,11 +962,19 @@ function Board({
         className="absolute origin-top-left"
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
-          width: world.width,
-          height: world.height,
+          width: world.x + world.width,
+          height: world.y + world.height,
         }}
       >
-        <svg className="pointer-events-none absolute inset-0" width={world.width} height={world.height}>
+        {/* Offset and viewBox move together, so paths are still drawn in board
+            coordinates however far into the negative the layer reaches. */}
+        <svg
+          className="pointer-events-none absolute"
+          style={{ left: world.x, top: world.y }}
+          width={world.width}
+          height={world.height}
+          viewBox={`${world.x} ${world.y} ${world.width} ${world.height}`}
+        >
           {graph.edges.map((edge) => {
             const from = graph.nodes.find((node) => node.id === edge.from)
             const to = graph.nodes.find((node) => node.id === edge.to)
