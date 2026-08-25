@@ -25,6 +25,7 @@ import {
   hitTestPins,
   loadWorldmap,
   vectorMapping,
+  worldToCell,
   zoomOf,
   type MapPin,
   type MapRect,
@@ -625,6 +626,7 @@ export function WorldmapView({
       ? levelForScale(view.scale)
       : Math.round(zoomOf(view.scale))
     : null
+  const cursorCell = cursor ? worldToCell(cursor.x, cursor.y) : null
 
   return (
     <div className={cn('relative overflow-hidden border border-fence bg-ash', className)}>
@@ -867,12 +869,17 @@ export function WorldmapView({
         ) : null}
         <Control label={t('map.zoom_out')} onClick={() => zoomAt(1 / 1.5)} icon={Minus} />
         <Control label={t('map.recentre')} onClick={reset} icon={Maximize2} />
-        {cursor ? (
+        {cursor && cursorCell ? (
           <div
-            aria-label={t('map.coordinates')}
+            aria-label={`${t('map.coordinates')} ${Math.round(cursor.x)}, ${Math.round(cursor.y)}. ${t('map.cell')} ${cursorCell.x}, ${cursorCell.y}`}
             className="border border-fence-bright bg-void/85 px-2 py-1 font-mono text-[0.625rem] text-bone tabular-nums"
           >
-            {Math.round(cursor.x)}, {Math.round(cursor.y)}
+            <div>
+              {Math.round(cursor.x)}, {Math.round(cursor.y)}
+            </div>
+            <div className="text-dust">
+              {t('map.cell')} {cursorCell.x}, {cursorCell.y}
+            </div>
           </div>
         ) : null}
       </div>

@@ -11,6 +11,7 @@ import { Panel } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorldmapView, type MapFocus } from '@/components/ui/worldmap'
 import { api, ApiError, type AdminPlayer } from '@/lib/api'
+import { worldToCell } from '@/lib/worldmap'
 import { cn } from '@/lib/cn'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
 import { fuzzyMatch } from '@/lib/fuzzy'
@@ -321,7 +322,7 @@ export function AdminPlayerMapPage() {
                             {player.online ? t('map.in_game') : t('map.logged_out')}
                             {' · '}
                             {player.x !== null && player.y !== null
-                              ? `${formatNumber(Math.round(player.x), intlLocale)}, ${formatNumber(Math.round(player.y), intlLocale)}`
+                              ? `${formatNumber(Math.round(player.x), intlLocale)}, ${formatNumber(Math.round(player.y), intlLocale)} · ${t('map.cell_at', worldToCell(player.x, player.y))}`
                               : t('admin.map_unknown_position')}
                           </span>
                           <HealthMeter
@@ -365,6 +366,9 @@ export function AdminPlayerMapPage() {
                       {' · '}
                       {formatNumber(Math.round(current.x ?? 0), intlLocale)},{' '}
                       {formatNumber(Math.round(current.y ?? 0), intlLocale)}
+                      {current.x !== null && current.y !== null
+                        ? ` · ${t('map.cell_at', worldToCell(current.x, current.y))}`
+                        : ''}
                       {current.z !== null && current.z !== 0
                         ? ` · ${t('map.floor_number', { count: current.z })}`
                         : ` · ${t('map.ground_floor')}`}
@@ -386,6 +390,8 @@ export function AdminPlayerMapPage() {
                     {t('admin.map_destination', {
                       x: Math.round(destination.x),
                       y: Math.round(destination.y),
+                      cx: worldToCell(destination.x, destination.y).x,
+                      cy: worldToCell(destination.x, destination.y).y,
                     })}
                   </p>
                 ) : (

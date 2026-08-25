@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Crosshair, Layers, Navigation } from 'lucide-react'
+import { Crosshair, Grid3x3, Layers, Navigation } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { HealthMeter } from '@/components/ui/bar'
@@ -8,6 +8,7 @@ import { FormError } from '@/components/ui/field'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorldmapView, type MapFocus } from '@/components/ui/worldmap'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
+import { worldToCell } from '@/lib/worldmap'
 import { myCharacterQuery, myPositionQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 
@@ -85,6 +86,11 @@ export function MapPage() {
                   value={`${formatNumber(Math.round(position.x), intlLocale)}, ${formatNumber(Math.round(position.y), intlLocale)}`}
                 />
                 <Reading
+                  icon={Grid3x3}
+                  label={t('map.cell')}
+                  value={`${formatNumber(worldToCell(position.x, position.y).x, intlLocale)}, ${formatNumber(worldToCell(position.x, position.y).y, intlLocale)}`}
+                />
+                <Reading
                   icon={Layers}
                   label={t('map.floor')}
                   value={
@@ -121,7 +127,7 @@ export function MapPage() {
                 <Reading
                   icon={Crosshair}
                   label={t('map.cursor')}
-                  value={`${formatNumber(Math.round(cursor.x), intlLocale)}, ${formatNumber(Math.round(cursor.y), intlLocale)}`}
+                  value={`${formatNumber(Math.round(cursor.x), intlLocale)}, ${formatNumber(Math.round(cursor.y), intlLocale)} · ${t('map.cell_at', worldToCell(cursor.x, cursor.y))}`}
                 />
               </span>
             ) : (

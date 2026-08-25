@@ -24,6 +24,19 @@ import {
 /** Where the pack is served from. Copied in at build time, not fetched cold. */
 export const WORLDMAP_URL = '/map/vanilla.json'
 
+/**
+ * One B42 map cell in world squares. Same unit as `CELLS=` on the renderer
+ * (`34,30` is squares `8704,7680` through the next 256).
+ */
+export const MAP_CELL_SQUARES = 256
+
+export function worldToCell(x: number, y: number): { x: number; y: number } {
+  return {
+    x: Math.floor(x / MAP_CELL_SQUARES),
+    y: Math.floor(y / MAP_CELL_SQUARES),
+  }
+}
+
 interface Style {
   fill: string
   /**
