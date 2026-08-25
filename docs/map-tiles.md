@@ -518,6 +518,12 @@ A seeded ISO_DZI file is a few hundred pixels off. Current `run.sh` deletes
 The map-tiles image installs it. Rebuild that image (`make map-tiles-region`
 already does).
 
+**`RCON save skipped: Connection refused`.** RCON only listens after the
+dedicated server has finished loading the world. `./deploy.sh` recreates
+`game-server`, so a region job started immediately will refuse until the
+healthcheck is green. The renderer now retries for three minutes. Check
+with `docker compose ps` — wait until `game-server` is healthy, then rerun.
+
 **The render says it cannot find the game files.** On Windows, a hand-run
 `docker run` needs `MSYS_NO_PATHCONV=1` from Git Bash or the bind mount silently
 does not happen and it looks like the install is missing. `make map-tiles` and
