@@ -36,11 +36,11 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'rea
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { FormError } from '@/components/ui/field'
-import { Panel } from '@/components/ui/panel'
+import { Field, FormError } from '@/components/ui/field'
+import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TabStrip } from '@/components/ui/tabs'
-import { api, ApiError, type ConfigField } from '@/lib/api'
+import { api, ApiError, type ConfigField, type MapTileSettings } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import {
   CONFIG_GROUPS,
@@ -67,7 +67,7 @@ import {
   type SettingMeta,
 } from '@/lib/config-metadata'
 import { fuzzyMatch } from '@/lib/fuzzy'
-import { adminConfigQuery, adminSandboxQuery, serverStatusQuery } from '@/lib/queries'
+import { adminConfigQuery, adminMapTileSettingsQuery, adminSandboxQuery, serverStatusQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -106,6 +106,8 @@ function groupIcon(id: string): LucideIcon {
   return GROUP_ICONS[id] ?? MoreHorizontal
 }
 
+type ConfigTab = ConfigSource | 'debug'
+
 type Row = {
   field: ConfigField
   meta?: SettingMeta
@@ -125,8 +127,9 @@ export function AdminConfigPage() {
   const searchRef = useRef<HTMLInputElement>(null)
 
   const hash = readConfigHash()
-  const [source, setSource] = useState<ConfigSource>(hash.source)
+  const [tab, setTab] = useState<ConfigTab>(hash.tab)
   const [group, setGroup] = useState<string>(hash.group)
+  const source: ConfigSource = tab === 'sandbox' ? 'sandbox' : 'server'
   const server = useQuery(adminConfigQuery)
   const sandbox = useQuery(adminSandboxQuery)
   const status = useQuery(serverStatusQuery)
@@ -350,16 +353,20 @@ export function AdminConfigPage() {
 
   function selectGroup(next: string) {
     setGroup(next)
-    writeConfigHash(source, next)
+    writeConfigHash(tab === 'debug' ? source : tab, next)
   }
 
-  function selectSource(next: ConfigSource) {
-    setSource(next)
+  function selectTab(next: ConfigTab) {
+    setTab(next)
     setQuery('')
+    setNotice(null)
+    if (next === 'debug') {
+      writeConfigHash('debug', 'featured')
+      return
+    }
     const nextGroup = 'featured'
     setGroup(nextGroup)
     writeConfigHash(next, nextGroup)
-    setNotice(null)
   }
 
   function setValue(key: string, value: string) {
@@ -416,9 +423,13 @@ export function AdminConfigPage() {
           </div>
           <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('admin.config_title')}</h1>
           <p className="mt-2 max-w-2xl text-sm text-smoke">
-            {source === 'sandbox' ? t('admin.config_sandbox_description') : t('admin.config_description')}
+            {tab === 'debug'
+              ? t('admin.config_debug_description')
+              : source === 'sandbox'
+                ? t('admin.config_sandbox_description')
+                : t('admin.config_description')}
           </p>
-          <div className="mt-3 max-w-md">
+          <div className="mt-3 max-w-lg">
             <TabStrip
               label={t('admin.config_title')}
               items={[
@@ -428,20 +439,23 @@ export function AdminConfigPage() {
                   label: t('admin.config_source_sandbox'),
                   count: sandbox.data?.fields.length,
                 },
+                { id: 'debug', label: t('admin.config_source_debug') },
               ]}
-              active={source}
-              onSelect={(id) => selectSource(id)}
+              active={tab}
+              onSelect={(id) => selectTab(id)}
             />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <p className="font-mono text-[0.6875rem] text-dust">
-            {dirtyKeys.length > 0
-              ? t('admin.config_unsaved', { count: dirtyKeys.length })
-              : source === 'sandbox'
-                ? t('admin.config_file_sandbox')
-                : t('admin.config_file')}
-          </p>
+          {tab !== 'debug' ? (
+            <p className="font-mono text-[0.6875rem] text-dust">
+              {dirtyKeys.length > 0
+                ? t('admin.config_unsaved', { count: dirtyKeys.length })
+                : source === 'sandbox'
+                  ? t('admin.config_file_sandbox')
+                  : t('admin.config_file')}
+            </p>
+          ) : null}
           <Button size="sm" variant="outline" onClick={() => setRestarting(true)}>
             <RotateCcw aria-hidden="true" className="size-3.5" />
             {t('admin.action.restart')}
@@ -456,7 +470,9 @@ export function AdminConfigPage() {
       ) : null}
       {error ? <FormError>{error}</FormError> : null}
 
-      {isPending ? (
+      {tab === 'debug' ? (
+        <DebugSettings />
+      ) : isPending ? (
         <Skeleton className="min-h-0 flex-1" />
       ) : isError ? (
         <div>
@@ -985,6 +1001,124 @@ function RichTextInput({
   )
 }
 
+function DebugSettings() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const query = useQuery(adminMapTileSettingsQuery)
+  const [batch, setBatch] = useState(8)
+  const [waitMinutes, setWaitMinutes] = useState(5)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  const settings = query.data
+
+  useEffect(() => {
+    if (!settings) {
+      return
+    }
+    setBatch(settings.batch_blocks)
+    setWaitMinutes(Math.round(settings.max_wait_secs / 60))
+  }, [settings])
+
+  const save = useMutation({
+    mutationFn: (input: Partial<MapTileSettings>) => api.adminUpdateMapTileSettings(input),
+    onSuccess: async () => {
+      setNotice(t('admin.map_tiles_saved'))
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'map-tiles'] })
+    },
+  })
+
+  const error =
+    save.error instanceof ApiError
+      ? save.error.message
+      : save.error
+        ? t('auth.unexpected_error')
+        : query.isError
+          ? t('common.error')
+          : null
+
+  if (query.isPending) {
+    return <Skeleton className="min-h-0 flex-1" />
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {notice ? (
+        <p role="status" className="shrink-0 border border-moss/40 bg-moss-soft px-3 py-2 text-sm text-moss">
+          {notice}
+        </p>
+      ) : null}
+      {error ? (
+        <div>
+          <FormError>{error}</FormError>
+          {query.isError ? (
+            <Button size="sm" variant="outline" className="mt-3" onClick={() => void query.refetch()}>
+              {t('common.retry')}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {settings ? (
+        <Panel bracketed className="shrink-0">
+          <PanelHeader label={t('admin.map_tiles_settings')} />
+          <div className="flex flex-col gap-3 p-4">
+            <p className="text-sm text-smoke">{t('admin.map_tiles_settings_hint')}</p>
+            <label className="flex items-center gap-2 text-sm text-bone">
+              <input
+                type="checkbox"
+                checked={settings.auto_rerender}
+                disabled={save.isPending}
+                onChange={(event) => save.mutate({ auto_rerender: event.target.checked })}
+              />
+              {t('admin.map_tiles_auto')}
+            </label>
+            <label className="flex items-center gap-2 text-sm text-bone">
+              <input
+                type="checkbox"
+                checked={settings.debug_overlay}
+                disabled={save.isPending}
+                onChange={(event) => save.mutate({ debug_overlay: event.target.checked })}
+              />
+              {t('admin.map_tiles_debug')}
+            </label>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+              <Field
+                type="number"
+                min={1}
+                max={256}
+                label={t('admin.map_tiles_batch')}
+                value={batch}
+                disabled={save.isPending || !settings.auto_rerender}
+                onChange={(event) => setBatch(Number(event.target.value) || 1)}
+              />
+              <Field
+                type="number"
+                min={0}
+                max={1440}
+                label={t('admin.map_tiles_wait')}
+                value={waitMinutes}
+                disabled={save.isPending || !settings.auto_rerender}
+                onChange={(event) => setWaitMinutes(Number(event.target.value) || 0)}
+              />
+              <Button
+                size="sm"
+                disabled={save.isPending || !settings.auto_rerender}
+                onClick={() =>
+                  save.mutate({
+                    batch_blocks: Math.min(256, Math.max(1, batch)),
+                    max_wait_secs: Math.min(86_400, Math.max(0, waitMinutes * 60)),
+                  })
+                }
+              >
+                {t('common.save')}
+              </Button>
+            </div>
+          </div>
+        </Panel>
+      ) : null}
+    </div>
+  )
+}
+
 function searchHaystack(row: Row, t: (key: TranslationKey) => string): string {
   const label = hasSettingLabel(row.field.key)
     ? t(settingLabelKey(row.field.key))
@@ -1014,28 +1148,32 @@ function sandboxSettingMeta(field: ConfigField): SettingMeta {
   }
 }
 
-function readConfigHash(): { source: ConfigSource; group: string } {
+function readConfigHash(): { tab: ConfigTab; group: string } {
   if (typeof window === 'undefined') {
-    return { source: 'server', group: 'featured' }
+    return { tab: 'server', group: 'featured' }
   }
   const raw = window.location.hash.replace('#', '')
+  if (raw === 'debug' || raw.startsWith('debug/')) {
+    return { tab: 'debug', group: 'featured' }
+  }
   if (raw === 'sandbox' || raw.startsWith('sandbox/')) {
     const group = raw.split('/')[1] || 'featured'
     return {
-      source: 'sandbox',
+      tab: 'sandbox',
       group: (SANDBOX_GROUPS as readonly string[]).includes(group) ? group : 'featured',
     }
   }
   return {
-    source: 'server',
+    tab: 'server',
     group: (CONFIG_GROUPS as readonly string[]).includes(raw) ? raw : 'featured',
   }
 }
 
-function writeConfigHash(source: ConfigSource, group: string) {
+function writeConfigHash(tab: ConfigTab, group: string) {
   if (typeof window === 'undefined') {
     return
   }
-  const hash = source === 'sandbox' ? `sandbox/${group}` : group
+  const hash =
+    tab === 'debug' ? 'debug' : tab === 'sandbox' ? `sandbox/${group}` : group
   window.history.replaceState(null, '', `#${hash}`)
 }
