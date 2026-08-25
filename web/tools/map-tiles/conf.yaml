@@ -7,6 +7,10 @@ custom_root: .
 # Live world overlay. A full county run leaves this at /dev/null. Region jobs
 # that set PZ_MAP_SAVE rewrite it to the snapshot of the dedicated-server save.
 save_game_root: /dev/null
+# Do not download "latest" pzdataspec at render time. The image already has
+# v1.12.249 under /opt; a newer zip can disagree with chunk_sprites.py.
+save_game_parser_tag: local
+save_game_parser_path: /opt
 
 output_entry: default
 output_route: map_data/

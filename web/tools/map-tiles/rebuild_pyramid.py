@@ -44,8 +44,9 @@ def merge_parent(tiles_dir: Path, z: int, x: int, y: int, tile_size: int = 2048)
             children.append((dx, dy, Image.open(path).convert("RGB")))
     canvas = Image.new("RGB", (tile_size * 2, tile_size * 2))
     for dx, dy, im in children:
-        if im.size != (tile_size, tile_size):
-            im = im.resize((tile_size, tile_size), Image.Resampling.LANCZOS)
+        # pzmap2dzi crops edge tiles smaller than tile_size. Stretching a
+        # sliver to 2048x2048 turns trees into a vertical barcode. Paste at
+        # native size in the quadrant, same as merge_tile.
         canvas.paste(im, (dx * tile_size, dy * tile_size))
     parent = canvas.resize((tile_size, tile_size), Image.Resampling.LANCZOS)
     dest = child_path(tiles_dir, z, x, y)

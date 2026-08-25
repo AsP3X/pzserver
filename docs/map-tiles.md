@@ -550,8 +550,12 @@ the player map.
 snapshot saw the open door. `Affected tiles: 0` / `composited 0 save tiles`
 means the overlay was then dropped: pzmap2dzi compared save-chunk (block)
 coords to `render_cell_range` as if they were cells. The renderer patches
-that. Re-run `make map-tiles-region CELLS="x,y"`. Do not run
-`map-tiles-heal` after — that puts the closed vanilla door back.
+that.
+
+**Town looks like a barcode of vertical ticks.** The save overlay painted
+every square in the cell (trees/fences on roofs and roads) and replaced
+vanilla. Overlay is now clipped to the punched door diamonds. Restore with
+`make map-tiles-heal CELLS="x,y"`, then re-run `make map-tiles-region`.
 
 **`RCON save skipped: Connection refused`.** RCON only listens after the
 dedicated server has finished loading the world. `./deploy.sh` recreates

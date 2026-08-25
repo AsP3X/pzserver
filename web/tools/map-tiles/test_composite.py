@@ -43,6 +43,42 @@ def test_save_pixels_cover_the_base(tmp_path):
     assert out.getpixel((48, 48))[0] > 200
 
 
+def test_punch_limits_overlay_to_those_squares(tmp_path):
+    """A full-cell save PNG must not replace vanilla outside the door hole."""
+    from cells import Geometry
+    from composite import composite_one, square_diamond
+
+    geo = Geometry(x0=1_040_384, y0=-139_296, sqr=128, cell_size=256)
+    wx, wy = 34 * 256 + 4, 30 * 256 + 4
+    z = 20
+    span = geo.span(z)
+    px, py = geo.world_to_dzi(wx, wy)
+    tx, ty = int(px // span), int(py // span)
+    pts = square_diamond(geo, wx, wy, 1, 1, z, tx, ty)
+    cx = int(sum(p[0] for p in pts) / 4)
+    cy = int(sum(p[1] for p in pts) / 4)
+    size = geo.tile_size
+    base_dir = tmp_path / "base"
+    save_dir = tmp_path / "save"
+    (base_dir / "20").mkdir(parents=True)
+    (save_dir / "20").mkdir(parents=True)
+    Image.new("RGB", (size, size), (255, 0, 0)).save(
+        base_dir / "20" / f"{tx}_{ty}.jpg", quality=95
+    )
+    Image.new("RGBA", (size, size), (0, 255, 0, 255)).save(
+        save_dir / "20" / f"{tx}_{ty}.png"
+    )
+    punch = (geo, [(wx, wy, 1, 1)])
+    assert composite_one(base_dir, save_dir, z, tx, ty, punch=punch)
+    out = Image.open(base_dir / "20" / f"{tx}_{ty}.jpg").convert("RGB")
+    ix, iy = min(size - 1, max(0, cx)), min(size - 1, max(0, cy))
+    g = out.getpixel((ix, iy))[1]
+    assert g > 100, (out.getpixel((ix, iy)), ix, iy)
+    far_x = 0 if cx > size // 2 else size - 1
+    far_y = 0 if cy > size // 2 else size - 1
+    assert out.getpixel((far_x, far_y))[0] > 200
+
+
 def test_punch_clears_vanilla_inside_a_save_chunk():
     """Open-door sprites are mostly transparent. Without a punch the closed
     vanilla door stays visible through the hole."""

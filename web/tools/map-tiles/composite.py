@@ -14,10 +14,11 @@ import sys
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageChops
 except ImportError:  # pragma: no cover
     Image = None
     ImageDraw = None
+    ImageChops = None
 
 OVERLAY_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 
@@ -58,6 +59,7 @@ def composite_one(base_dir: Path, save_dir: Path, z: int, x: int, y: int, punch=
             ov = ov.resize(base.size, Image.Resampling.LANCZOS)
         if punch:
             punch_save_footprint(base, punch, z, x, y)
+            ov = mask_overlay_to_punch(ov, punch, z, x, y)
         base.alpha_composite(ov)
         out = base
     else:
@@ -83,6 +85,30 @@ def square_diamond(geo, wx: int, wy: int, w: int, h: int, level: int, tx: int, t
         px, py = geo.world_to_dzi(sx, sy)
         pts.append(((px - origin_x) * scale, (py - origin_y) * scale))
     return pts
+
+
+def mask_overlay_to_punch(ov, punch, z: int, tx: int, ty: int):
+    """Keep overlay alpha only inside punch diamonds.
+
+    A save render paints every square in the cell. Compositing that PNG
+    over vanilla replaces the town with whatever the save layer drew —
+    including a forest of 1-pixel-wide tree/fence sprites on every tile.
+    Door/window state only needs the squares we already punched.
+    """
+    if ImageDraw is None:
+        return ov
+    geo, rects = punch
+    keep = Image.new("L", ov.size, 0)
+    draw = ImageDraw.Draw(keep)
+    size = ov.size[0]
+    for wx, wy, w, h in rects:
+        pts = square_diamond(geo, wx, wy, w, h, z, tx, ty)
+        if not any(-size <= px <= size * 2 and -size <= py <= size * 2 for px, py in pts):
+            continue
+        draw.polygon(pts, fill=255)
+    r, g, b, a = ov.split()
+    a = ImageChops.multiply(a, keep)
+    return Image.merge("RGBA", (r, g, b, a))
 
 
 def punch_save_footprint(base, punch, z: int, tx: int, ty: int) -> None:
