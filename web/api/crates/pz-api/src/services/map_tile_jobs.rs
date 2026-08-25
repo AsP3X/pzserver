@@ -439,21 +439,16 @@ async fn spawn_and_wait(
     let client = http_client(INSPECT_TIMEOUT);
     let body = serde_json::json!({
         "Image": state.config.map_tiles_image,
-        "Env": [
-            format!("PZ_MAP_SQUARES={}", format_rects(squares)),
-            format!("PZ_MAP_CELLS={}", format_rects(cells)),
-            format!("PZ_GAME_VERSION={}", state.config.pz_game_version),
-            format!("PZ_SAVE_GAME={}", state.config.pz_save_game),
-            format!("PZ_SERVER_NAME={}", state.config.server_name),
-            // Regional jobs write z21 for these cells. A full county of z21
-            // is tens of GB; this is how it accumulates, one job at a time.
-            "PZ_MAP_DETAIL=21".to_owned(),
-            // Paint the live save on top of vanilla for those cells.
-            "PZ_MAP_SAVE=1".to_owned(),
-            format!("PZ_RCON_HOST={}", state.config.rcon.host),
-            format!("PZ_RCON_PORT={}", state.config.rcon.port),
-            format!("PZ_RCON_PASSWORD={}", state.config.rcon.password),
-        ],
+        "Env": renderer_env(
+            squares,
+            cells,
+            &state.config.pz_game_version,
+            &state.config.pz_save_game,
+            &state.config.server_name,
+            &state.config.rcon.host,
+            state.config.rcon.port,
+            &state.config.rcon.password,
+        ),
         "HostConfig": renderer_host_config(
             &state.config.pz_server_host,
             &state.config.pz_texturepacks_host,
@@ -645,6 +640,39 @@ async fn fail(db: &PgPool, id: Uuid, error: String) {
 /// Scratch (`/out`) stays on the host bind; the live pack is the named volume
 /// at `/pack`, the same volume web-api reads. They have to be the same file
 /// or a region job updates a pack nobody is serving.
+#[allow(clippy::too_many_arguments)]
+fn renderer_env(
+    squares: &[[i32; 4]],
+    cells: &[[i32; 4]],
+    game_version: &str,
+    save_game: &str,
+    server_name: &str,
+    rcon_host: &str,
+    rcon_port: u16,
+    rcon_password: &str,
+) -> Vec<String> {
+    vec![
+        format!("PZ_MAP_SQUARES={}", format_rects(squares)),
+        format!("PZ_MAP_CELLS={}", format_rects(cells)),
+        format!("PZ_GAME_VERSION={game_version}"),
+        format!("PZ_SAVE_GAME={save_game}"),
+        format!("PZ_SERVER_NAME={server_name}"),
+        // Regional jobs write z21 for these cells. A full county of z21
+        // is tens of GB; this is how it accumulates, one job at a time.
+        "PZ_MAP_DETAIL=21".to_owned(),
+        // Paint the live save on top of vanilla for those cells.
+        "PZ_MAP_SAVE=1".to_owned(),
+        format!("PZ_RCON_HOST={rcon_host}"),
+        format!("PZ_RCON_PORT={rcon_port}"),
+        format!("PZ_RCON_PASSWORD={rcon_password}"),
+        // Docker create Env can replace the image ENV. Without this the
+        // workers cannot import chunk_sprites / save_skip, so open doors
+        // stay the vanilla closed sprite.
+        "PYTHONPATH=/tools".to_owned(),
+        "PYTHONUNBUFFERED=1".to_owned(),
+    ]
+}
+
 fn renderer_host_config(
     pz_server_host: &str,
     pz_texturepacks_host: &str,
@@ -803,5 +831,23 @@ job: 25/100 worker: 8/8
         assert_eq!(host["Mounts"][0]["Type"], "volume");
         assert_eq!(host["Mounts"][0]["Source"], "pz-map-tiles-sqlite");
         assert_eq!(host["Mounts"][0]["Target"], "/pack");
+    }
+
+    #[test]
+    fn renderer_env_keeps_pythonpath_for_door_patches() {
+        let env = renderer_env(
+            &[],
+            &[[34, 30, 1, 1]],
+            "42.20.0",
+            "Multiplayer/ZomboidServer",
+            "ZomboidServer",
+            "game-server",
+            27015,
+            "secret",
+        );
+        assert!(env.iter().any(|item| item == "PYTHONPATH=/tools"));
+        assert!(env.iter().any(|item| item == "PYTHONUNBUFFERED=1"));
+        assert!(env.iter().any(|item| item == "PZ_MAP_SAVE=1"));
+        assert!(env.iter().any(|item| item == "PZ_MAP_CELLS=34,30,1,1"));
     }
 }

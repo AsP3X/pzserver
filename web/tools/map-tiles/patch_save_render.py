@@ -15,11 +15,9 @@ OLD = """    def init_worker(self, dzi):
 
 NEW = """    def init_worker(self, dzi):
         self.utils = self.lib_loader.load('pzdataspec.utils')
-        try:
-            from chunk_sprites import patch_chunk_data
-            patch_chunk_data(self.utils)
-        except Exception as error:
-            print('door/window sprite patch skipped: {}'.format(error))
+        from chunk_sprites import patch_chunk_data
+        patch_chunk_data(self.utils)
+        print('door/window sprite patch applied')
         self.tiledef = self.utils.load_tile_defs(self.pz_root, self.mod_root, self.save_version)
 """
 

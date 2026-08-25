@@ -6,6 +6,11 @@
 # of all of it -- see "regional re-render" below.
 set -euo pipefail
 
+# Docker API create Env can replace the image ENV. The skip/sprite patches
+# live in /tools and workers import them via PYTHONPATH.
+export PYTHONPATH="/tools${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
+
 CONF=conf/conf.yaml
 OUT=/out
 TREE="$OUT/html/map_data/base"   # verified layout; there is no `default` segment
@@ -47,6 +52,10 @@ trap on_exit EXIT
 set_progress starting 1
 
 cd /opt/pzmap2dzi
+python /tools/patch_scheduler.py
+python /tools/patch_save_render.py
+python /tools/patch_base_skip.py
+echo "==> PYTHONPATH=$PYTHONPATH"
 
 # Fail before the hours, not after them.
 #
@@ -193,10 +202,22 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
             SNAP="/out/save-snapshot/${SAVE_GAME}"
             echo "==> flush live chunks so door/window state is on disk"
             set_progress snapshot 2
-            if python /tools/rcon_save.py; then
-                sleep 2
-            else
-                echo "==> continuing without RCON save; open doors may still be closed on disk"
+            BEFORE_MTIME=$(python -c "
+from pathlib import Path
+from chunks import parse_cell_rects
+from wait_save import max_mtime
+rects = parse_cell_rects(Path('/tmp/render_cells.txt').read_text())
+newest, n = max_mtime(Path('$LIVE_SAVE'), rects)
+print(f'{newest}')
+")
+            if ! python /tools/rcon_save.py; then
+                echo "FAIL: RCON save did not run. Open doors live in Java memory" >&2
+                echo "until the dedicated server flushes map/{x}/{y}.bin." >&2
+                exit 1
+            fi
+            if ! python /tools/wait_save.py "$LIVE_SAVE" /tmp/render_cells.txt "$BEFORE_MTIME"; then
+                echo "FAIL: chunk files did not update after RCON save." >&2
+                exit 1
             fi
             echo "==> snapshot save $SAVE_GAME for overlay"
             set_progress snapshot 4

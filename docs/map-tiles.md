@@ -123,11 +123,18 @@ A **world-change job** is the same regional job, plus a save overlay:
 4. WAL-replace those rows in `tiles.sqlite`.
 
 Door, window and curtain sprites come from the save object's *state*
-(`open` / smashed / glass-removed), not the default `sprite_id`. Opening a
-door only updates Java memory — the renderer issues RCON `save` (and the
-API does too) before the snapshot so chunk files match what players just
-did. Vanilla lotpack paint is skipped on those 8-square blocks so the
-closed sprite cannot show through the open-door hole.
+(`open` / smashed / glass-removed), not the default `sprite_id`. PZ's
+`IsoDoor.save` writes the closed sprite as `sprite_id` and the live
+picture as `open` + `openSprite.ID` (PZwiki: open tiles are tilesheet
+offset +2 and are not flagged Door — they are mostly a hole).
+Player-built doors are `IsoThumpable` (class 18), same idea on
+`bit_header`. Opening a door only updates Java memory until `save` —
+the renderer issues RCON `save` (and the API does too) and waits for
+chunk mtimes before the snapshot. Vanilla lotpack paint is skipped on
+those 8-square blocks so the closed sprite cannot show through the
+open-door hole. The panel job must pass `PYTHONPATH=/tools` into the
+renderer; without it the skip/sprite patches never load and the door
+stays shut on the map.
 
 The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
 (default 120). The first pass seeds `map_tile_blocks` and does not enqueue.

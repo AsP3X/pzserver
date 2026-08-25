@@ -17,8 +17,10 @@ NEW = """    def square(self, im_getter, dzi, ox, oy, sx, sy, layer):
             from save_skip import covers as _save_covers
             if _save_covers(sx, sy):
                 return
-        except Exception:
-            pass
+        except Exception as error:
+            if not getattr(self, '_save_skip_warned', False):
+                print('save-square skip failed: {}'.format(error))
+                self._save_skip_warned = True
         cx, subx = divmod(sx, dzi.cell_size)
 """
 

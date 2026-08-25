@@ -13,13 +13,17 @@ SQUARES_FILE = Path("/tmp/save_squares.txt")
 
 def load_rects(path: Path = SQUARES_FILE) -> list[tuple[int, int, int, int]]:
     if not path.is_file():
+        print(f"save-square skip: {path} missing; vanilla closed doors will show")
         return []
     text = path.read_text(encoding="utf-8").strip()
     if not text:
+        print(f"save-square skip: {path} empty; vanilla closed doors will show")
         return []
     from cells import parse_rects
 
-    return parse_rects(text)
+    rects = parse_rects(text)
+    print(f"save-square skip: {len(rects)} chunk rect(s) from {path}")
+    return rects
 
 
 def covers(sx: int, sy: int, rects=None) -> bool:

@@ -14,7 +14,11 @@ init_worker moved.
 
 
 def visual_sprite_id(obj):
-    """Sprite id the isometric overlay should paint for one grid object."""
+    """Sprite id the isometric overlay should paint for one grid object.
+
+    Returns None to omit the object: an open door with no open sprite is a
+    hole, and painting the closed id would hide that.
+    """
     wrapper = getattr(obj, "object", obj)
     base = getattr(wrapper, "base_object", None)
     default = getattr(base, "sprite_id", None) if base is not None else None
@@ -23,46 +27,79 @@ def visual_sprite_id(obj):
         return default
 
     # Window: smashed / glass-removed / open / closed, in that priority.
+    # open_sprite_id is optional on the B42 ksy (has_open_sprite flag).
     if hasattr(sub, "destroyed") and hasattr(sub, "glass_removed"):
-        if getattr(sub, "glass_removed", 0):
+        if _flag(getattr(sub, "glass_removed", 0)):
             sid = getattr(sub, "glass_removed_sprite_id", None)
             if _usable(sid):
                 return sid
-        if getattr(sub, "destroyed", 0):
+        if _flag(getattr(sub, "destroyed", 0)):
             sid = getattr(sub, "smashed_sprite_id", None)
             if _usable(sid):
                 return sid
-        if getattr(sub, "open", 0):
+        if _flag(getattr(sub, "open", 0)):
             sid = getattr(sub, "open_sprite_id", None)
             if _usable(sid):
                 return sid
+            return None
         sid = getattr(sub, "closed_sprite_id", None)
         if _usable(sid):
             return sid
         return default
 
-    # Door: open vs closed. curtain_flags marks IsoDoor, not IsoWindow.
-    if hasattr(sub, "open_sprite_id") and hasattr(sub, "closed_sprite_id") and hasattr(
-        sub, "curtain_flags"
+    # Vanilla IsoDoor (class 17). IsoObject.sprite_id stays the closed tile;
+    # open/closed ids and the `open` flag are extra fields after super.save.
+    # PZwiki: the open tile is tilesheet +2 and is not flagged Door — it is
+    # mostly a hole, so we must not fall back to the closed id.
+    if hasattr(sub, "curtain_flags") and (
+        hasattr(sub, "open_sprite_id") or hasattr(sub, "closed_sprite_id")
     ):
-        if getattr(sub, "open", 0):
-            if _usable(sub.open_sprite_id):
-                return sub.open_sprite_id
-        if _usable(sub.closed_sprite_id):
-            return sub.closed_sprite_id
+        if _flag(getattr(sub, "open", 0)):
+            sid = getattr(sub, "open_sprite_id", None)
+            if _usable(sid):
+                return sid
+            return None
+        sid = getattr(sub, "closed_sprite_id", None)
+        if _usable(sid):
+            return sid
+        return default
+
+    # Player-built door/window: IsoThumpable (class 18). `open` is bit 0 of
+    # bit_header; sprite ids are only present when their bits were written.
+    if hasattr(sub, "is_door") or hasattr(sub, "bit_header"):
+        if _flag(getattr(sub, "open", 0)):
+            sid = getattr(sub, "open_sprite_id", None)
+            if _usable(sid):
+                return sid
+            return None
+        sid = getattr(sub, "closed_sprite_id", None)
+        if _usable(sid):
+            return sid
         return default
 
     # Curtain: sprite_id is one state, other_sprite_id the other. `open`
     # selects the alternate.
     if hasattr(sub, "other_sprite_id") and hasattr(sub, "barricade_strength"):
-        if getattr(sub, "open", 0) and _usable(sub.other_sprite_id):
+        if _flag(getattr(sub, "open", 0)) and _usable(sub.other_sprite_id):
             return sub.other_sprite_id
         return default
 
     return default
 
 
+def _flag(value) -> bool:
+    if hasattr(value, "value") and not isinstance(value, (int, float, bool, str, bytes)):
+        value = value.value
+    if value is None or value is False:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return bool(value)
+
+
 def _usable(sid) -> bool:
+    if hasattr(sid, "value") and not isinstance(sid, (int, float)):
+        sid = sid.value
     return isinstance(sid, int) and sid >= 0
 
 
