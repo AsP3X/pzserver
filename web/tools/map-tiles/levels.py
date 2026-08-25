@@ -13,8 +13,14 @@ if len(sys.argv) != 2:
     raise SystemExit(2)
 
 con = sqlite3.connect(f"file:{Path(sys.argv[1]).as_posix()}?mode=ro", uri=True)
-low, high = con.execute("SELECT MIN(z), MAX(z) FROM tiles").fetchone()
-if low is None:
+counts = dict(con.execute("SELECT z, COUNT(*) FROM tiles GROUP BY z"))
+if not counts:
     print("the pack holds no tiles", file=sys.stderr)
     raise SystemExit(1)
+# Sparse z21/z22 from a detail job must not become the leaf level of a
+# world-change. Those keys are not in the county pack (omit_levels 2), so
+# underlay restore is 0 and the save overlay has nothing to composite onto.
+populous = max(counts.values())
+high = max(z for z, n in counts.items() if n * 2 >= populous)
+low = min(counts)
 print(low, high)

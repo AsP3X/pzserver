@@ -62,6 +62,7 @@ cd /opt/pzmap2dzi
 python /tools/patch_scheduler.py
 python /tools/patch_save_render.py
 python /tools/patch_base_skip.py
+python /tools/patch_unit_range.py
 echo "==> PYTHONPATH=$PYTHONPATH"
 
 # Fail before the hours, not after them.
@@ -358,6 +359,10 @@ fi
 
 if [ -n "${WANT_SAVE:-}" ]; then
     echo "==> render save overlay"
+    # Leftover save tiles look "complete" to incremental mode and the overlay
+    # paints nothing (Affected tiles: 0). The snapshot is the authority.
+    rm -rf "${SAVE_TREE:-/tmp/missing-save}/layer0_files"
+    rm -f "${SAVE_TREE:-/tmp/missing-save}/map_info.json" "${SAVE_TREE:-/tmp/missing-save}/sources.json"
     watch_progress save 70 15 "$RENDER_LOG"
     python main.py -c "$CONF" render save 2>&1 | tee -a "$RENDER_LOG"
     stop_progress_watch
@@ -372,10 +377,16 @@ if [ -n "${WANT_SAVE:-}" ]; then
         COMPOSITE_KEYS=/tmp/leaves.txt
     fi
     if [ -s /tmp/save_squares.txt ] && [ -f "$TREE/map_info.json" ]; then
-        python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files" \
-            "$TREE/map_info.json" /tmp/save_squares.txt
+        COMP_OUT=$(python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files" \
+            "$TREE/map_info.json" /tmp/save_squares.txt)
     else
-        python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files"
+        COMP_OUT=$(python /tools/composite.py "$COMPOSITE_KEYS" "$TREE/layer0_files" "$SAVE_TREE/layer0_files")
+    fi
+    echo "$COMP_OUT"
+    if [ -s /tmp/save_squares.txt ] && echo "$COMP_OUT" | grep -q "composited 0 "; then
+        echo "FAIL: save overlay painted nothing but open-square skip listed doors." >&2
+        echo "The live door state was snapshotted and then dropped (unit-range filter)." >&2
+        exit 1
     fi
 fi
 

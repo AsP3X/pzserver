@@ -546,6 +546,13 @@ That copies the original tiles over the region (seconds). Then
 `make map-tiles-region CELLS="41,38"` paints live save on top. Hard-refresh
 the player map.
 
+**Door still closed after a region job.** `open-square skip: N` means the
+snapshot saw the open door. `Affected tiles: 0` / `composited 0 save tiles`
+means the overlay was then dropped: pzmap2dzi compared save-chunk (block)
+coords to `render_cell_range` as if they were cells. The renderer patches
+that. Re-run `make map-tiles-region CELLS="x,y"`. Do not run
+`map-tiles-heal` after — that puts the closed vanilla door back.
+
 **`RCON save skipped: Connection refused`.** RCON only listens after the
 dedicated server has finished loading the world. `./deploy.sh` recreates
 `game-server`, so a region job started immediately will refuse until the
