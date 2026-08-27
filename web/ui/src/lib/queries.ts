@@ -393,12 +393,6 @@ export const adminVaultQuery = queryOptions({
   staleTime: 5_000,
 })
 
-export const adminMapTileSettingsQuery = queryOptions({
-  queryKey: ['admin', 'map-tiles', 'settings'],
-  queryFn: api.adminMapTileSettings,
-  staleTime: 5_000,
-})
-
 export const adminStoreQuery = queryOptions({
   queryKey: ['admin', 'store'],
   queryFn: api.adminStoreItems,

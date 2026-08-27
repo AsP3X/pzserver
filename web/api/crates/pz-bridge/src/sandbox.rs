@@ -113,7 +113,10 @@ impl SandboxVars {
     /// Unknown keys are an error: unlike `server.ini`, sandbox options are
     /// defined by the game (and mods), and inventing one at the root would
     /// silently do nothing.
-    pub fn apply(contents: &str, updates: &BTreeMap<String, String>) -> Result<String, SandboxError> {
+    pub fn apply(
+        contents: &str,
+        updates: &BTreeMap<String, String>,
+    ) -> Result<String, SandboxError> {
         if updates.is_empty() {
             return Ok(with_trailing_newline(contents));
         }
@@ -224,8 +227,15 @@ fn rewrite_line(
 fn replace_value(line: &str, key: &str, rhs: &str, new_value: &str) -> String {
     let indent_len = line.len() - line.trim_start().len();
     let indent = &line[..indent_len];
-    let comma = if trimmed_ends_with_comma(line) { "," } else { "" };
-    format!("{indent}{key} = {formatted}{comma}", formatted = format_like(rhs, new_value))
+    let comma = if trimmed_ends_with_comma(line) {
+        ","
+    } else {
+        ""
+    };
+    format!(
+        "{indent}{key} = {formatted}{comma}",
+        formatted = format_like(rhs, new_value)
+    )
 }
 
 fn trimmed_ends_with_comma(line: &str) -> bool {
@@ -316,10 +326,7 @@ fn display_value(rhs: &str) -> String {
 }
 
 fn strip_comment(trimmed: &str) -> String {
-    trimmed
-        .trim_start_matches('-')
-        .trim()
-        .to_owned()
+    trimmed.trim_start_matches('-').trim().to_owned()
 }
 
 struct CommentMeta {
@@ -702,7 +709,10 @@ mod tests {
         assert_eq!(group("FoodLootNew"), Some("loot"));
         assert_eq!(group("StarterKit"), Some("character"));
         assert_eq!(group("ZombieLore.Speed"), Some("lore"));
-        assert_eq!(group("ZombieConfig.PopulationMultiplier"), Some("population"));
+        assert_eq!(
+            group("ZombieConfig.PopulationMultiplier"),
+            Some("population")
+        );
         assert_eq!(group("Map.AllowMiniMap"), Some("map"));
         assert_eq!(group("CHStatusHUD.RestrictStats"), Some("mods"));
         assert_eq!(group("VERSION"), Some("other"));
@@ -785,6 +795,9 @@ mod tests {
         let mut updates = BTreeMap::new();
         updates.insert("HoursForLootRespawn".to_owned(), current);
         let next = SandboxVars::apply(&contents, &updates).expect("no-op apply");
-        assert_eq!(SandboxVars::parse(&next).fields().len(), vars.fields().len());
+        assert_eq!(
+            SandboxVars::parse(&next).fields().len(),
+            vars.fields().len()
+        );
     }
 }

@@ -40,7 +40,7 @@ import { Field, FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TabStrip } from '@/components/ui/tabs'
-import { api, ApiError, type ConfigField, type MapTileSettings } from '@/lib/api'
+import { api, ApiError, type ConfigField } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import {
   CONFIG_GROUPS,
@@ -67,7 +67,7 @@ import {
   type SettingMeta,
 } from '@/lib/config-metadata'
 import { fuzzyMatch } from '@/lib/fuzzy'
-import { adminConfigQuery, adminMapTileSettingsQuery, adminSandboxQuery, serverStatusQuery } from '@/lib/queries'
+import { adminConfigQuery, adminSandboxQuery, serverStatusQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 import type { TranslationKey } from '@/i18n/locales'
 
@@ -106,7 +106,7 @@ function groupIcon(id: string): LucideIcon {
   return GROUP_ICONS[id] ?? MoreHorizontal
 }
 
-type ExtraTab = 'map' | 'debug'
+type ExtraTab = 'map'
 type ConfigTab = ConfigSource | ExtraTab
 
 function isIniTab(tab: ConfigTab): tab is ConfigSource {
@@ -428,13 +428,11 @@ export function AdminConfigPage() {
           </div>
           <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('admin.config_title')}</h1>
           <p className="mt-2 max-w-2xl text-sm text-smoke">
-            {tab === 'debug'
-              ? t('admin.config_debug_description')
-              : tab === 'map'
-                ? t('admin.config_map_description')
-                : source === 'sandbox'
-                  ? t('admin.config_sandbox_description')
-                  : t('admin.config_description')}
+            {tab === 'map'
+              ? t('admin.config_map_description')
+              : source === 'sandbox'
+                ? t('admin.config_sandbox_description')
+                : t('admin.config_description')}
           </p>
           <div className="mt-3 max-w-xl">
             <TabStrip
@@ -447,7 +445,6 @@ export function AdminConfigPage() {
                   count: sandbox.data?.fields.length,
                 },
                 { id: 'map', label: t('admin.config_source_map') },
-                { id: 'debug', label: t('admin.config_source_debug') },
               ]}
               active={tab}
               onSelect={(id) => selectTab(id)}
@@ -478,8 +475,8 @@ export function AdminConfigPage() {
       ) : null}
       {error ? <FormError>{error}</FormError> : null}
 
-      {tab === 'map' || tab === 'debug' ? (
-        <ExtraSettings tab={tab} />
+      {tab === 'map' ? (
+        <ExtraSettings />
       ) : isPending ? (
         <Skeleton className="min-h-0 flex-1" />
       ) : isError ? (
@@ -1009,44 +1006,72 @@ function RichTextInput({
   )
 }
 
-function ExtraSettings({ tab }: { tab: ExtraTab }) {
+function parseCellRects(raw: string): number[][] | null {
+  const parts = raw
+    .split(/[;\n]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length === 0) {
+    return null
+  }
+  const cells: number[][] = []
+  for (const part of parts) {
+    const nums = part
+      .split(',')
+      .map((piece) => piece.trim())
+      .filter(Boolean)
+      .map(Number)
+    if (nums.some((value) => !Number.isInteger(value))) {
+      return null
+    }
+    if (nums.length === 2 || nums.length === 4) {
+      cells.push(nums)
+      continue
+    }
+    return null
+  }
+  return cells
+}
+
+function ExtraSettings() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const query = useQuery(adminMapTileSettingsQuery)
-  const [batch, setBatch] = useState(8)
-  const [waitMinutes, setWaitMinutes] = useState(5)
+  const [cells, setCells] = useState('')
+  const [jobId, setJobId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const parsed = parseCellRects(cells)
 
-  const settings = query.data
+  const job = useQuery({
+    queryKey: ['admin', 'map-tiles', 'jobs', jobId],
+    queryFn: () => api.adminMapTileJob(jobId!),
+    enabled: Boolean(jobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'queued' || status === 'running' ? 2_000 : false
+    },
+  })
 
-  useEffect(() => {
-    if (!settings) {
-      return
-    }
-    setBatch(settings.batch_blocks)
-    setWaitMinutes(Math.round(settings.max_wait_secs / 60))
-  }, [settings])
-
-  const save = useMutation({
-    mutationFn: (input: Partial<MapTileSettings>) => api.adminUpdateMapTileSettings(input),
-    onSuccess: async () => {
-      setNotice(t('admin.map_tiles_saved'))
+  const rerender = useMutation({
+    mutationFn: (input: number[][]) => api.adminRerenderMapTiles({ cells: input }),
+    onSuccess: async (started) => {
+      setJobId(started.id)
+      setNotice(t('admin.map_tiles_queued'))
       await queryClient.invalidateQueries({ queryKey: ['admin', 'map-tiles'] })
     },
   })
 
   const error =
-    save.error instanceof ApiError
-      ? save.error.message
-      : save.error
+    rerender.error instanceof ApiError
+      ? rerender.error.message
+      : rerender.error
         ? t('auth.unexpected_error')
-        : query.isError
-          ? t('common.error')
-          : null
-
-  if (query.isPending) {
-    return <Skeleton className="min-h-0 flex-1" />
-  }
+        : job.error instanceof ApiError
+          ? job.error.message
+          : job.error
+            ? t('auth.unexpected_error')
+            : cells.trim() && !parsed
+              ? t('admin.map_tiles_invalid')
+              : null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -1055,81 +1080,39 @@ function ExtraSettings({ tab }: { tab: ExtraTab }) {
           {notice}
         </p>
       ) : null}
-      {error ? (
-        <div>
-          <FormError>{error}</FormError>
-          {query.isError ? (
-            <Button size="sm" variant="outline" className="mt-3" onClick={() => void query.refetch()}>
-              {t('common.retry')}
+      {error ? <FormError>{error}</FormError> : null}
+      <Panel bracketed className="shrink-0">
+        <PanelHeader label={t('admin.map_tiles_settings')} />
+        <div className="flex flex-col gap-3 p-4">
+          <p className="text-sm text-smoke">{t('admin.map_tiles_settings_hint')}</p>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <Field
+              label={t('admin.map_tiles_cells')}
+              hint={t('admin.map_tiles_cells_hint')}
+              value={cells}
+              placeholder="41,38"
+              disabled={rerender.isPending}
+              onChange={(event) => setCells(event.target.value)}
+            />
+            <Button
+              size="sm"
+              disabled={rerender.isPending || !parsed}
+              onClick={() => parsed && rerender.mutate(parsed)}
+            >
+              {t('admin.map_tiles_rerender')}
             </Button>
+          </div>
+          {job.data ? (
+            <p className="font-mono text-xs text-dust">
+              {t('admin.map_tiles_progress', {
+                status: job.data.status,
+                pct: job.data.progress_pct ?? 0,
+              })}
+              {job.data.error ? ` — ${job.data.error}` : ''}
+            </p>
           ) : null}
         </div>
-      ) : null}
-      {settings && tab === 'map' ? (
-        <Panel bracketed className="shrink-0">
-          <PanelHeader label={t('admin.map_tiles_settings')} />
-          <div className="flex flex-col gap-3 p-4">
-            <p className="text-sm text-smoke">{t('admin.map_tiles_settings_hint')}</p>
-            <label className="flex items-center gap-2 text-sm text-bone">
-              <input
-                type="checkbox"
-                checked={settings.auto_rerender}
-                disabled={save.isPending}
-                onChange={(event) => save.mutate({ auto_rerender: event.target.checked })}
-              />
-              {t('admin.map_tiles_auto')}
-            </label>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-              <Field
-                type="number"
-                min={1}
-                max={256}
-                label={t('admin.map_tiles_batch')}
-                value={batch}
-                disabled={save.isPending || !settings.auto_rerender}
-                onChange={(event) => setBatch(Number(event.target.value) || 1)}
-              />
-              <Field
-                type="number"
-                min={0}
-                max={1440}
-                label={t('admin.map_tiles_wait')}
-                value={waitMinutes}
-                disabled={save.isPending || !settings.auto_rerender}
-                onChange={(event) => setWaitMinutes(Number(event.target.value) || 0)}
-              />
-              <Button
-                size="sm"
-                disabled={save.isPending || !settings.auto_rerender}
-                onClick={() =>
-                  save.mutate({
-                    batch_blocks: Math.min(256, Math.max(1, batch)),
-                    max_wait_secs: Math.min(86_400, Math.max(0, waitMinutes * 60)),
-                  })
-                }
-              >
-                {t('common.save')}
-              </Button>
-            </div>
-          </div>
-        </Panel>
-      ) : null}
-      {settings && tab === 'debug' ? (
-        <Panel bracketed className="shrink-0">
-          <PanelHeader label={t('admin.config_debug_overlay')} />
-          <div className="flex flex-col gap-3 p-4">
-            <label className="flex items-center gap-2 text-sm text-bone">
-              <input
-                type="checkbox"
-                checked={settings.debug_overlay}
-                disabled={save.isPending}
-                onChange={(event) => save.mutate({ debug_overlay: event.target.checked })}
-              />
-              {t('admin.map_tiles_debug')}
-            </label>
-          </div>
-        </Panel>
-      ) : null}
+      </Panel>
     </div>
   )
 }
@@ -1168,9 +1151,6 @@ function readConfigHash(): { tab: ConfigTab; group: string } {
     return { tab: 'server', group: 'featured' }
   }
   const raw = window.location.hash.replace('#', '')
-  if (raw === 'debug' || raw.startsWith('debug/')) {
-    return { tab: 'debug', group: 'featured' }
-  }
   if (raw === 'map' || raw.startsWith('map/')) {
     return { tab: 'map', group: 'featured' }
   }

@@ -1196,12 +1196,18 @@ export interface VaultView {
   moves: VaultMove[]
 }
 
-export interface MapTileSettings {
-  auto_rerender: boolean
-  batch_blocks: number
-  max_wait_secs: number
-  debug_overlay: boolean
-  pending_since: string | null
+export interface MapTileJob {
+  id: string
+  squares: number[][]
+  cells: number[][]
+  status: string
+  error: string | null
+  tiles_replaced: number | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  progress_stage: string | null
+  progress_pct: number | null
 }
 
 export interface VaultSettings {
@@ -1824,10 +1830,10 @@ export const api = {
 
   upgradeVault: () => post<VaultView>('/api/v1/me/vault/upgrade', {}),
 
-  adminMapTileSettings: () => request<MapTileSettings>('/api/v1/admin/map-tiles/settings'),
+  adminRerenderMapTiles: (input: { cells?: number[][]; squares?: number[][] }) =>
+    post<MapTileJob>('/api/v1/admin/map-tiles/rerender', input),
 
-  adminUpdateMapTileSettings: (input: Partial<MapTileSettings>) =>
-    patch<MapTileSettings>('/api/v1/admin/map-tiles/settings', input),
+  adminMapTileJob: (id: string) => request<MapTileJob>(`/api/v1/admin/map-tiles/jobs/${id}`),
 
   adminVault: () => request<AdminVault>('/api/v1/admin/vault'),
 

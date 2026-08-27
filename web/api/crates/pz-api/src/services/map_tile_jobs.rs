@@ -139,12 +139,8 @@ pub async fn active_updating(
             if rects.is_empty() {
                 return None;
             }
-            let (stage, percent) = resolve_progress(
-                &status,
-                file_tuple.as_ref(),
-                row_stage.as_deref(),
-                row_pct,
-            );
+            let (stage, percent) =
+                resolve_progress(&status, file_tuple.as_ref(), row_stage.as_deref(), row_pct);
             Some(UpdatingRegion {
                 rects,
                 percent,
@@ -230,12 +226,7 @@ fn parse_job_counts(line: &str) -> Option<(i32, i32)> {
     let rest = line[start + 4..].trim_start();
     let (done, total) = rest.split_once('/')?;
     let done = done.trim().parse().ok()?;
-    let total = total
-        .split_whitespace()
-        .next()?
-        .trim()
-        .parse()
-        .ok()?;
+    let total = total.split_whitespace().next()?.trim().parse().ok()?;
     Some((done, total))
 }
 
@@ -344,7 +335,10 @@ pub fn read_progress_file(pack: &std::path::Path) -> Option<FileProgress> {
     Some(FileProgress {
         stage,
         percent: percent.clamp(0, 100),
-        squares: value.get("squares").cloned().unwrap_or(serde_json::json!([])),
+        squares: value
+            .get("squares")
+            .cloned()
+            .unwrap_or(serde_json::json!([])),
         cells: value.get("cells").cloned().unwrap_or(serde_json::json!([])),
     })
 }
@@ -627,10 +621,7 @@ async fn container_logs(proxy: &str) -> Vec<String> {
 }
 
 async fn connect_network(proxy: &str, network: &str) {
-    let url = format!(
-        "{}/networks/{network}/connect",
-        proxy.trim_end_matches('/')
-    );
+    let url = format!("{}/networks/{network}/connect", proxy.trim_end_matches('/'));
     let body = serde_json::json!({ "Container": CONTAINER });
     if let Err(error) = http_client(INSPECT_TIMEOUT)
         .post(url)
@@ -764,7 +755,11 @@ mod tests {
         let cells = serde_json::json!([[34, 30, 1, 1], [40, 12]]);
         assert_eq!(
             world_rects(&squares, &cells),
-            vec![[100, 200, 10, 10], [8704, 7680, 256, 256], [10240, 3072, 256, 256]]
+            vec![
+                [100, 200, 10, 10],
+                [8704, 7680, 256, 256],
+                [10240, 3072, 256, 256]
+            ]
         );
     }
 
@@ -788,7 +783,12 @@ job: 25/100 worker: 8/8
 
     #[test]
     fn file_progress_beats_row_defaults() {
-        let (stage, pct) = resolve_progress("running", Some(&("pack".to_owned(), 92)), Some("render"), Some(40));
+        let (stage, pct) = resolve_progress(
+            "running",
+            Some(&("pack".to_owned(), 92)),
+            Some("render"),
+            Some(40),
+        );
         assert_eq!((stage.as_str(), pct), ("pack", Some(92)));
         let (stage, pct) = resolve_progress("running", None, Some("render"), Some(40));
         assert_eq!((stage.as_str(), pct), ("render", Some(40)));
@@ -808,8 +808,11 @@ job: 25/100 worker: 8/8
     fn progress_file_reads_stage_and_percent() {
         let dir = tempfile::tempdir().unwrap();
         let pack = dir.path().join("tiles.sqlite");
-        std::fs::write(dir.path().join("job_progress.json"), r#"{"stage":"render","percent":42}"#)
-            .unwrap();
+        std::fs::write(
+            dir.path().join("job_progress.json"),
+            r#"{"stage":"render","percent":42}"#,
+        )
+        .unwrap();
         let got = read_progress_file(&pack).expect("sidecar");
         assert_eq!(got.stage, "render");
         assert_eq!(got.percent, 42);

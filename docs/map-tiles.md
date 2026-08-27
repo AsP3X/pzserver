@@ -145,9 +145,10 @@ packed with `--replace --wal` into the live `tiles.sqlite`. Without
 lose to the rows already in the pack, then get unlinked). `PZ_MAP_VANILLA_ONLY=1`
 skips the overlay.
 
-After that, the scanner and `make map-tiles-region` keep player-alterable
-things current: doors, windows, curtains, chopped trees, destroyed walls, and
-player-built `IsoThumpable` (class 18) carpentry.
+After that, a **manual** regional job (`make map-tiles-region`, the admin
+Map tab, or `POST /api/v1/admin/map-tiles/rerender`) is how you refresh
+cells after a game update or a mod that adds map tiles. Player placement
+and door / window state are not auto-painted.
 
 > **Skip the lotpack leaf; paint only mapped door/window/tree/carpentry sprites.**
 > A world-change job skips the closed/intact lotpack leaf, then paints save
@@ -272,24 +273,10 @@ anchors a 512-wide sheet). Save-sprite paint uses **only** that map — not
 Floors and containers in the save stay off the overlay. Ids that never
 anchor drop rather than paint the wrong sheet.
 
-The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
-(default 120). The first pass seeds `map_tile_blocks` and does not enqueue.
-Later passes collect dirty blocks (a door or a window sheet is one block)
-and enqueue them as small square rects once either:
-
-- at least `batch_blocks` (default 8) dirty spots have piled up, or
-- `max_wait_secs` (default 300) has passed since the first pending spot.
-
-Staff toggle this on Configuration → **Map**. Off means the
-isometric pack stays as last painted. Each door, curtain or sheet action
-counts as one, even when they share an 8-square block — ten blinds in one
-room still reach the batch. Oldest dirty blocks go first so a quiet door is
-not starved by a busy cell. One job at a time; a running job skips the tick.
-Set the scan interval to `0` to disable the scanner itself.
-
-**Debug overlay** lives on Configuration → **Debug**. It draws the running
-count above the player in game on each counted action, and `PAINT` when a
-job actually starts.
+Staff start a regional job from Configuration → **Map** (cells as `x,y` or
+`x,y,w,h`, several separated by semicolons) or from
+`make map-tiles-region`. One job at a time; a second run while one is
+already painting is a conflict, not a queue.
 
 `make map-tiles-region` does the same overlay when `/saves` is mounted.
 `make map-tiles-detail` does not — that is a vanilla z21 fill.
@@ -365,8 +352,8 @@ fine for `make map-tiles-region`; the API spawn cannot use it.
    grazes the ceiling.
 9. **Do not wait on HTTP for the render.** A region takes minutes. `POST`
    returns `202` + job id.
-10. **Do not invent a second render path for world changes.** Chunk mtimes
-    emit cells into this same job. Save overlay is composited onto dirty
+10. **Do not invent a second render path for world changes.** A manual
+    region job is the same pipeline. Save overlay is composited onto dirty
     keys, not a second pack.
 
 ### What it costs

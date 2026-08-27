@@ -54,11 +54,6 @@ pub struct Config {
     pub pz_data_host: String,
     /// Save folder relative to `Saves/`, e.g. `Multiplayer/ZomboidServer`.
     pub pz_save_game: String,
-    /// How often to scan chunk mtimes. Zero disables the world-change detector.
-    pub map_tiles_world_scan: Duration,
-    /// Cap on cells in one automatic job so a busy town does not enqueue the
-    /// whole county.
-    pub map_tiles_world_max_cells: usize,
     /// Docker volume that holds `tiles.sqlite`. API and renderer share it so a
     /// region job updates the same pack the site is serving.
     pub map_tiles_volume: String,
@@ -167,8 +162,6 @@ impl Config {
             map_tiles_host: string("PZ_MAP_TILES_HOST", "./data/map-tiles"),
             pz_data_host: string("PZ_DATA_HOST", "./data/zomboid"),
             pz_save_game: string("PZ_SAVE_GAME", &save_game_default),
-            map_tiles_world_scan: seconds("MAP_TILES_WORLD_SCAN_SECS", "120")?,
-            map_tiles_world_max_cells: parse("MAP_TILES_WORLD_MAX_CELLS", "8", "integer")?,
             map_tiles_volume: string("MAP_TILES_VOLUME", "pz-map-tiles-sqlite"),
             pz_game_version: string("PZ_GAME_VERSION", "42.20.0"),
             steam_branch: optional("PZ_STEAM_BRANCH"),

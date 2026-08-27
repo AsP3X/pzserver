@@ -246,7 +246,7 @@ fn classify(method: &str, path: &str) -> (String, Option<String>) {
             return ("reports.update".into(), Some((*id).to_owned()));
         }
         ["admin", "site"] => "site.update".into(),
-        ["admin", "map-tiles", "settings"] if method == "PATCH" => "map.tiles.settings".into(),
+        ["admin", "map-tiles", "rerender"] if method == "POST" => "map.tiles.rerender".into(),
         ["admin", "backups"] if method == "POST" => "backups.create".into(),
         ["admin", "backups"] if method == "DELETE" => "backups.delete".into(),
         ["admin", "backups", "schedule"] => "backups.schedule".into(),

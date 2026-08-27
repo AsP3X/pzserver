@@ -103,10 +103,6 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/audit/actions", get(audit_actions))
         .route("/admin/map-tiles/rerender", post(rerender_tiles))
         .route("/admin/map-tiles/jobs/{id}", get(tile_job))
-        .route(
-            "/admin/map-tiles/settings",
-            get(map_tile_settings).patch(update_map_tile_settings),
-        )
 }
 
 /// Download and import sit outside the 15s request ceiling.
@@ -1243,24 +1239,5 @@ async fn tile_job(
 ) -> ApiResult<Json<crate::services::map_tile_jobs::Job>> {
     Ok(Json(
         crate::services::map_tile_jobs::get(&state.db, id).await?,
-    ))
-}
-
-async fn map_tile_settings(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-) -> ApiResult<Json<crate::services::map_tile_world::SettingsView>> {
-    Ok(Json(
-        crate::services::map_tile_world::view_settings(&state.db).await?,
-    ))
-}
-
-async fn update_map_tile_settings(
-    State(state): State<AppState>,
-    _staff: AdminUser,
-    Json(body): Json<crate::services::map_tile_world::SettingsPatch>,
-) -> ApiResult<Json<crate::services::map_tile_world::SettingsView>> {
-    Ok(Json(
-        crate::services::map_tile_world::apply_settings(&state, body).await?,
     ))
 }

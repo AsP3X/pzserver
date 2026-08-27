@@ -173,8 +173,6 @@ services:
       PZ_MAP_TILES_HOST: ${PZ_MAP_TILES_HOST:-./data/map-tiles}
       PZ_DATA_HOST: ${PZ_DATA_HOST:-./data/zomboid}
       PZ_SAVE_GAME: Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}
-      MAP_TILES_WORLD_SCAN_SECS: ${MAP_TILES_WORLD_SCAN_SECS:-120}
-      MAP_TILES_WORLD_MAX_CELLS: ${MAP_TILES_WORLD_MAX_CELLS:-8}
       MAP_TILES_VOLUME: pz-map-tiles-sqlite
       PZ_GAME_VERSION: ${PZ_GAME_VERSION:-42.20.0}
       PZ_STEAM_BRANCH: ${PZ_STEAM_BRANCH:-}

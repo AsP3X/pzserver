@@ -31,10 +31,7 @@ async fn meta(State(state): State<AppState>) -> impl IntoResponse {
             tracing::warn!(%error, "map tile jobs unread; construction overlay empty");
         }
     }
-    (
-        [(header::CACHE_CONTROL, "no-store, no-cache")],
-        Json(meta),
-    )
+    ([(header::CACHE_CONTROL, "no-store, no-cache")], Json(meta))
 }
 
 async fn tile(State(state): State<AppState>, Path((z, tile)): Path<(i64, String)>) -> Response {

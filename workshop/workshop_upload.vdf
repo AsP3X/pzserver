@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, and /report for filing a player report from inside the game."
-    "changenote"        "[h1]1.24 — Map edits count as they happen[/h1]\n[b]Added[/b]\n[list]\n[*]Closing a door, a window, or a blind, and hanging or taking a sheet, now tell the panel immediately instead of waiting for a chunk file to be written. Ten blinds in one room now count as ten, not one 8-square block.\n[*]Staff can turn on a debug overlay on the player map: the pending count appears above the character on each counted action, and PAINT when a tile job actually starts.\n[/list]"
+    "changenote"        "[h1]1.25 — Dropped map-edit watchers[/h1]\n[b]Removed[/b]\n[list]\n[*]Door, window, curtain, sheet, barricade, lock, and smash actions no longer notify the panel. Those world-edit pings did not produce a reliable isometric re-paint.\n[*]The in-game pending-count / PAINT overlay that rode those notices.\n[/list]"
 }
