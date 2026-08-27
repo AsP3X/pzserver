@@ -1848,5 +1848,11 @@
   "admin.action.password_new": "Neues Spiel-Passwort",
   "admin.action.password_hint": "Mindestens 6 Zeichen. Keine Anführungszeichen oder Backslashes.",
   "nav.collapse": "Menü einklappen",
-  "nav.expand": "Menü ausklappen"
+  "nav.expand": "Menü ausklappen",
+  "admin.map_update_open": "Karte aktualisieren…",
+  "admin.map_update_title": "Isometrische Karte aktualisieren",
+  "admin.map_update_hint": "Rendert die angegebenen Zellen aus den Spieldateien und dem laufenden Save neu und ersetzt nur diese Kacheln im Pack. Minuten, keine Stunden. Ein kompletter Neuaufbau bleibt ein Host-Befehl.",
+  "admin.map_update_running": "Rendert…",
+  "admin.map_update_log": "Renderer-Ausgabe",
+  "admin.map_update_log_empty": "Noch keine Ausgabe. Starte ein Neurendern, um zuzusehen."
 }

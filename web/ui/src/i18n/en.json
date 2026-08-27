@@ -1848,5 +1848,11 @@
   "admin.action.password_new": "New game password",
   "admin.action.password_hint": "At least 6 characters. No quotes or backslashes.",
   "nav.collapse": "Collapse menu",
-  "nav.expand": "Expand menu"
+  "nav.expand": "Expand menu",
+  "admin.map_update_open": "Update map…",
+  "admin.map_update_title": "Update the isometric map",
+  "admin.map_update_hint": "Re-renders the cells you name from the game files and the live save, then replaces just those tiles in the pack. Minutes, not hours. A full county rebuild stays a host command.",
+  "admin.map_update_running": "Rendering…",
+  "admin.map_update_log": "Renderer output",
+  "admin.map_update_log_empty": "No output yet. Start a re-render to watch it run."
 }

@@ -103,6 +103,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/audit/actions", get(audit_actions))
         .route("/admin/map-tiles/rerender", post(rerender_tiles))
         .route("/admin/map-tiles/jobs/{id}", get(tile_job))
+        .route("/admin/map-tiles/jobs/{id}/log", get(tile_job_log))
 }
 
 /// Download and import sit outside the 15s request ceiling.
@@ -1239,5 +1240,36 @@ async fn tile_job(
 ) -> ApiResult<Json<crate::services::map_tile_jobs::Job>> {
     Ok(Json(
         crate::services::map_tile_jobs::get(&state.db, id).await?,
+    ))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TileLogQuery {
+    /// Byte offset from the previous poll. Absent means "from the start".
+    #[serde(default)]
+    offset: u64,
+}
+
+/// The renderer's own output, for the admin Map dialog.
+///
+/// There is one log sidecar beside the pack, not one per job: only one
+/// `pz-map-tiles` container runs at a time and `run.sh` truncates it on
+/// start. The job id is still in the path so the dialog cannot show a
+/// finished job someone else's run has since overwritten without noticing --
+/// `get` fails first if the id is unknown.
+async fn tile_job_log(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Path(id): Path<Uuid>,
+    Query(query): Query<TileLogQuery>,
+) -> ApiResult<Json<crate::services::map_tile_jobs::JobLog>> {
+    crate::services::map_tile_jobs::get(&state.db, id).await?;
+    Ok(Json(
+        crate::services::map_tile_jobs::read_job_log(&state.config.map_tiles_path, query.offset)
+            .unwrap_or(crate::services::map_tile_jobs::JobLog {
+                offset: query.offset,
+                text: String::new(),
+                size: 0,
+            }),
     ))
 }

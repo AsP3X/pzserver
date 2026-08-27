@@ -53,6 +53,16 @@ read_pack_size() {
 }
 MAP_INFO_BAK=
 PROGRESS=/pack/job_progress.json
+# Everything this script prints, on the volume the API can read, so the admin
+# Map dialog can show the run as it happens. `docker logs` is not enough: the
+# container is removed the moment it exits, taking the output with it, and a
+# CLI `make map-tiles-region` has no container the API knows about at all.
+# Survives the run on purpose -- the dialog shows the finished log too, until
+# the next job truncates it.
+JOB_LOG=/pack/job.log
+if [ -d /pack ] && : > "$JOB_LOG" 2>/dev/null; then
+    exec > >(tee -a "$JOB_LOG") 2>&1
+fi
 PROGRESS_WATCH=
 set_progress() {
     python /tools/progress.py write "$PROGRESS" "$1" "$2" || true

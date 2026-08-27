@@ -343,6 +343,47 @@ pub fn read_progress_file(pack: &std::path::Path) -> Option<FileProgress> {
     })
 }
 
+/// A slice of the renderer's log, for the admin Map dialog.
+#[derive(Debug, Serialize)]
+pub struct JobLog {
+    /// Byte offset the next poll should ask for.
+    pub offset: u64,
+    /// Bytes from the requested offset onward.
+    pub text: String,
+    /// Total size, so a caller can tell it was truncated under it.
+    pub size: u64,
+}
+
+/// How much log one poll may return. A full county run prints megabytes of
+/// per-tile progress; the dialog only ever shows the tail.
+const LOG_CHUNK: u64 = 256 * 1024;
+
+/// Read `job.log` from `offset`, the sidecar `run.sh` tees next to the pack.
+///
+/// A restarted job truncates the file, so an offset past the end means the
+/// caller is reading a previous run: rewind rather than return nothing.
+pub fn read_job_log(pack: &std::path::Path, offset: u64) -> Option<JobLog> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let path = pack.parent()?.join("job.log");
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let start = if offset > size { 0 } else { offset };
+    // Skip ahead when a caller is far behind, so one poll cannot pull the
+    // whole file into memory.
+    let start = start.max(size.saturating_sub(LOG_CHUNK));
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    file.take(LOG_CHUNK).read_to_end(&mut buf).ok()?;
+    Some(JobLog {
+        offset: start + buf.len() as u64,
+        // The renderer writes UTF-8, but a chunk boundary can split a
+        // character and a torn read must not 500 the dialog.
+        text: String::from_utf8_lossy(&buf).into_owned(),
+        size,
+    })
+}
+
 fn format_rects(rects: &[[i32; 4]]) -> String {
     rects
         .iter()
@@ -816,6 +857,51 @@ job: 25/100 worker: 8/8
         let got = read_progress_file(&pack).expect("sidecar");
         assert_eq!(got.stage, "render");
         assert_eq!(got.percent, 42);
+    }
+
+    #[test]
+    fn job_log_reads_from_an_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("tiles.sqlite");
+        std::fs::write(dir.path().join("job.log"), "==> deploy\n==> render\n").unwrap();
+
+        let all = read_job_log(&pack, 0).expect("log");
+        assert_eq!(all.text, "==> deploy\n==> render\n");
+        assert_eq!(all.offset, all.size);
+
+        // A poll from where the last one stopped returns only what is new.
+        let tail = read_job_log(&pack, 11).expect("log");
+        assert_eq!(tail.text, "==> render\n");
+    }
+
+    #[test]
+    fn job_log_rewinds_when_a_new_run_truncated_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("tiles.sqlite");
+        std::fs::write(dir.path().join("job.log"), "==> starting\n").unwrap();
+        // The dialog was following a longer previous run; do not go silent.
+        let got = read_job_log(&pack, 9_000).expect("log");
+        assert_eq!(got.text, "==> starting\n");
+        assert_eq!(got.offset, got.size);
+    }
+
+    #[test]
+    fn job_log_without_a_sidecar_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_job_log(&dir.path().join("tiles.sqlite"), 0).is_none());
+    }
+
+    #[test]
+    fn job_log_caps_one_poll_at_the_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("tiles.sqlite");
+        let big = "x".repeat((LOG_CHUNK as usize) * 2);
+        std::fs::write(dir.path().join("job.log"), &big).unwrap();
+        let got = read_job_log(&pack, 0).expect("log");
+        assert_eq!(got.text.len() as u64, LOG_CHUNK);
+        assert_eq!(got.size, big.len() as u64);
+        // Caller is told where it really got to, not where it asked from.
+        assert_eq!(got.offset, got.size);
     }
 
     #[test]

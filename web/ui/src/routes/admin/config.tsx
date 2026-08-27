@@ -35,8 +35,9 @@ import {
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { MapUpdateDialog } from '@/components/ui/map-update-dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { Field, FormError } from '@/components/ui/field'
+import { FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TabStrip } from '@/components/ui/tabs'
@@ -1006,113 +1007,25 @@ function RichTextInput({
   )
 }
 
-function parseCellRects(raw: string): number[][] | null {
-  const parts = raw
-    .split(/[;\n]+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-  if (parts.length === 0) {
-    return null
-  }
-  const cells: number[][] = []
-  for (const part of parts) {
-    const nums = part
-      .split(',')
-      .map((piece) => piece.trim())
-      .filter(Boolean)
-      .map(Number)
-    if (nums.some((value) => !Number.isInteger(value))) {
-      return null
-    }
-    if (nums.length === 2 || nums.length === 4) {
-      cells.push(nums)
-      continue
-    }
-    return null
-  }
-  return cells
-}
 
 function ExtraSettings() {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
-  const [cells, setCells] = useState('')
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const parsed = parseCellRects(cells)
-
-  const job = useQuery({
-    queryKey: ['admin', 'map-tiles', 'jobs', jobId],
-    queryFn: () => api.adminMapTileJob(jobId!),
-    enabled: Boolean(jobId),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === 'queued' || status === 'running' ? 2_000 : false
-    },
-  })
-
-  const rerender = useMutation({
-    mutationFn: (input: number[][]) => api.adminRerenderMapTiles({ cells: input }),
-    onSuccess: async (started) => {
-      setJobId(started.id)
-      setNotice(t('admin.map_tiles_queued'))
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'map-tiles'] })
-    },
-  })
-
-  const error =
-    rerender.error instanceof ApiError
-      ? rerender.error.message
-      : rerender.error
-        ? t('auth.unexpected_error')
-        : job.error instanceof ApiError
-          ? job.error.message
-          : job.error
-            ? t('auth.unexpected_error')
-            : cells.trim() && !parsed
-              ? t('admin.map_tiles_invalid')
-              : null
+  const [open, setOpen] = useState(false)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {notice ? (
-        <p role="status" className="shrink-0 border border-moss/40 bg-moss-soft px-3 py-2 text-sm text-moss">
-          {notice}
-        </p>
-      ) : null}
-      {error ? <FormError>{error}</FormError> : null}
       <Panel bracketed className="shrink-0">
         <PanelHeader label={t('admin.map_tiles_settings')} />
         <div className="flex flex-col gap-3 p-4">
           <p className="text-sm text-smoke">{t('admin.map_tiles_settings_hint')}</p>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-            <Field
-              label={t('admin.map_tiles_cells')}
-              hint={t('admin.map_tiles_cells_hint')}
-              value={cells}
-              placeholder="41,38"
-              disabled={rerender.isPending}
-              onChange={(event) => setCells(event.target.value)}
-            />
-            <Button
-              size="sm"
-              disabled={rerender.isPending || !parsed}
-              onClick={() => parsed && rerender.mutate(parsed)}
-            >
-              {t('admin.map_tiles_rerender')}
+          <div>
+            <Button size="sm" onClick={() => setOpen(true)}>
+              {t('admin.map_update_open')}
             </Button>
           </div>
-          {job.data ? (
-            <p className="font-mono text-xs text-dust">
-              {t('admin.map_tiles_progress', {
-                status: job.data.status,
-                pct: job.data.progress_pct ?? 0,
-              })}
-              {job.data.error ? ` — ${job.data.error}` : ''}
-            </p>
-          ) : null}
         </div>
       </Panel>
+      <MapUpdateDialog open={open} onClose={() => setOpen(false)} />
     </div>
   )
 }

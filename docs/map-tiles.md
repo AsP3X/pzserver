@@ -127,7 +127,30 @@ make map-tiles-region CELLS="34,30,4,4"
 make map-tiles-detail CELLS="34,30"          # z21 only; leaves z20 in place
 POST /api/v1/admin/map-tiles/rerender  {"cells":[[34,30,4,4]]}
 GET  /api/v1/admin/map-tiles/jobs/{id}
+GET  /api/v1/admin/map-tiles/jobs/{id}/log?offset=0
 ```
+
+#### From the panel: Configuration → **Update map…**
+
+The button opens a dialog that runs the same regional job and shows it
+happening: the cells field, a stage label and percent bar from
+`job_progress.json`, and the renderer's **own stdout** streaming underneath.
+
+The log comes from `job.log`, which `run.sh` tees next to the pack on the
+`pz-map-tiles-sqlite` volume. `docker logs` is not enough on its own — the
+container is removed the moment it exits, taking the output with it, and a CLI
+`make map-tiles-region` has no container the API knows about at all. The
+sidecar survives the run, so the dialog still shows a finished job (including
+why it failed) until the next job truncates it.
+
+`GET …/jobs/{id}/log?offset=N` answers `{offset, text, size}` in bytes, so the
+dialog polls incrementally instead of re-sending a run's whole output every
+tick. One poll is capped at 256 KB and returns the **tail** when the caller is
+far behind — a full county run prints megabytes of per-tile progress.
+
+The dialog is **regional only, on purpose**. A full county rebuild takes hours
+and replaces the live pack in place; that stays `make map-tiles` on the host
+rather than sitting one click away in the panel.
 
 A full county of z21 is ~60–80 GB, so it is never part of `make map-tiles`.
 Regional jobs (and the admin rerender endpoint) write z21 for just those cells.

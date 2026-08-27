@@ -1210,6 +1210,14 @@ export interface MapTileJob {
   progress_pct: number | null
 }
 
+/** One poll of the renderer's own output, for the Map update dialog. */
+export interface MapTileJobLog {
+  /** Byte offset to send with the next poll. */
+  offset: number
+  text: string
+  size: number
+}
+
 export interface VaultSettings {
   enabled: boolean
   default_slots: number
@@ -1834,6 +1842,9 @@ export const api = {
     post<MapTileJob>('/api/v1/admin/map-tiles/rerender', input),
 
   adminMapTileJob: (id: string) => request<MapTileJob>(`/api/v1/admin/map-tiles/jobs/${id}`),
+
+  adminMapTileJobLog: (id: string, offset: number) =>
+    request<MapTileJobLog>(`/api/v1/admin/map-tiles/jobs/${id}/log?offset=${offset}`),
 
   adminVault: () => request<AdminVault>('/api/v1/admin/vault'),
 
