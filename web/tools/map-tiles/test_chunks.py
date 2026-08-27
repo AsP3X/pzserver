@@ -6,6 +6,7 @@ from chunks import (
     chunk_cell,
     chunks_for_cells,
     iter_chunks,
+    occupied_cells,
     parse_cell_rects,
     sanitize_save_name,
 )
@@ -33,6 +34,7 @@ def test_iter_chunks_b42_layout(tmp_path):
     found = list(iter_chunks(tmp_path))
     assert found == [(1375, 1251, 8, blob)]
     assert dict(cell_mtimes(tmp_path))[(42, 39)] >= 0
+    assert occupied_cells(tmp_path) == [(42, 39)]
 
 
 def test_iter_chunks_legacy_map_xy(tmp_path):

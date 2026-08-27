@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Render, verify, pack. Re-running resumes: pzmap2dzi skips work it has already
-# done, and the packer skips tiles already stored.
+# Render, verify, pack. A full county run replaces every packed JPEG (--replace)
+# so the live map actually moves. Regional jobs replace only dirty keys.
+# pzmap2dzi still skips work it has already done on disk.
 #
 # Set PZ_MAP_SQUARES and/or PZ_MAP_CELLS to redraw only part of the map instead
 # of all of it -- see "regional re-render" below.
@@ -36,6 +37,20 @@ if [ -s /out/tiles.sqlite ] && [ /out/tiles.sqlite != "$PACK" ]; then
     PRISTINE=/out/tiles.sqlite
 fi
 PACK_ARGS=""
+# The pyramid's real size, which the client lays every tile out on. Read from
+# map_info just before packing -- see pack_size.py for why this must not be a
+# constant. Falls back to the pair the shipped pack used if map_info is absent.
+PACK_W=2318656
+PACK_H=1019040
+read_pack_size() {
+    local size
+    if size=$(python /tools/pack_size.py "$TREE/map_info.json" 2>/dev/null); then
+        read -r PACK_W PACK_H <<< "$size"
+        echo "==> pyramid size ${PACK_W}x${PACK_H} (from map_info)"
+    else
+        echo "==> map_info unreadable; packing the previous size ${PACK_W}x${PACK_H}" >&2
+    fi
+}
 MAP_INFO_BAK=
 PROGRESS=/pack/job_progress.json
 PROGRESS_WATCH=
@@ -219,11 +234,12 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
         fi
         echo "==> heal-only: copy pristine tiles over the black region (no re-render)"
         python /tools/unpack.py "$PRISTINE" "$TREE/layer0_files" --only /tmp/dirty.txt
+        read_pack_size
         python /tools/pack.py "$TREE/layer0_files" "$PACK" \
             "game_version=${PZ_GAME_VERSION:-42.20.0}" \
             "tile_size=2048" \
-            "width=2318656" \
-            "height=1019040" \
+            "width=$PACK_W" \
+            "height=$PACK_H" \
             "generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --replace --only /tmp/dirty.txt --wal
         echo "==> healed; re-run without PZ_MAP_HEAL_ONLY to paint live save on top"
@@ -244,39 +260,59 @@ print(';'.join(f'{x},{y},{w},{h}' for x,y,w,h in rects))
     # Without this the fresh bytes lose to the rows already in the pack and the
     # whole run is a no-op. Only dirty keys; WAL so a live reader can keep going.
     PACK_ARGS="--replace --only /tmp/dirty.txt --wal"
+fi
 
-    # World-change jobs paint the live save on top of vanilla. Detail-only
-    # fills (z21 of the shipped map) skip this — they have no world state.
-    SAVE_GAME="${PZ_SAVE_GAME:-}"
-    WANT_SAVE="${PZ_MAP_SAVE:-}"
+# A full county pack must replace existing rows. Skip-on-conflict is how an
+# earlier clean-slate run painted for hours, packed 0 tiles, then unlinked
+# the JPEGs — the live map never moved.
+if [ -z "$REGION" ]; then
+    PACK_ARGS="--replace --wal"
+fi
 
-    # Paint-the-save overlay stays off: chunk sprite ids still do not match
-    # load_tile_defs, and compositing them puts window frames on roads.
-    # Open doors are handled by skipping the lotpack *name* of the closed
-    # leaf during the vanilla paint (open_squares.py). The open tile is a
-    # hole; dropping the closed leaf is enough. PZ_MAP_SAVE_SPRITES=1 turns
-    # the (still broken) save paint back on for whoever is working on ids.
-    PAINT_SAVE=
-    if [ -n "${PZ_MAP_SAVE_SPRITES:-}" ]; then
-        PAINT_SAVE=1
+# World-change overlay: live save on top of vanilla. Region jobs opt in with
+# PZ_MAP_SAVE=1. A full rebuild does the same for every cell that has a save
+# chunk so the clean slate already shows player-alterable things. Detail-only
+# fills (z21 of the shipped map) skip this — they have no world state.
+# PZ_MAP_VANILLA_ONLY=1 keeps a full run as lotpack only.
+SAVE_GAME="${PZ_SAVE_GAME:-}"
+WANT_SAVE="${PZ_MAP_SAVE:-}"
+PAINT_SAVE=
+if [ -n "${PZ_MAP_SAVE_SPRITES:-}" ]; then
+    PAINT_SAVE=1
+fi
+if [ -z "$REGION" ] && [ -z "${PZ_MAP_VANILLA_ONLY:-}" ]; then
+    WANT_SAVE=1
+fi
+
+if [ -z "${PZ_MAP_DETAIL_ONLY:-}" ] && { [ -n "$WANT_SAVE" ] || [ -n "$SAVE_GAME" ]; }; then
+    SAVE_GAME="${SAVE_GAME:-Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}}"
+    LIVE_SAVE="/saves/${SAVE_GAME}"
+    if [ ! -d "$LIVE_SAVE" ]; then
+        if [ -n "$REGION" ] && [ -n "${PZ_MAP_SAVE:-}" ]; then
+            echo "FAIL: PZ_MAP_SAVE is set but $LIVE_SAVE is missing." >&2
+            echo "Mount the dedicated-server Saves folder at /saves." >&2
+            exit 1
+        fi
+        echo "==> no save at $LIVE_SAVE; packing vanilla tiles only"
+        WANT_SAVE=
     else
-        echo "==> save overlay paint off (chunk sprite ids do not resolve)"
-        echo "    skip list still runs from lotpack names so open doors vanish"
-    fi
-
-    if [ -z "$DETAIL_ONLY" ] && { [ -n "$WANT_SAVE" ] || [ -n "$SAVE_GAME" ]; }; then
-        SAVE_GAME="${SAVE_GAME:-Multiplayer/${PZ_SERVER_NAME:-ZomboidServer}}"
-        LIVE_SAVE="/saves/${SAVE_GAME}"
-        if [ ! -d "$LIVE_SAVE" ]; then
-            if [ -n "$WANT_SAVE" ]; then
-                echo "FAIL: PZ_MAP_SAVE is set but $LIVE_SAVE is missing." >&2
-                echo "Mount the dedicated-server Saves folder at /saves." >&2
-                exit 1
+        if [ -z "$REGION" ]; then
+            python -c "
+from pathlib import Path
+from chunks import occupied_cells
+cells = occupied_cells(Path('$LIVE_SAVE'))
+print(';'.join(f'{x},{y}' for x, y in cells), end='')
+" > /tmp/render_cells.txt
+            if [ ! -s /tmp/render_cells.txt ]; then
+                echo "==> no save chunks; packing vanilla county"
+                WANT_SAVE=
+            else
+                echo "==> overlaying occupied save cells on the clean slate"
             fi
-            echo "==> no save at $LIVE_SAVE; region will be vanilla tiles only"
-        else
+        fi
+        if [ -n "$WANT_SAVE" ]; then
             SNAP="/out/save-snapshot/${SAVE_GAME}"
-            echo "==> flush live chunks so door/window state is on disk"
+            echo "==> flush live chunks so door/window/tree state is on disk"
             set_progress snapshot 2
             BEFORE_MTIME=$(python -c "
 from pathlib import Path
@@ -308,7 +344,12 @@ print(f'{newest}')
             # whole cell goes black.
             python /tools/open_squares.py "$SNAP" /tmp/save_skip.txt \
                 /pz /pz/steamapps/workshop/content/108600 \
-                "/pz/media/maps/Muldraugh, KY" || true
+                "/pz/media/maps/Muldraugh, KY" \
+                /tmp/tiledef_map.txt || true
+            if [ -s /tmp/tiledef_map.txt ]; then
+                echo "==> save overlay paint on (lotpack-anchored sprite ids)"
+                PAINT_SAVE=1
+            fi
             if [ -z "$PAINT_SAVE" ]; then
                 WANT_SAVE=
             elif [ ! -f "$SNAP/WorldDictionary.bin" ]; then
@@ -351,6 +392,13 @@ fi
 # pixels off and it stops. Planning already used x0/y0/sqr; let it write a
 # fresh map_info for this omit_levels.
 rm -f "$TREE/map_info.json"
+# Full rebuild: leftover JPEGs are treated as done and would keep the old
+# closed doors / chopped canopies. Regional jobs restore from the live pack
+# instead and must not wipe.
+if [ -z "$REGION" ]; then
+    echo "==> clean slate: discarding previous county tiles"
+    rm -rf "$TREE/layer0_files"
+fi
 
 if [ -n "$REGION" ]; then
     echo "==> render region"
@@ -430,11 +478,12 @@ fi
 
 echo "==> pack"
 set_progress pack 92
+read_pack_size
 python /tools/pack.py "$TREE/layer0_files" "$PACK" \
     "game_version=${PZ_GAME_VERSION:-42.20.0}" \
     "tile_size=2048" \
-    "width=2318656" \
-    "height=1019040" \
+    "width=$PACK_W" \
+    "height=$PACK_H" \
     "generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     $PACK_ARGS
 

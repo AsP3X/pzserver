@@ -4,8 +4,9 @@ pz_root: /pz
 output_root: /out
 mod_root: /pz/steamapps/workshop/content/108600
 custom_root: .
-# Live world overlay. A full county run leaves this at /dev/null. Region jobs
-# that set PZ_MAP_SAVE rewrite it to the snapshot of the dedicated-server save.
+# Live world overlay. run.sh rewrites this to the snapshot of the dedicated-
+# server save for region jobs and for a full county rebuild. Leave /dev/null
+# here so a vanilla-only run (PZ_MAP_VANILLA_ONLY=1) paints lotpack only.
 save_game_root: /dev/null
 # Do not download "latest" pzdataspec at render time. The image already has
 # v1.12.249 under /opt; a newer zip can disagree with chunk_sprites.py.

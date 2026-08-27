@@ -1,12 +1,14 @@
 from types import SimpleNamespace
 
-from chunk_sprites import visual_sprite_id
+from chunk_sprites import overlay_kind, overlay_sprites, visual_sprite_id
 
 
-def _obj(sprite_id, **sub):
+def _obj(sprite_id, class_id=None, **sub):
     base = SimpleNamespace(sprite_id=sprite_id)
     subclass = SimpleNamespace(**sub) if sub else None
-    wrapper = SimpleNamespace(base_object=base, subclass_object=subclass)
+    wrapper = SimpleNamespace(
+        base_object=base, subclass_object=subclass, class_id=class_id
+    )
     return SimpleNamespace(object=wrapper)
 
 
@@ -144,3 +146,21 @@ def test_open_window_without_open_sprite_is_omitted():
         closed_sprite_id=10,
     )
     assert visual_sprite_id(window) is None
+
+
+def test_overlay_omits_floors_and_keeps_open_doors():
+    """Save chunks store containers and floors. Painting those ids with
+    load_tile_defs (or a 512-wide door sheet) puts window frames on roads."""
+    floor = _obj(12, class_id=0)
+    door = _obj(
+        100,
+        class_id=17,
+        open=1,
+        locked=0,
+        open_sprite_id=200,
+        closed_sprite_id=100,
+        curtain_flags=0,
+    )
+    assert overlay_kind(floor) is None
+    assert overlay_kind(door) == "door"
+    assert overlay_sprites([floor, door]) == [200]

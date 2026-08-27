@@ -10,7 +10,15 @@ windows never move.
 This replaces ChunkData.__init__ after pzdataspec loads, so a pzmap2dzi bump
 does not silently drop the fix: patch_save_render.py fails the image build if
 init_worker moved.
+
+The overlay must not paint every save object. B42 chunk ids are file-0;
+`load_tile_defs` is 110000/page 1000. Looking up a floor or a container in
+that map (or in a 512-wide sheet expanded from one door) stamps window
+frames on roads. Only door/window/curtain/tree/thumpable sprites go out,
+and only ids the lotpack map named.
 """
+
+OVERLAY_KINDS = frozenset({"door", "window", "curtain", "tree", "thumpable"})
 
 
 def visual_sprite_id(obj):
@@ -88,6 +96,54 @@ def visual_sprite_id(obj):
     return default
 
 
+def overlay_kind(obj) -> str | None:
+    """door / window / curtain / tree / thumpable, from the chunk parser."""
+    wrapper = getattr(obj, "object", obj)
+    sub = getattr(wrapper, "subclass_object", None)
+    cid = getattr(wrapper, "class_id", None)
+    if sub is None and cid is None:
+        return None
+    if hasattr(sub, "other_sprite_id") and hasattr(sub, "barricade_strength"):
+        return "curtain"
+    if hasattr(sub, "destroyed") and hasattr(sub, "glass_removed"):
+        return "window"
+    if hasattr(sub, "curtain_flags") and (
+        hasattr(sub, "open_sprite_id") or hasattr(sub, "closed_sprite_id")
+    ):
+        return "door"
+    if cid == 26:
+        return "window"
+    if cid == 17:
+        return "door"
+    if cid == 1:
+        return "tree"
+    if sub is not None and (
+        hasattr(sub, "log_yield") or (hasattr(sub, "size") and hasattr(sub, "damage"))
+    ):
+        return "tree"
+    if cid == 18 or (sub is not None and hasattr(sub, "bit_header")):
+        if getattr(sub, "is_window", False):
+            return "window"
+        if getattr(sub, "is_door", False):
+            return "door"
+        return "thumpable"
+    if sub is not None and getattr(sub, "is_door", False):
+        return "door"
+    return None
+
+
+def overlay_sprites(objects) -> list[int]:
+    """Sprite ids the save layer may paint. Floors and furniture are omitted."""
+    out: list[int] = []
+    for obj in objects:
+        if overlay_kind(obj) not in OVERLAY_KINDS:
+            continue
+        sid = visual_sprite_id(obj)
+        if isinstance(sid, int):
+            out.append(sid)
+    return out
+
+
 def _header_int(value):
     if hasattr(value, "value") and not isinstance(value, (int, float, bool, str, bytes)):
         value = value.value
@@ -141,11 +197,7 @@ def chunk_data_init(self, raw):
                 bit <<= 1
                 layer += 1
 
-            sprites = []
-            for obj in grid_square.objects:
-                sid = visual_sprite_id(obj)
-                if isinstance(sid, int):
-                    sprites.append(sid)
+            sprites = overlay_sprites(grid_square.objects)
 
             if sprites:
                 self._set_sprites(layer, x, y, sprites)

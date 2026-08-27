@@ -21,6 +21,13 @@ pub struct TileMeta {
     pub max_level: Option<i64>,
     pub game_version: Option<String>,
     pub generated_at: Option<String>,
+    /// The pyramid's own full-resolution size, as the render measured it.
+    ///
+    /// The client lays every tile out on this. It is not a constant: the size
+    /// depends on the game files the pack was rendered from, and a pack that
+    /// claims a height it does not have squashes the whole map.
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     /// Jobs currently painting. Empty when none are queued or running.
     #[serde(default)]
     pub updating: Vec<UpdatingRegion>,
@@ -43,6 +50,8 @@ impl TileMeta {
             max_level: None,
             game_version: None,
             generated_at: None,
+            width: None,
+            height: None,
             updating: Vec::new(),
         }
     }
@@ -212,6 +221,8 @@ fn read_meta(con: &Connection) -> rusqlite::Result<TileMeta> {
         max_level: get("max_level")?.and_then(|v| v.parse().ok()),
         game_version: get("game_version")?,
         generated_at: get("generated_at")?,
+        width: get("width")?.and_then(|v| v.parse().ok()),
+        height: get("height")?.and_then(|v| v.parse().ok()),
         updating: Vec::new(),
     })
 }

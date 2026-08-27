@@ -85,3 +85,25 @@ def test_a_transparent_overlay_leaves_vanilla_alone(tmp_path):
     assert composite(dirty, base_dir, save_dir) == 1
     out = Image.open(base_dir / "20" / "1_2.jpg").convert("RGB")
     assert out.getpixel((32, 32))[1] > 150
+
+
+def test_empty_dirty_composites_every_overlay_tile(tmp_path):
+    """A full county rebuild has no dirty.txt. Composite every save PNG."""
+    dirty = tmp_path / "dirty.txt"
+    dirty.write_text("", encoding="utf-8")
+    base_dir = tmp_path / "base"
+    save_dir = tmp_path / "save"
+    (base_dir / "20").mkdir(parents=True)
+    (save_dir / "20").mkdir(parents=True)
+    Image.new("RGB", (64, 64), (255, 0, 0)).save(
+        base_dir / "20" / "1_2.jpg", quality=95
+    )
+    overlay = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for x in range(16):
+        for y in range(16):
+            overlay.putpixel((x, y), (0, 255, 0, 255))
+    overlay.save(save_dir / "20" / "1_2.png")
+
+    assert composite(dirty, base_dir, save_dir) == 1
+    out = Image.open(base_dir / "20" / "1_2.jpg").convert("RGB")
+    assert out.getpixel((8, 8))[1] > 200

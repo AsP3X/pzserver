@@ -132,6 +132,22 @@ def test_replace_only_updates_named_tiles(tmp_path):
     assert (tiles / "20" / "5_6.jpg").exists()
 
 
+def test_full_replace_overwrites_every_existing_tile(tmp_path):
+    """A clean-slate county pack must not skip rows already in tiles.sqlite."""
+    tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
+    build_tree(tree)
+    pack(tree / "base" / "layer0_files", db, {})
+
+    build_tree(tree)
+    tiles = tree / "base" / "layer0_files"
+    (tiles / "20" / "3_4.jpg").write_bytes(b"NEW")
+    n = pack(tiles, db, {"generated_at": "rebuild"}, replace=True, wal=True)
+
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT data FROM tiles WHERE z=20 AND x=3 AND y=4").fetchone()[0] == b"NEW"
+    assert n >= 1
+
+
 def test_region_pack_enables_wal(tmp_path):
     tree, db = tmp_path / "tree", tmp_path / "tiles.sqlite"
     build_tree(tree)

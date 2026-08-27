@@ -27,12 +27,48 @@ def is_curtain(name: str) -> bool:
     return "curtain" in name.lower()
 
 
+def is_tree_leaf(name: str) -> bool:
+    """The tree (or jumbo canopy), not ground cover around it."""
+    lower = name.lower()
+    if lower.startswith("vegetation_trees_"):
+        return True
+    if lower.startswith("jumbo_tree_"):
+        return True
+    # e_americanhollyJUMBO, e_redmapleJUMBOXL, e_birchJUMBO, …
+    if lower.startswith("e_") and ("jumbo" in lower or "tree" in lower):
+        return True
+    return "stump" in lower
+
+
+def is_wall_leaf(name: str) -> bool:
+    """The wall face, not an overlay/detailing stamp."""
+    lower = name.lower()
+    if not lower.startswith("walls_"):
+        return False
+    return "overlay" not in lower and "detailing" not in lower
+
+
+def is_thumpable_leaf(name: str) -> bool:
+    """Player-built carpentry / constructed objects, not vanilla walls."""
+    lower = name.lower()
+    return (
+        lower.startswith("constructedobjects_")
+        or lower.startswith("carpentry_")
+        or lower.startswith("crafted_")
+    )
+
+
+def is_stump(name: str) -> bool:
+    return "stump" in name.lower()
+
+
 def leaves_for(kind: str, tiles: list[str]) -> list[str]:
-    """`kind` is door, window or curtain."""
-    if kind == "curtain":
-        match = is_curtain
-    elif kind == "window":
-        match = is_window_leaf
-    else:
-        match = is_door_leaf
+    """`kind` is door, window, curtain, tree, wall or thumpable."""
+    match = {
+        "curtain": is_curtain,
+        "window": is_window_leaf,
+        "tree": is_tree_leaf,
+        "wall": is_wall_leaf,
+        "thumpable": is_thumpable_leaf,
+    }.get(kind, is_door_leaf)
     return [name for name in tiles if match(name)]

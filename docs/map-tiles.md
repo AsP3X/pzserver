@@ -74,7 +74,7 @@ Pick one for the pack:
 
 | How | Command |
 |-----|---------|
-| Generate on this machine (hours, ~24 GB, needs texture packs first) | `make map-tiles` |
+| Generate on this machine (hours, ~24 GB, needs texture packs first; overlays the live save and **replaces** the pack) | `make map-tiles` |
 | Upload a pack built elsewhere | copy it to `data/map-tiles/tiles.sqlite`, then `make up` (imports into the volume if empty) or `make map-tiles-import` |
 
 ```bash
@@ -135,16 +135,27 @@ Until a cell has z21, the client asks for it, gets 404, and upscales z20.
 
 ### World changes (player builds, fire, smashed tiles)
 
-The county pack is vanilla map files. Player construction and environment
-damage live in the dedicated-server save
-(`Saves/Multiplayer/<name>/map/{x}/{y}.bin` on B42).
+The county pack starts from vanilla map files. Player construction and
+environment damage live in the dedicated-server save
+(`Saves/Multiplayer/<name>/map/{x}/{y}.bin` on B42). A **full**
+`make map-tiles` is a clean slate of that world: vanilla county, jumbo tree
+margin, BOX downsampling, then a save overlay on every cell that has a chunk,
+packed with `--replace --wal` into the live `tiles.sqlite`. Without
+`--replace` a re-run paints for hours and stores 0 tiles (the previous JPEGs
+lose to the rows already in the pack, then get unlinked). `PZ_MAP_VANILLA_ONLY=1`
+skips the overlay.
 
-> **Save-sprite paint is off; open-door skip is on.** A world-change job
-> re-renders the region from vanilla map files and drops the lotpack tiles
-> the live save contradicts (an opened door, a smashed window). It does
-> **not** composite save-chunk sprites on top — those ids still resolve to
-> the wrong sheets. See *[Why save-sprite paint is off](#why-save-sprite-paint-is-off)*.
-> `PZ_MAP_SAVE_SPRITES=1` turns the (broken) paint path back on.
+After that, the scanner and `make map-tiles-region` keep player-alterable
+things current: doors, windows, curtains, chopped trees, destroyed walls, and
+player-built `IsoThumpable` (class 18) carpentry.
+
+> **Skip the lotpack leaf; paint only mapped door/window/tree/carpentry sprites.**
+> A world-change job skips the closed/intact lotpack leaf, then paints save
+> sprites whose ids were correlated from unique matches (B42 chunks still use
+> file-0 ids). `load_tile_defs` is **not** used for the overlay — merging the
+> lotpack map onto it paints window frames on every road and parking square
+> that has a save object. Unknown ids stay unpainted; vanilla already drew
+> them. `PZ_MAP_SAVE_SPRITES=1` forces paint even if that map file is empty.
 
 A **world-change job** is the same regional job, plus a save overlay:
 
@@ -166,19 +177,51 @@ sprite is anchored bottom-centre and stands about three diamond heights above
 its square, so clipping the overlay to that square's ground diamond keeps the
 doorstep and throws the door away.
 
-Door, window and curtain sprites come from the save object's *state*
-(`open` / smashed / glass-removed), not the default `sprite_id`. PZ's
-`IsoDoor.save` writes the closed sprite as `sprite_id` and the live
+Door, window, curtain and tree sprites come from the save object's *state*
+(`open` / smashed / glass-removed / `damage`), not the default `sprite_id`.
+PZ's `IsoDoor.save` writes the closed sprite as `sprite_id` and the live
 picture as `open` + `openSprite.ID` (PZwiki: open tiles are tilesheet
 offset +2 and are not flagged Door — they are mostly a hole).
-Player-built doors are `IsoThumpable` (class 18), same idea on
-`bit_header`. Opening a door only updates Java memory until `save` —
-the renderer issues RCON `save` (and the API does too) and waits for
+Player-built doors, windows and carpentry are `IsoThumpable` (class 18),
+same idea on `bit_header`. Chopped trees are `IsoTree` (class 1) until the
+stump replaces them. Opening a door only updates Java memory until `save`
+— the renderer issues RCON `save` (and the API does too) and waits for
 chunk mtimes before the snapshot. Vanilla lotpack paint drops the one
-closed-door tile on that square so the closed sprite cannot show through
-the open-door hole; everything else on the square still paints. The panel
-job must pass `PYTHONPATH=/tools` into the renderer; without it the
-skip/sprite patches never load and the door stays shut on the map.
+contradicted leaf on that square so the closed door / standing tree cannot
+show through; everything else on the square still paints. The panel job
+must pass `PYTHONPATH=/tools` into the renderer; without it the skip/sprite
+patches never load and the door stays shut on the map.
+
+#### The pyramid's size is measured, never assumed
+
+The client lays every tile out on the width and height the **pack** declares:
+`tileBounds()` in `web/ui/src/lib/iso-tiles.ts` clamps each tile's destination
+rectangle to them, so an edge tile is drawn exactly as wide as it really is.
+
+That size is **not a constant**. It depends on the game files the pack was
+rendered from. This install's county is **2 318 464 × 1 015 776**; the public
+pyramid the constants were copied from was 2 318 656 × 1 019 040 — 3 264 px
+taller. `verify.py` used to wave that through on a 16 384 tolerance, reasoning
+it cost "at most one tile row at the bottom edge". It did not: every level was
+drawn short by the ratio, and the further out you zoomed the worse it looked,
+because at z12 a single tile row spans the entire map.
+
+So:
+
+- `pack_size.py` reads the render's own `map_info.json` (`w`/`h` × 2^`skip`)
+  and `run.sh` writes that into the pack's `meta` table.
+- `/api/v1/map-tiles/meta` returns `width` and `height`.
+- The client calls `setPackSize()` from that and falls back to `ISO_DZI`
+  only for a pack too old to carry them.
+- `verify.py` no longer pins the size — it sanity-checks it is Knox County at
+  all (±5%) and keeps `x0`/`y0`/`sqr`/`cell_rects` exact, because *those* place
+  every pin.
+
+To correct an existing pack without re-rendering, update the two rows:
+
+```bash
+docker run --rm -v pz-map-tiles-sqlite:/pack --entrypoint python pzserver-map-tiles:local -c "import sqlite3; con=sqlite3.connect('/pack/tiles.sqlite'); con.execute(\"UPDATE meta SET value='2318464' WHERE key='width'\"); con.execute(\"UPDATE meta SET value='1015776' WHERE key='height'\"); con.commit()"
+```
 
 #### Render margin: the rectangle over a tree
 
@@ -210,25 +253,24 @@ axes. So `conf.yaml` sets an explicit numeric margin instead,
 `[-5, 0, 5, 25]` (320 px across, 800 px up), and `patch_render_margin.py`
 stops `BaseRender.update_options` from overwriting it.
 
-**The shipped county pack was rendered without this**, so the chopped canopies
-are baked into it everywhere. Only cells that get redrawn pick up the fix — a
-`map-tiles-region` on the cells you care about, or a full `map-tiles` run
-(hours) to clear it county-wide.
+**Older packs were rendered without this**, so chopped canopies are baked in
+until those cells are redrawn. A full `make map-tiles` rebuild clears it
+county-wide; `map-tiles-region` fixes the cells you name.
 
-#### Why save-sprite paint is off
+#### Sprite ids vs lotpack names
 
 A chunk stores each object's sprite as an **id**. `load_tile_defs` numbers
 B42 `newtiledefinitions.tiles` from **110000** (page size 1000). The save
 writes the old file-0 ids: `fixtures_doors_01_0` is **11264** in the chunk
-and **122000** in the tiledef file. WorldDictionary.bin parses (5103 items,
-46 objects) but reports `num_sprites = 0`, so it cannot fill the gap.
+and **122000** in the tiledef file. WorldDictionary.bin reports
+`num_sprites = 0`.
 
-Using the id map paints the wrong sheet — window frames on roads. The
-lotpack already has the closed leaf's *name* on that square, so a
-world-change job skips that name during the vanilla paint and does not
-composite save sprites. The open-door tile is a hole; dropping the closed
-leaf is enough. `PZ_MAP_SAVE_SPRITES=1` turns id-based save paint back on
-for whoever is working on the mapping.
+A world-change job therefore skips the closed lotpack *name* on that square
+and builds an id map from unique door/window matches (one object, one leaf
+anchors a 512-wide sheet). Save-sprite paint uses **only** that map — not
+`load_tile_defs` — and only for door/window/curtain/tree/thumpable objects.
+Floors and containers in the save stay off the overlay. Ids that never
+anchor drop rather than paint the wrong sheet.
 
 The API scans 8-square block mtimes every `MAP_TILES_WORLD_SCAN_SECS`
 (default 120). The first pass seeds `map_tile_blocks` and does not enqueue.

@@ -44,6 +44,12 @@ def iter_chunks(save: Path):
         yield int(parts[1]), int(parts[2]), CELL_SIZE, blob
 
 
+def occupied_cells(save: Path) -> list[tuple[int, int]]:
+    """Cells that have at least one save chunk — the ones player state can dirty."""
+    cells = {chunk_cell(x, y, unit) for x, y, unit, _path in iter_chunks(save)}
+    return sorted(cells)
+
+
 def chunk_cell(x: int, y: int, unit: int) -> tuple[int, int]:
     """Which 256-square cell a chunk file belongs to."""
     return (x * unit) // CELL_SIZE, (y * unit) // CELL_SIZE

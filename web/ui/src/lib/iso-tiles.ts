@@ -118,6 +118,9 @@ export interface TileMeta {
   max_level: number | null
   game_version: string | null
   generated_at: string | null
+  /** The pack's own pyramid size; absent on a pack built before it was stored. */
+  width?: number | null
+  height?: number | null
   /** Jobs currently painting. */
   updating?: UpdatingJob[]
 }
@@ -144,6 +147,9 @@ export function loadTileMeta(): Promise<TileMeta> {
     .then((meta: TileMeta) => {
       if (meta.max_level !== null) {
         setRenderedMaxLevel(meta.max_level)
+      }
+      if (meta.width != null && meta.height != null) {
+        setPackSize(meta.width, meta.height)
       }
       setPackRevision(meta.generated_at ?? meta.game_version ?? '')
       return meta
@@ -179,6 +185,35 @@ export function tileUrl(z: number, x: number, y: number): string {
   return url
 }
 
+/**
+ * The pack's own pyramid size, from /api/v1/map-tiles/meta.
+ *
+ * ISO_DZI.width/height are only a fallback for a pack too old to carry them.
+ * The render's real size depends on the game files it was built from -- this
+ * install's county is 2_318_464 x 1_015_776, not the 2_318_656 x 1_019_040 the
+ * public pyramid used. Laying tiles out on the wrong height squashes every
+ * level, worst zoomed out where one tile row spans the whole map.
+ */
+let packWidth: number = ISO_DZI.width
+let packHeight: number = ISO_DZI.height
+
+export function setPackSize(width: number, height: number): void {
+  if (Number.isFinite(width) && width > 0) {
+    packWidth = width
+  }
+  if (Number.isFinite(height) && height > 0) {
+    packHeight = height
+  }
+}
+
+export function dziWidth(): number {
+  return packWidth
+}
+
+export function dziHeight(): number {
+  return packHeight
+}
+
 /** How many full-res DZI pixels one tile covers at this level. */
 export function tileSpan(level: number): number {
   return ISO_DZI.tileSize * 2 ** (ISO_DZI.maxLevel - level)
@@ -187,8 +222,8 @@ export function tileSpan(level: number): number {
 export function tilesOnLevel(level: number): { cols: number; rows: number } {
   const span = tileSpan(level)
   return {
-    cols: Math.ceil(ISO_DZI.width / span),
-    rows: Math.ceil(ISO_DZI.height / span),
+    cols: Math.ceil(packWidth / span),
+    rows: Math.ceil(packHeight / span),
   }
 }
 
@@ -207,8 +242,8 @@ export function tileBounds(tile: IsoTile): { x: number; y: number; w: number; h:
   return {
     x,
     y,
-    w: Math.max(0, Math.min(span, ISO_DZI.width - x)),
-    h: Math.max(0, Math.min(span, ISO_DZI.height - y)),
+    w: Math.max(0, Math.min(span, packWidth - x)),
+    h: Math.max(0, Math.min(span, packHeight - y)),
   }
 }
 
@@ -217,7 +252,7 @@ export function minIsoScaleForViewport(width: number, height: number): number {
   if (width <= 0 || height <= 0) {
     return MIN_ISO_SCALE
   }
-  return Math.max(MIN_ISO_SCALE, Math.min(width / ISO_DZI.width, height / ISO_DZI.height))
+  return Math.max(MIN_ISO_SCALE, Math.min(width / packWidth, height / packHeight))
 }
 
 export interface IsoTile {
@@ -602,21 +637,12 @@ export function drawIsoTiles(
 
     const ready = isoTiles.get(tile)
     if (ready) {
-      // pzmap2dzi crops edge tiles smaller than tileSize. Stretching that
-      // JPEG to the full DZI rectangle turns trees into a shifted stamp.
-      const nw = ready.naturalWidth || ready.width
-      const nh = ready.naturalHeight || ready.height
-      if (nw > 0 && nh > 0 && (nw < ISO_DZI.tileSize || nh < ISO_DZI.tileSize)) {
-        ctx.drawImage(
-          ready,
-          destX,
-          destY,
-          destW * (nw / ISO_DZI.tileSize),
-          destH * (nh / ISO_DZI.tileSize),
-        )
-      } else {
-        ctx.drawImage(ready, destX, destY, destW, destH)
-      }
+      // `bounds` is already the cropped rectangle -- tileBounds() clamps to the
+      // pack's real width/height, so an edge tile's destW/destH is exactly what
+      // its shorter JPEG covers. Scaling by naturalHeight/tileSize on top of
+      // that counted the crop twice: at z12 the single tile row is 992 of 2048
+      // px, so the whole map was drawn at half its height.
+      ctx.drawImage(ready, destX, destY, destW, destH)
       continue
     }
 

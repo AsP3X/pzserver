@@ -156,7 +156,7 @@ map-tiles:
 	@# reaches the texture check.
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" map-tiles
+	$(COMPOSE) --profile tools run --rm --no-deps --use-aliases -e PZ_MAP_CELLS="$(CELLS)" -e PZ_MAP_SQUARES="$(SQUARES)" -e PZ_MAP_SAVE=1 map-tiles
 
 # Redraw part of the map instead of all of it, for when the world has changed:
 #   make map-tiles-region SQUARES="8704,7680,256,256"  x, y, width, height in world squares

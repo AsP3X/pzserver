@@ -5,12 +5,15 @@ x0, y0 and sqr. Those must match exactly, or survivors land on the wrong
 buildings — a failure that still looks like a working map, which is why this
 runs before anything is built on top of a render.
 
-The image dimensions are a different matter. `omit_levels: N` reports w and h
-divided by 2^N while leaving x0/y0/sqr in full-resolution space, recording the
-reduction as `skip`. So the size check undoes that before comparing, and
-tolerates a small residual: our game files differ slightly from whatever the
-public pyramid was rendered from, which costs at most one tile row at the
-bottom edge.
+The image dimensions used to be checked against the public pyramid's, with a
+tolerance for "our game files differ slightly". That reasoning was wrong: the
+client lays every tile out on the size the *pack* declares, so a render 3264 px
+shorter than the constant did not cost one row at the bottom edge -- it drew
+every level short, worst zoomed out where a single tile row spans the map. The
+render's size is now measured (pack_size.py) and published in the pack, so
+there is nothing to compare it against. What remains here is the geometry that
+really is fixed: x0/y0/sqr place every pin, and cell_rects say it is the right
+map.
 """
 import json
 import sys
@@ -18,18 +21,17 @@ import sys
 # From ISO_DZI in web/ui/src/lib/iso-tiles.ts. These decide pin placement.
 EXACT = {"x0": 1040384, "y0": -139296, "sqr": 128}
 
-# Full-resolution pyramid the client's tile maths is built around.
-FULL_W, FULL_H = 2318656, 1019040
+# A render this far off the shipped county is not this map at all. Wide on
+# purpose: the point is to catch a wrong or truncated render, not to pin the
+# size, which pack_size.py measures and the pack publishes.
+SANE_W, SANE_H = 2318656, 1019040
+SANE_FRACTION = 0.05
 
 # The B42 vanilla cell rectangles, as documented in pzmap2dzi's own conf.yaml.
 # This is the real shape check: w and h are derived from these, so matching
 # rects means matching geometry, and comparing rects catches a wrong map where
 # comparing pixel counts only catches it by proxy.
 CELL_RECTS = [[0, 18, 45, 45], [45, 3, 13, 60], [58, 0, 20, 63]]
-
-# One cell diagonal. Sub-cell differences are padding and rounding against a
-# slightly different source install; a whole cell means real geometry drift.
-TOLERANCE = 16384
 
 
 def check(info: dict) -> list:
@@ -47,12 +49,12 @@ def check(info: dict) -> list:
 
     skip = info.get("skip", 0)
     scale = 2**skip
-    for label, want in (("w", FULL_W), ("h", FULL_H)):
+    for label, sane in (("w", SANE_W), ("h", SANE_H)):
         got = info.get(label, 0) * scale
-        if abs(got - want) > TOLERANCE:
+        if abs(got - sane) > sane * SANE_FRACTION:
             problems.append(
-                f"{label} x 2^{skip} is {got}, expected about {want} "
-                f"(off by {abs(got - want)}, tolerance {TOLERANCE})"
+                f"{label} x 2^{skip} is {got}, which is not Knox County "
+                f"(about {sane}, +/-{SANE_FRACTION:.0%})"
             )
 
     return problems

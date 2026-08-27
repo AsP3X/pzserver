@@ -354,7 +354,7 @@ function Do-MapTiles {
             Write-Host "Redrawing map $what from the live save (minutes; updates the existing pack)..." -ForegroundColor Cyan
         }
     } else {
-        Write-Host "Rendering the isometric basemap from the game files (hours, ~15 GB)..." -ForegroundColor Cyan
+        Write-Host "Rendering the isometric basemap from the live world (hours, ~15 GB; replaces the pack)..." -ForegroundColor Cyan
     }
     # Docker cannot create a mountpoint inside a read-only bind mount, and /pz
     # is one. Without this the run dies on "read-only file system" before it
@@ -374,6 +374,8 @@ function Do-MapTiles {
         $run += @("-e", "PZ_MAP_DETAIL=$Detail", "-e", "PZ_MAP_SAVE=1")
     } elseif ($Squares -or $Cells) {
         $run += @("-e", "PZ_MAP_DETAIL=21", "-e", "PZ_MAP_SAVE=1")
+    } else {
+        $run += @("-e", "PZ_MAP_SAVE=1")
     }
     $run += @("map-tiles")
     # `Invoke-Compose $run`, NOT `@run`. Invoke-Compose is a PowerShell
