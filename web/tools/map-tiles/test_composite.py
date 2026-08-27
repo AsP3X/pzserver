@@ -107,3 +107,42 @@ def test_empty_dirty_composites_every_overlay_tile(tmp_path):
     assert composite(dirty, base_dir, save_dir) == 1
     out = Image.open(base_dir / "20" / "1_2.jpg").convert("RGB")
     assert out.getpixel((8, 8))[1] > 200
+
+
+def _stamp(path: Path, rgb: tuple[int, int, int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".jpg":
+        Image.new("RGB", (64, 64), rgb).save(path, quality=95)
+        return
+    overlay = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for x in range(16):
+        for y in range(16):
+            overlay.putpixel((x, y), (*rgb, 255))
+    overlay.save(path)
+
+
+def test_planned_keys_that_miss_the_overlay_still_composite_where_it_landed(
+    tmp_path,
+):
+    """A region job's leaves are the cell AABB. Save sprites often land a
+    couple of DZI tiles away, so compositing *only* the leaves reports 0 and
+    the run aborts after skip already punched the vanilla doors."""
+    from composite import covers_keys
+
+    dirty = tmp_path / "leaves.txt"
+    dirty.write_text("20/131_61\n20/132_61\n", encoding="utf-8")
+    base_dir = tmp_path / "base"
+    save_dir = tmp_path / "save"
+    _stamp(base_dir / "20" / "131_61.jpg", (255, 0, 0))
+    _stamp(base_dir / "20" / "129_64.jpg", (255, 0, 0))
+    _stamp(save_dir / "20" / "129_64.png", (0, 255, 0))
+
+    assert not covers_keys([(20, 131, 61), (20, 132, 61)], save_dir)
+    from composite import extra_overlay_lines
+
+    assert extra_overlay_lines(dirty, save_dir) == ["20/129_64"]
+    assert composite(dirty, base_dir, save_dir) == 1
+    out = Image.open(base_dir / "20" / "129_64.jpg").convert("RGB")
+    assert out.getpixel((8, 8))[1] > 200
+    red = Image.open(base_dir / "20" / "131_61.jpg").convert("RGB")
+    assert red.getpixel((8, 8))[0] > 200

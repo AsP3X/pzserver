@@ -90,20 +90,81 @@ def list_overlay_keys(save_dir: Path) -> list[tuple[int, int, int]]:
     return keys
 
 
-def composite(dirty: Path, base_dir: Path, save_dir: Path) -> int:
+def covers_keys(keys: list[tuple[int, int, int]], save_dir: Path) -> bool:
+    """True when at least one planned DZI tile has a save overlay file."""
+    return any(overlay_path(save_dir, z, x, y) is not None for z, x, y in keys)
+
+
+def composite_keys(dirty: Path, save_dir: Path) -> list[tuple[int, int, int]]:
+    """Planned dirty/leaf keys plus every overlay file that actually exists.
+
+    A region job's leaves are the cell AABB. Save sprites often land a couple
+    of DZI tiles away, so walking *only* the leaves reports 0 composites.
+    """
     text = dirty.read_text(encoding="utf-8") if dirty.is_file() else ""
-    keys = parse_dirty(text) if text.strip() else list_overlay_keys(save_dir)
+    planned = parse_dirty(text) if text.strip() else []
+    overlay_keys = list_overlay_keys(save_dir)
+    if not planned:
+        return overlay_keys
+    seen = set(planned)
+    keys = list(planned)
+    for key in overlay_keys:
+        if key not in seen:
+            keys.append(key)
+            seen.add(key)
+    return keys
+
+
+def extra_overlay_lines(dirty: Path, save_dir: Path) -> list[str]:
+    """Overlay DZI keys that are not already in dirty/leaves, for packing."""
+    have: set[str] = set()
+    if dirty.is_file():
+        for line in dirty.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                have.add(line)
+    extra = []
+    for z, x, y in list_overlay_keys(save_dir):
+        line = f"{z}/{x}_{y}"
+        if line not in have:
+            extra.append(line)
+    return extra
+
+
+def composite(dirty: Path, base_dir: Path, save_dir: Path) -> int:
     painted = 0
-    for z, x, y in keys:
+    for z, x, y in composite_keys(dirty, save_dir):
         if composite_one(base_dir, save_dir, z, x, y):
             painted += 1
     return painted
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "--covers":
+        leaves = Path(sys.argv[2])
+        save_dir = Path(sys.argv[3])
+        text = leaves.read_text(encoding="utf-8") if leaves.is_file() else ""
+        keys = parse_dirty(text) if text.strip() else []
+        raise SystemExit(0 if covers_keys(keys, save_dir) else 1)
+    if len(sys.argv) == 4 and sys.argv[1] == "--append-dirty":
+        dirty = Path(sys.argv[2])
+        extra = extra_overlay_lines(dirty, Path(sys.argv[3]))
+        if extra:
+            with dirty.open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(extra) + "\n")
+            print(f"pack also {len(extra)} overlay tile(s) the cell AABB missed")
+        raise SystemExit(0)
     if len(sys.argv) != 4:
         print(
             "usage: composite.py <dirty.txt> <base layer0_files> <save layer0_files>",
+            file=sys.stderr,
+        )
+        print(
+            "       composite.py --covers <leaves.txt> <save layer0_files>",
+            file=sys.stderr,
+        )
+        print(
+            "       composite.py --append-dirty <dirty.txt> <save layer0_files>",
             file=sys.stderr,
         )
         raise SystemExit(2)

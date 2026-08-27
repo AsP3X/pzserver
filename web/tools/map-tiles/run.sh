@@ -410,17 +410,41 @@ if [ -z "$REGION" ]; then
     rm -rf "$TREE/layer0_files"
 fi
 
+# Keep the render's own output so the cache gate below can read it. Losing it
+# is how a run with 13,000 destroyed tiles got mistaken for a good one.
+RENDER_LOG=/tmp/render.log
+: > "$RENDER_LOG"
+
+# Save overlay before the base. Skip punches vanilla doors on the cell AABB
+# tiles; save sprites often land a couple of DZI tiles away. If we skip first
+# and then composite only the AABB, we abort with holes. Paint the overlay,
+# and only skip when it actually covers those leaves.
+if [ -n "${WANT_SAVE:-}" ]; then
+    echo "==> render save overlay"
+    # Leftover save tiles look "complete" to incremental mode and the overlay
+    # paints nothing (Affected tiles: 0). The snapshot is the authority.
+    rm -rf "${SAVE_TREE:-/tmp/missing-save}/layer0_files"
+    rm -f "${SAVE_TREE:-/tmp/missing-save}/map_info.json" "${SAVE_TREE:-/tmp/missing-save}/sources.json"
+    watch_progress save 8 12 "$RENDER_LOG"
+    python main.py -c "$CONF" render save 2>&1 | tee -a "$RENDER_LOG"
+    stop_progress_watch
+    if grep -q "Failed to load parser utils" "$RENDER_LOG"; then
+        echo "FAIL: save overlay parser did not load (need lark in the image)." >&2
+        exit 1
+    fi
+    if [ -s /tmp/leaves.txt ] && ! python /tools/composite.py --covers /tmp/leaves.txt "$SAVE_TREE/layer0_files"; then
+        echo "==> save overlay missed planned leaves; not skipping vanilla doors"
+        : > /tmp/save_skip.txt
+    fi
+fi
+
 if [ -n "$REGION" ]; then
     echo "==> render region"
 else
     echo "==> render base (hours; ctrl-c is safe, re-run resumes)"
 fi
-# Keep the render's own output so the cache gate below can read it. Losing it
-# is how a run with 13,000 destroyed tiles got mistaken for a good one.
-RENDER_LOG=/tmp/render.log
-: > "$RENDER_LOG"
 watch_progress render 20 50 "$RENDER_LOG"
-python main.py -c "$CONF" render base 2>&1 | tee "$RENDER_LOG"
+python main.py -c "$CONF" render base 2>&1 | tee -a "$RENDER_LOG"
 stop_progress_watch
 if grep -q "map_info mismatch" "$RENDER_LOG" || grep -q "Render stopped" "$RENDER_LOG"; then
     echo "FAIL: pzmap2dzi refused the base render (map_info mismatch)." >&2
@@ -429,18 +453,6 @@ fi
 set_progress render 70
 
 if [ -n "${WANT_SAVE:-}" ]; then
-    echo "==> render save overlay"
-    # Leftover save tiles look "complete" to incremental mode and the overlay
-    # paints nothing (Affected tiles: 0). The snapshot is the authority.
-    rm -rf "${SAVE_TREE:-/tmp/missing-save}/layer0_files"
-    rm -f "${SAVE_TREE:-/tmp/missing-save}/map_info.json" "${SAVE_TREE:-/tmp/missing-save}/sources.json"
-    watch_progress save 70 15 "$RENDER_LOG"
-    python main.py -c "$CONF" render save 2>&1 | tee -a "$RENDER_LOG"
-    stop_progress_watch
-    if grep -q "Failed to load parser utils" "$RENDER_LOG"; then
-        echo "FAIL: save overlay parser did not load (need lark in the image)." >&2
-        exit 1
-    fi
     echo "==> composite save onto base"
     set_progress composite 88
     COMPOSITE_KEYS=/tmp/dirty.txt
@@ -451,9 +463,10 @@ if [ -n "${WANT_SAVE:-}" ]; then
     echo "$COMP_OUT"
     if [ -s /tmp/save_skip.txt ] && echo "$COMP_OUT" | grep -q "composited 0 "; then
         echo "FAIL: save overlay painted nothing but open-square skip listed doors." >&2
-        echo "The live door state was snapshotted and then dropped (unit-range filter)." >&2
+        echo "The overlay files and the planned cell tiles did not overlap." >&2
         exit 1
     fi
+    python /tools/composite.py --append-dirty /tmp/dirty.txt "$SAVE_TREE/layer0_files"
 fi
 
 # After the overlay, not before. The live world is on the tile by now, so
