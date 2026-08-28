@@ -10,6 +10,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -147,24 +148,13 @@ impl InventoryReader {
             return Ok(());
         }
 
-        let path = self.dir.join(EXPORT_REQUESTS_FILE);
-
-        let existing: ExportRequests = match tokio::fs::read_to_string(&path).await {
-            Ok(contents) if !contents.trim().is_empty() => {
-                serde_json::from_str(&contents).unwrap_or_default()
-            }
-            // A missing or empty queue is the usual state; both start a new one.
-            Ok(_) => ExportRequests::default(),
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                ExportRequests::default()
-            }
-            Err(source) => return Err(InventoryError::Write { path, source }),
-        };
+        let existing = self.read_queue().await?;
 
         // Deduplicated and ordered so the file stays readable by hand.
         let mut usernames: BTreeSet<String> = existing.usernames.into_iter().collect();
         usernames.insert(username.to_owned());
 
+        let path = self.dir.join(EXPORT_REQUESTS_FILE);
         let body = serde_json::to_string_pretty(&ExportRequests {
             usernames: usernames.into_iter().collect(),
         })
@@ -174,6 +164,52 @@ impl InventoryReader {
         })?;
 
         write_atomically(&self.dir, EXPORT_REQUESTS_FILE, &body).await
+    }
+
+    /// Wait until the mod has drained this username from the request queue.
+    ///
+    /// `true` means the name is no longer listed — either the mod served it,
+    /// or it was never queued. `false` means the timeout ran out while the
+    /// name was still sitting there.
+    pub async fn await_served(
+        &self,
+        username: &str,
+        timeout: Duration,
+    ) -> Result<bool, InventoryError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            if !self.queue_contains(username).await? {
+                return Ok(true);
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(false);
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn queue_contains(&self, username: &str) -> Result<bool, InventoryError> {
+        let queued = self.read_queue().await?;
+        Ok(queued.usernames.iter().any(|name| name == username))
+    }
+
+    async fn read_queue(&self) -> Result<ExportRequests, InventoryError> {
+        let path = self.dir.join(EXPORT_REQUESTS_FILE);
+
+        match tokio::fs::read_to_string(&path).await {
+            Ok(contents) if !contents.trim().is_empty() => {
+                Ok(serde_json::from_str(&contents).unwrap_or_default())
+            }
+            // A missing or empty queue is the usual state.
+            Ok(_) => Ok(ExportRequests::default()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                Ok(ExportRequests::default())
+            }
+            Err(source) => Err(InventoryError::Write { path, source }),
+        }
     }
 }
 
@@ -353,5 +389,55 @@ mod tests {
                 .join(format!("{EXPORT_REQUESTS_FILE}.tmp"))
                 .exists()
         );
+    }
+
+    #[tokio::test]
+    async fn await_served_returns_once_the_queue_no_longer_lists_the_player() {
+        let (dir, reader) = reader();
+
+        reader.request_snapshot("rook").await.expect("queue");
+
+        let queue = dir.path().join(EXPORT_REQUESTS_FILE);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            std::fs::write(
+                queue,
+                r#"{"usernames":[],"updated_at":"2026-08-28T00:00:00"}"#,
+            )
+            .expect("drain");
+        });
+
+        let done = reader
+            .await_served("rook", std::time::Duration::from_millis(500))
+            .await
+            .expect("wait");
+
+        assert!(done);
+    }
+
+    #[tokio::test]
+    async fn await_served_times_out_while_the_player_is_still_queued() {
+        let (_dir, reader) = reader();
+
+        reader.request_snapshot("rook").await.expect("queue");
+
+        let done = reader
+            .await_served("rook", std::time::Duration::from_millis(80))
+            .await
+            .expect("wait");
+
+        assert!(!done);
+    }
+
+    #[tokio::test]
+    async fn an_empty_queue_is_already_served() {
+        let (_dir, reader) = reader();
+
+        let done = reader
+            .await_served("rook", std::time::Duration::from_millis(50))
+            .await
+            .expect("wait");
+
+        assert!(done);
     }
 }

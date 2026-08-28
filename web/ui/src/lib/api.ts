@@ -358,6 +358,8 @@ export interface MyInventoryResponse {
   online: boolean
   /** Takes and gives waiting for the next join. */
   holds: InventoryHold[]
+  /** True when a forced refresh waited and the mod actually wrote a snapshot. */
+  served?: boolean
 }
 
 export interface MyPositionResponse {
@@ -489,12 +491,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     )
   }
 
-  // 204 has no body to parse.
-  if (response.status === 204) {
+  // 204/205 have no body. 202 Accepted is also often empty — the inventory
+  // refresh used to return that, and `response.json()` on an empty body is a
+  // SyntaxError that the UI surfaces as "Something went wrong".
+  if (response.status === 204 || response.status === 205) {
     return undefined as T
   }
 
-  return (await response.json()) as T
+  const text = await response.text()
+  if (text.trim().length === 0) {
+    return undefined as T
+  }
+
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new ApiError('Invalid JSON response', response.status, 'invalid_json')
+  }
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {
@@ -1392,7 +1405,7 @@ export const api = {
 
   myPosition: () => request<MyPositionResponse>('/api/v1/me/position'),
 
-  refreshInventory: () => post<void>('/api/v1/me/inventory/refresh', {}),
+  refreshInventory: () => post<MyInventoryResponse>('/api/v1/me/inventory/refresh', {}),
 
   myReports: () => request<PlayerReport[]>('/api/v1/me/reports'),
 

@@ -405,10 +405,16 @@ function Load({
 
   const refresh = useMutation({
     mutationFn: api.refreshInventory,
-    onSuccess: () => {
+    onSuccess: (fresh) => {
       onError(null)
+      if (fresh?.snapshot) {
+        queryClient.setQueryData(myInventoryQuery.queryKey, fresh)
+        onNotice(t(fresh.served ? 'inventory.refreshed' : 'inventory.refresh_queued'))
+        return
+      }
+
       onNotice(t('inventory.refresh_queued'))
-      void queryClient.invalidateQueries({ queryKey: ['me', 'inventory'] })
+      void queryClient.invalidateQueries({ queryKey: myInventoryQuery.queryKey })
     },
     onError: (cause) => {
       onNotice(null)

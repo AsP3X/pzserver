@@ -993,6 +993,7 @@
   "inventory.refresh": "Aktualisieren",
   "inventory.refresh_offline": "Nur möglich, während du im Spiel bist.",
   "inventory.refresh_queued": "Der Server erstellt gleich eine neue Aufnahme.",
+  "inventory.refreshed": "Aus dem aktuellen Inventar aktualisiert.",
   "inventory.search": "Gegenstände durchsuchen",
   "inventory.show_all_matches": "Alle Treffer anzeigen",
   "inventory.title": "Was du bei dir trägst",

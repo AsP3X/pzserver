@@ -993,6 +993,7 @@
   "inventory.refresh": "Refresh",
   "inventory.refresh_offline": "Only possible while you are in game.",
   "inventory.refresh_queued": "Asked the server for a fresh one — it lands in a moment.",
+  "inventory.refreshed": "Updated from the live pack.",
   "inventory.search": "Search items and categories",
   "inventory.show_all_matches": "Show all matches",
   "inventory.title": "What you are carrying",

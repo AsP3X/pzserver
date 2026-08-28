@@ -44,8 +44,9 @@ export const leaderboardQuery = (
 
 /** The signed-in player's own character. Polled while the page is open. */
 /**
- * The inventory snapshot. Polled while the page is open, because a refresh
- * lands as a file the mod writes a tick or two later rather than as a response.
+ * The inventory snapshot. Polled while the page is open so a capture that
+ * lands after a timeout still shows up. A press of Refresh waits for the
+ * mod and writes this query directly.
  */
 export const myInventoryQuery = queryOptions({
   queryKey: ['me', 'inventory'],

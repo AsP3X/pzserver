@@ -8,8 +8,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use pz_bridge::{InventoryReader, InventorySnapshot, PlayerVitals, VitalsReader};
+use pz_bridge::{InventoryReader, InventorySnapshot, PlayerFile, PlayerVitals, VitalsReader};
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::AuthUser;
@@ -95,6 +96,13 @@ struct InventoryResponse {
     online: bool,
     /// Takes and gives waiting for the next join.
     holds: Vec<holdings::InventoryHold>,
+    /// True when a forced refresh waited and the mod drained the request.
+    #[serde(skip_serializing_if = "is_false")]
+    served: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// How stale a snapshot may be before simply opening the page renews it.
@@ -104,6 +112,13 @@ struct InventoryResponse {
 /// page's poll interval, so an open page keeps itself fresh without ever
 /// queueing twice for one answer.
 const SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(8);
+
+/// How long a forced refresh waits for the mod to drain the request.
+///
+/// EveryOneMinute is about 2.5 real seconds; two heartbeats is the usual
+/// answer, and this is long enough for a lagging tick without holding the
+/// browser on a dead server.
+const SNAPSHOT_WAIT: Duration = Duration::from_secs(8);
 
 /// The player's last inventory snapshot.
 ///
@@ -121,11 +136,9 @@ async fn my_inventory(
     let online = character::is_online(&status.players, username);
 
     let reader = InventoryReader::new(&state.config.lua_bridge_path);
+    let queued_as = roster_username(&status.players, username);
 
-    let read = reader.read(username).await.map_err(|error| {
-        tracing::warn!(%error, "inventory snapshot unreadable");
-        ApiError::Internal("inventory snapshot unreadable".to_owned())
-    })?;
+    let read = read_snapshot(&reader, queued_as, username).await?;
 
     let stale = read
         .as_ref()
@@ -135,26 +148,16 @@ async fn my_inventory(
 
     // Offline players are skipped because the mod drops requests for anyone
     // not on its roster; the queue would just accumulate.
-    if online
-        && stale
-        && let Err(error) = reader.request_snapshot(username).await
-    {
-        // The reading we already have is still worth serving.
-        tracing::warn!(%error, "could not queue an inventory snapshot");
+    if online && stale {
+        if let Err(error) = reader.request_snapshot(queued_as).await {
+            // The reading we already have is still worth serving.
+            tracing::warn!(%error, "could not queue an inventory snapshot");
+        }
     }
 
-    let holds = holdings::holds(&state.db, user.id, username)
-        .await
-        .unwrap_or_default();
-
-    Ok(Json(InventoryResponse {
-        snapshot: read.as_ref().map(|read| read.data.clone()),
-        reported_at: read
-            .and_then(|read| read.reported_at)
-            .map(DateTime::<Utc>::from),
-        online,
-        holds,
-    }))
+    Ok(Json(
+        inventory_response(&state, user.id, username, online, read, false).await,
+    ))
 }
 
 #[derive(Serialize)]
@@ -233,15 +236,19 @@ async fn my_position(
     }))
 }
 
-/// Ask the mod for a fresh snapshot.
+/// Ask the mod for a fresh snapshot and wait for it to land.
 ///
 /// Refused when the player is offline: the mod matches requests against its
 /// roster and silently drops the rest, and a button that quietly does nothing
 /// is worse than one that says why.
+///
+/// The response is the snapshot after the mod drains the request, not the
+/// one that was on disk when the button was pressed. A timeout still returns
+/// whatever is there — the request stays queued and the next poll picks it up.
 async fn refresh_inventory(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
-) -> ApiResult<StatusCode> {
+) -> ApiResult<Json<InventoryResponse>> {
     let username = user.username.as_str();
     let status = state.status.current().await;
 
@@ -251,18 +258,82 @@ async fn refresh_inventory(
         ));
     }
 
-    InventoryReader::new(&state.config.lua_bridge_path)
-        .request_snapshot(username)
+    // The mod looks up names exactly as the game spelled them. Accounts match
+    // case-insensitively, so queue the roster spelling rather than the
+    // registration spelling or the request is dropped on the next tick.
+    let queued_as = roster_username(&status.players, username);
+    let reader = InventoryReader::new(&state.config.lua_bridge_path);
+
+    reader.request_snapshot(queued_as).await.map_err(|error| {
+        tracing::error!(%error, "could not queue an inventory snapshot");
+        ApiError::Internal("could not queue a snapshot".to_owned())
+    })?;
+
+    let served = reader
+        .await_served(queued_as, SNAPSHOT_WAIT)
         .await
-        .map_err(|error| {
-            tracing::error!(%error, "could not queue an inventory snapshot");
-            ApiError::Internal("could not queue a snapshot".to_owned())
-        })?;
+        .unwrap_or(false);
 
-    tracing::info!(username, "queued an inventory snapshot");
+    tracing::info!(username, served, "forced an inventory snapshot");
 
-    // Accepted, not done: the mod writes the file on its next tick.
-    Ok(StatusCode::ACCEPTED)
+    let read = read_snapshot(&reader, queued_as, username).await?;
+
+    Ok(Json(
+        inventory_response(&state, user.id, username, true, read, served).await,
+    ))
+}
+
+/// Prefer the in-game filename, then the account name. They usually match;
+/// when they do not, Linux bind mounts treat them as two files.
+async fn read_snapshot(
+    reader: &InventoryReader,
+    queued_as: &str,
+    username: &str,
+) -> ApiResult<Option<PlayerFile<InventorySnapshot>>> {
+    let read = reader.read(queued_as).await.map_err(snapshot_unreadable)?;
+
+    if read.is_some() || queued_as == username {
+        return Ok(read);
+    }
+
+    reader.read(username).await.map_err(snapshot_unreadable)
+}
+
+fn snapshot_unreadable(error: impl std::fmt::Display) -> ApiError {
+    tracing::warn!(%error, "inventory snapshot unreadable");
+    ApiError::Internal("inventory snapshot unreadable".to_owned())
+}
+
+/// The in-game spelling of this account, when the player is on the roster.
+fn roster_username<'a>(players: &'a [String], username: &'a str) -> &'a str {
+    players
+        .iter()
+        .find(|player| player.eq_ignore_ascii_case(username))
+        .map(String::as_str)
+        .unwrap_or(username)
+}
+
+async fn inventory_response(
+    state: &AppState,
+    user_id: Uuid,
+    username: &str,
+    online: bool,
+    read: Option<PlayerFile<InventorySnapshot>>,
+    served: bool,
+) -> InventoryResponse {
+    let holds = holdings::holds(&state.db, user_id, username)
+        .await
+        .unwrap_or_default();
+
+    InventoryResponse {
+        snapshot: read.as_ref().map(|read| read.data.clone()),
+        reported_at: read
+            .and_then(|read| read.reported_at)
+            .map(DateTime::<Utc>::from),
+        online,
+        holds,
+        served,
+    }
 }
 
 async fn my_reports(
@@ -332,4 +403,18 @@ async fn read_report(
     let report = reports::mark_read(&state.db, user.id, id).await?;
     reports::refresh_inbox(&state.db, &state.config.lua_bridge_path, &user.username).await;
     Ok(Json(report))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queues_the_roster_spelling_when_the_account_differs_in_case() {
+        let roster = vec!["Rook".to_owned(), "vesper".to_owned()];
+
+        assert_eq!(roster_username(&roster, "rook"), "Rook");
+        assert_eq!(roster_username(&roster, "VESPER"), "vesper");
+        assert_eq!(roster_username(&roster, "ghost"), "ghost");
+    }
 }
