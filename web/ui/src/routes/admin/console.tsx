@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 
 import { Button } from '@/components/ui/button'
 import { FormError } from '@/components/ui/field'
-import { Container, Section, SectionHeading } from '@/components/ui/section'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { api, ApiError } from '@/lib/api'
 import { useTranslation } from '@/i18n/use-translation'
@@ -83,77 +82,80 @@ export function AdminConsolePage() {
   }
 
   return (
-    <Section className="py-10">
-      <Container>
-        <SectionHeading
-          eyebrow={t('nav.group.server')}
-          title={t('admin.console_title')}
-          description={t('admin.console_description')}
-        />
-
-        <Panel bracketed>
-          <PanelHeader label={t('admin.console_session')} />
-          <div
-            ref={output}
-            role="log"
-            aria-live="polite"
-            aria-relevant="additions"
-            className="h-[24rem] overflow-y-auto bg-void px-4 py-3 font-mono text-sm"
-          >
-            {history.length === 0 ? (
-              <p className="text-dust">{t('admin.console_empty')}</p>
-            ) : (
-              <ol className="space-y-2">
-                {history.map((entry, offset) => (
-                  <li
-                    key={`${offset}-${entry.kind}`}
-                    className={
-                      entry.kind === 'in'
-                        ? 'text-hazard'
-                        : entry.kind === 'err'
-                          ? 'text-blood'
-                          : 'whitespace-pre-wrap text-bone'
-                    }
-                  >
-                    {entry.kind === 'in' ? `> ${entry.text}` : entry.text}
-                  </li>
-                ))}
-              </ol>
-            )}
+    <section className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:p-5">
+      <header className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <span aria-hidden="true" className="hazard-tape h-1 w-8" />
+            <span className="eyebrow">{t('nav.group.server')}</span>
           </div>
-          <form
-            className="flex flex-col gap-3 border-t border-fence p-4 sm:flex-row sm:items-end"
-            onSubmit={submit}
-          >
-            <div className="min-w-0 flex-1">
-              <label htmlFor="rcon-command" className="font-mono text-[0.6875rem] tracking-widest text-smoke uppercase">
-                {t('admin.console_command')}
-              </label>
-              <input
-                ref={input}
-                id="rcon-command"
-                value={command}
-                onChange={(event) => setCommand(event.target.value)}
-                onKeyDown={onKeyDown}
-                autoComplete="off"
-                spellCheck={false}
-                className="mt-2 h-12 w-full border border-fence-bright bg-void px-3 font-mono text-sm text-bone focus:border-hazard"
-              />
-            </div>
-            <Button type="submit" disabled={!command.trim() || run.isPending}>
-              {t('admin.console_send')}
-            </Button>
-          </form>
-        </Panel>
+          <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('admin.console_title')}</h1>
+        </div>
+        <p className="max-w-xl text-xs leading-relaxed text-dust lg:text-right">
+          {t('admin.console_description')}
+        </p>
+      </header>
 
-        {run.error && !(run.error instanceof ApiError) ? (
-          <div className="mt-4">
-            <FormError>{t('auth.unexpected_error')}</FormError>
+      <Panel bracketed className="flex min-h-0 flex-1 flex-col">
+        <PanelHeader label={t('admin.console_session')} className="shrink-0" />
+        <div
+          ref={output}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          className="min-h-0 flex-1 overflow-y-auto bg-void px-4 py-3 font-mono text-sm"
+        >
+          {history.length === 0 ? (
+            <p className="text-dust">{t('admin.console_empty')}</p>
+          ) : (
+            <ol className="space-y-2">
+              {history.map((entry, offset) => (
+                <li
+                  key={`${offset}-${entry.kind}`}
+                  className={
+                    entry.kind === 'in'
+                      ? 'text-hazard'
+                      : entry.kind === 'err'
+                        ? 'text-blood'
+                        : 'whitespace-pre-wrap text-bone'
+                  }
+                >
+                  {entry.kind === 'in' ? `> ${entry.text}` : entry.text}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+        <form
+          className="flex shrink-0 flex-col gap-3 border-t border-fence p-4 sm:flex-row sm:items-end"
+          onSubmit={submit}
+        >
+          <div className="min-w-0 flex-1">
+            <label htmlFor="rcon-command" className="font-mono text-[0.6875rem] tracking-widest text-smoke uppercase">
+              {t('admin.console_command')}
+            </label>
+            <input
+              ref={input}
+              id="rcon-command"
+              value={command}
+              onChange={(event) => setCommand(event.target.value)}
+              onKeyDown={onKeyDown}
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-2 h-12 w-full border border-fence-bright bg-void px-3 font-mono text-sm text-bone focus:border-hazard"
+            />
           </div>
-        ) : null}
+          <Button type="submit" disabled={!command.trim() || run.isPending}>
+            {t('admin.console_send')}
+          </Button>
+        </form>
+      </Panel>
 
-        <p className="mt-4 text-xs text-dust">{t('admin.console_hint')}</p>
-      </Container>
-    </Section>
+      {run.error && !(run.error instanceof ApiError) ? (
+        <FormError>{t('auth.unexpected_error')}</FormError>
+      ) : null}
+
+      <p className="shrink-0 text-xs text-dust">{t('admin.console_hint')}</p>
+    </section>
   )
 }
