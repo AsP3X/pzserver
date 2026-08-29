@@ -7,7 +7,7 @@
 //! - [`store`] is the staff catalogue. Fixed prices, optional stock.
 //! - [`auction`] is player-to-player: list, bid, buyout.
 //! - [`offers`] is the other side of that: post a price, fill it with the item.
-//! - [`delivery`] gives and takes items through RCON or the Knox Relay queue.
+//! - [`delivery`] gives and takes items through the Knox Relay queue.
 //!
 //! [`rewards`] pays the daily drop, tasks and rank-ups through `wallet`.
 
@@ -16,6 +16,7 @@ pub mod delivery;
 pub mod deposit;
 pub mod inventory;
 pub mod measure;
+pub mod notices;
 pub mod offers;
 pub mod quests;
 pub mod rewards;

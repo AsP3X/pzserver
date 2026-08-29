@@ -300,7 +300,7 @@ async fn give_item(
     if !(1..=100).contains(&count) {
         return Err(ApiError::Validation("Give between 1 and 100.".to_owned()));
     }
-    let outcome = crate::services::economy::delivery::give_now(
+    crate::services::economy::delivery::give_now(
         &state,
         &username,
         item_type,
@@ -310,16 +310,8 @@ async fn give_item(
         staff.id,
     )
     .await?;
-    let queued = matches!(
-        outcome,
-        crate::services::economy::delivery::GiveOutcome::Queued
-    );
     Ok(Json(serde_json::json!({
-        "message": if queued {
-            "Queued. They receive it the next time they are in the world."
-        } else {
-            "Given."
-        }
+        "message": "Queued. In-world players receive it on the next pulse; others on join."
     })))
 }
 

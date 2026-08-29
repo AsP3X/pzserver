@@ -27,6 +27,9 @@ pub const PLAYER_STATS_FILE: &str = "player_stats.json";
 /// Postgres before it rolls off.
 pub const DEATHS_FILE: &str = "deaths.json";
 
+/// World clock, weather, mod version and capability flags.
+pub const GAME_STATE_FILE: &str = "game_state.json";
+
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
     #[error("bridge file {path} could not be read: {source}")]
@@ -156,6 +159,26 @@ where
     Ok(f64::deserialize(deserializer)?.trunc() as i64)
 }
 
+/// `game_state.json` as the panel needs it: version and capability flags.
+///
+/// Other fields (clock, weather) are ignored here. Unknown keys stay ignored
+/// so an older mod without `features` still parses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorldExport {
+    #[serde(default)]
+    pub mod_version: Option<String>,
+    #[serde(default)]
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub paused: Option<bool>,
+}
+
+impl WorldExport {
+    pub fn has_feature(&self, name: &str) -> bool {
+        self.features.iter().any(|flag| flag == name)
+    }
+}
+
 /// A read of one export, paired with the mtime it was read at.
 #[derive(Debug, Clone)]
 pub struct BridgeRead<T> {
@@ -207,6 +230,11 @@ impl LuaBridge {
     /// Recent deaths, or `None` when nobody has died on this server yet.
     pub async fn deaths(&self) -> Result<Option<BridgeRead<DeathsExport>>, BridgeError> {
         self.read_export(DEATHS_FILE).await
+    }
+
+    /// World export, or `None` when the mod has never written it.
+    pub async fn game_state(&self) -> Result<Option<BridgeRead<WorldExport>>, BridgeError> {
+        self.read_export(GAME_STATE_FILE).await
     }
 
     /// When an export was last rewritten, without paying to parse it.
@@ -261,6 +289,18 @@ mod tests {
         let bridge = LuaBridge::new(dir.path());
 
         (dir, bridge)
+    }
+
+    #[test]
+    fn game_state_contract_lists_the_features_the_mod_advertises() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../game-server/tests/contracts/game_state_features.json");
+        let body = std::fs::read_to_string(&path).expect("contract");
+        let state: WorldExport = serde_json::from_str(&body).expect("parse");
+        assert_eq!(state.mod_version.as_deref(), Some("1.25"));
+        assert!(state.has_feature("panel_jobs"));
+        assert!(state.has_feature("held_vault"));
+        assert!(state.has_feature("desk_inbox"));
     }
 
     #[tokio::test]

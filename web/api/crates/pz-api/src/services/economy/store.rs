@@ -329,7 +329,7 @@ pub async fn buy(
     .await?;
     tx.commit().await?;
 
-    match delivery::give_now(
+    delivery::give_now(
         state,
         username,
         &item.item_type,
@@ -338,19 +338,14 @@ pub async fn buy(
         "store_purchase",
         purchase.id,
     )
-    .await?
-    {
-        delivery::GiveOutcome::Instant => on_delivered(state, purchase.id).await,
-        delivery::GiveOutcome::Queued => {
-            sqlx::query("UPDATE store_purchases SET status = 'queued' WHERE id = $1")
-                .bind(purchase.id)
-                .execute(&state.db)
-                .await?;
-            get_purchase(&state.db, purchase.id)
-                .await?
-                .ok_or_else(|| ApiError::Validation("That purchase is gone.".to_owned()))
-        }
-    }
+    .await?;
+    sqlx::query("UPDATE store_purchases SET status = 'queued' WHERE id = $1")
+        .bind(purchase.id)
+        .execute(&state.db)
+        .await?;
+    get_purchase(&state.db, purchase.id)
+        .await?
+        .ok_or_else(|| ApiError::Validation("That purchase is gone.".to_owned()))
 }
 
 pub async fn on_delivered(state: &AppState, purchase_id: Uuid) -> ApiResult<StorePurchase> {

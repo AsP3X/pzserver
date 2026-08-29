@@ -6,11 +6,11 @@
 -- is the mod's heartbeat, not a once-a-minute hook. Every interval here is
 -- counted in those ticks.
 --
---   every tick   inventory export requests
---   4 ticks      character vitals heartbeats      (~10 real seconds)
---   6 ticks      deliveries and money deposits    (~15 real seconds)
---   12 ticks     player positions                 (~30 real seconds)
---   48 ticks     safehouse and faction claims      (~2 real minutes)
+--   1 real second  panel jobs, snapshot requests, deliveries, enrol/report
+--   4 ticks        character vitals heartbeats      (~10 real seconds)
+--   6 ticks        money deposits                   (~15 real seconds)
+--   12 ticks       player positions                 (~30 real seconds)
+--   48 ticks       safehouse and faction claims      (~2 real minutes)
 --
 -- Respawn cooldown, safe zones and PvP tracking run every tick; they do their
 -- own internal rate limiting for anything expensive.
@@ -42,6 +42,7 @@ local Vitals = require("KR_Vitals")
 local Enrol = require("KR_Enrol")
 local Report = require("KR_Report")
 local Tickets = require("KR_Tickets")
+local Jobs = require("KR_Jobs")
 
 local LOG = "[KnoxRelay] "
 
@@ -75,7 +76,7 @@ local sinceHoldings = 0
 local lastWorldExport = 0
 local lastBeaconExport = 0
 local lastProgressExport = 0
-local lastSettle = 0
+local lastPulse = 0
 local framesSinceWorld = 0
 
 --- Roughly WORLD_SECONDS of frames, for when os.time is unavailable. Erring
@@ -136,22 +137,25 @@ local function onCreatePlayer(playerIndex, player)
     Orders.settleOnline()
 end
 
---- The heartbeat.
-local function onEveryOneMinute()
+--- Work the panel asked for: jobs, snapshots, codes, tickets, item settle.
+--- Runs on the real-time pulse so PauseEmpty cannot stall a shop take, and
+--- again on EveryOneMinute as a fallback when OnTickEvenPaused is missing.
+local function panelWork()
     Snapshot.serveRequests()
-
-    -- Every tick, not on a divisor: a player is standing in game waiting to be
-    -- shown a code, and the panel aims to answer inside five seconds.
+    Jobs.drain()
     Enrol.poll()
     Report.poll()
     Tickets.poll()
 
-    -- Takes first, every tick: a joiner must not get a window to drop a
-    -- reserved item before the queue runs.
     local delivered = Orders.settleOnline()
     if delivered > 0 then
         print(LOG .. "Processed " .. delivered .. " delivery entries")
     end
+end
+
+--- The heartbeat.
+local function onEveryOneMinute()
+    panelWork()
 
     sinceDelivery = sinceDelivery + 1
     if sinceDelivery >= DELIVERY_TICKS then
@@ -202,12 +206,13 @@ end
 local function onTickEvenPaused()
     exportWorld()
 
-    -- Joiners can act before EveryOneMinute. Settle at least once a second
-    -- so a reserved item is pinned before they can drop it.
-    local settleDue
-    settleDue, lastSettle = due(lastSettle, 1)
-    if settleDue then
-        Orders.settleOnline()
+    -- Joiners can act before EveryOneMinute. Pulse at least once a second
+    -- so a reserved item is pinned before they can drop it, and a Refresh
+    -- does not wait on the in-game clock.
+    local pulseDue
+    pulseDue, lastPulse = due(lastPulse, 1)
+    if pulseDue then
+        panelWork()
     end
 
     local beaconDue

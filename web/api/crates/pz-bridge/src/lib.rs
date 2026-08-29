@@ -15,6 +15,7 @@ pub mod deposit;
 pub mod docker;
 pub mod ini;
 pub mod inventory;
+pub mod jobs;
 pub mod links;
 pub mod lua;
 pub mod panel_state;
@@ -40,9 +41,11 @@ pub use deposit::{
 pub use docker::{ContainerState, ContainerStatus, DockerClient, DockerError, parse_docker_logs};
 pub use ini::ServerIni;
 pub use inventory::{InventoryReader, InventorySnapshot};
+pub use jobs::{JobsChannel, JobsError, PanelJob, PanelResult};
 pub use links::{LinkChannel, LinkRequest, LinkResult, LinkResults};
 pub use lua::{
     Death, DeathsExport, LivePlayer, LuaBridge, PlayerStatsExport, PlayersLiveExport, StatsPlayer,
+    WorldExport,
 };
 pub use panel_state::{
     ModState, PanelStateError, persist_config_state, read_intended_mod_lists,
@@ -54,8 +57,8 @@ pub use sandbox::{SandboxError, SandboxField, SandboxKind, SandboxVars, sandbox_
 pub use steam::{SteamClient, SteamError};
 pub use steam_update::{PublicUpdate, UpdateReport, UpdateVerdict};
 pub use tickets::{
-    ReportChannel, ReportRequest, ReportResult, ReportResults, TicketAction, TicketInbox,
-    TicketMessage, TicketOutbox, TicketPlayerInbox, TicketSnapshot,
+    DeskNotice, ReportChannel, ReportRequest, ReportResult, ReportResults, TicketAction,
+    TicketInbox, TicketMessage, TicketOutbox, TicketPlayerInbox, TicketSnapshot,
 };
 pub use vitals::{PlayerVitals, VitalsReader};
 pub use whitelist::{WhitelistAccount, authenticate as authenticate_whitelist};

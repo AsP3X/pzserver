@@ -1,4 +1,8 @@
-//! Give and take items. RCON when the player is online, Lua queue otherwise.
+//! Give and take items through the Knox Relay queue.
+//!
+//! RCON `additem` is not used: it cannot restore wear or pack a bag, and the
+//! mod already mirrors container edits to the client. Online versus offline
+//! is "settle on the next pulse" versus "settle on join".
 
 use chrono::{DateTime, Utc};
 use pz_bridge::{DeliveryChannel, DeliveryEntry};
@@ -7,7 +11,6 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
-use crate::services::admin;
 use crate::state::AppState;
 
 const MAX_ATTEMPTS: i32 = 40;
@@ -40,9 +43,6 @@ pub async fn give_now(
     reference_type: &str,
     reference_id: Uuid,
 ) -> ApiResult<GiveOutcome> {
-    if try_rcon_give(state, username, item_type, count).await {
-        return Ok(GiveOutcome::Instant);
-    }
     enqueue(
         state,
         "give_verified",
@@ -154,12 +154,15 @@ async fn enqueue(
     reference_id: Uuid,
 ) -> ApiResult<ItemOrder> {
     let lua_id = Uuid::new_v4().to_string();
+    let queued_as =
+        crate::services::character::roster_name(&state.status.current().await.players, username)
+            .to_owned();
     let channel = DeliveryChannel::new(&state.config.lua_bridge_path);
     channel
         .enqueue(DeliveryEntry {
             id: lua_id.clone(),
             action: action.to_owned(),
-            username: username.to_owned(),
+            username: queued_as.clone(),
             item_type: item_type.to_owned(),
             count,
             status: "pending".to_owned(),
@@ -183,7 +186,7 @@ async fn enqueue(
     .bind(kind)
     .bind(reference_type)
     .bind(reference_id)
-    .bind(username)
+    .bind(&queued_as)
     .bind(item_type)
     .bind(count)
     .bind(condition)
@@ -191,21 +194,6 @@ async fn enqueue(
     .fetch_one(&state.db)
     .await?;
     Ok(row)
-}
-
-pub async fn try_rcon_give(state: &AppState, username: &str, item_type: &str, count: i32) -> bool {
-    let online = state.status.current().await.players;
-    if !online.iter().any(|name| name == username) {
-        return false;
-    }
-    let Ok(name) = admin::player_name(username) else {
-        return false;
-    };
-    if !(1..=100).contains(&count) || item_type.contains('"') {
-        return false;
-    }
-    let command = format!("additem \"{name}\" \"{item_type}\" {count}");
-    admin::console(state, &command).await.is_ok()
 }
 
 pub async fn tick(state: &AppState) {
@@ -405,6 +393,5 @@ async fn mark_failed(db: &PgPool, id: Uuid, detail: Option<&str>) -> Result<(), 
 
 #[derive(Debug)]
 pub enum GiveOutcome {
-    Instant,
     Queued,
 }

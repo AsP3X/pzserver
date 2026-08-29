@@ -190,6 +190,17 @@ pub struct TicketPlayerInbox {
     pub updated_at: String,
     #[serde(default)]
     pub reports: Vec<TicketSnapshot>,
+    #[serde(default)]
+    pub notices: Vec<DeskNotice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeskNotice {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub unread: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

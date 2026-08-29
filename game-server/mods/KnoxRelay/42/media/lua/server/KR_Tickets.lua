@@ -72,7 +72,7 @@ function KR_Tickets.push(player)
     end
 
     if type(slice) ~= "table" then
-        slice = { unread = 0, updated_at = "", reports = {} }
+        slice = { unread = 0, updated_at = "", reports = {}, notices = {} }
     end
 
     lastSeen[username] = slice.updated_at
@@ -82,6 +82,7 @@ function KR_Tickets.push(player)
             unread = slice.unread or 0,
             updated_at = slice.updated_at or "",
             reports = slice.reports or {},
+            notices = slice.notices or {},
         })
     end)
 end

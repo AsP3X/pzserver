@@ -478,7 +478,8 @@ local function pendingFor(username)
 
     local pending = {}
     for _, entry in ipairs(queue.entries) do
-        if entry.status == "pending" and not done[entry.id] and entry.username == username then
+        if entry.status == "pending" and not done[entry.id]
+            and Roster.sameName(entry.username, username) then
             pending[#pending + 1] = entry
         end
     end

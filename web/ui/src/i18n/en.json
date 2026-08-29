@@ -1549,6 +1549,8 @@
   "vault.cargo": ":count items inside",
   "vault.cargo_fee": "This bag is one slot. Retrieve charges for the bag plus everything inside (:count items).",
   "vault.one_bag": "Bags are stored one at a time so the contents stay together.",
+  "vault.held": "Held",
+  "vault.held_hint": "Returned from the auction house. Retrieving is free and this stack does not use a vault slot.",
   "vault.retrieve_hint": "The fee is taken after the items are back in your pack. A packed bag comes back as the bag plus its contents in your pockets, so every client can see them.",
   "vault.retrieve_confirm": "Retrieve :name",
   "vault.retrieve_body": "Take :count × :name back to your pack for :fee.",

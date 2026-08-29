@@ -638,6 +638,17 @@ async fn ticket_desk_loop(state: AppState) {
                         Ok(())
                     }
                 }
+                "notice_ack" => {
+                    let Some(raw) = request.body.as_deref() else {
+                        continue;
+                    };
+                    let Ok(id) = uuid::Uuid::parse_str(raw.trim()) else {
+                        continue;
+                    };
+                    crate::services::economy::notices::ack(&state.db, &username, id)
+                        .await
+                        .map_err(|error| error.to_string())
+                }
                 _ => Ok(()),
             };
 

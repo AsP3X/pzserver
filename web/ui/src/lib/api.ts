@@ -1174,6 +1174,8 @@ export interface VaultItem {
   condition_bp: number
   quantity: number
   cargo_count: number
+  held: boolean
+  origin: string | null
 }
 
 export interface VaultMove {

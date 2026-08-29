@@ -801,10 +801,16 @@ pub async fn rebuild_inbox(db: &PgPool, lua_dir: &Path) {
 
     let names = match sqlx::query_scalar::<_, String>(
         r#"
-        SELECT DISTINCT coalesce(a.username, r.author_username)
-        FROM player_reports r
-        LEFT JOIN users a ON a.id = r.user_id
-        WHERE coalesce(a.username, r.author_username) IS NOT NULL
+        SELECT DISTINCT name FROM (
+            SELECT coalesce(a.username, r.author_username) AS name
+            FROM player_reports r
+            LEFT JOIN users a ON a.id = r.user_id
+            UNION
+            SELECT u.username
+            FROM desk_notices n
+            JOIN users u ON u.id = n.user_id
+        ) names
+        WHERE name IS NOT NULL
         ORDER BY 1
         LIMIT 200
         "#,
@@ -828,7 +834,10 @@ pub async fn rebuild_inbox(db: &PgPool, lua_dir: &Path) {
     for name in names {
         match inbox_for(db, &name).await {
             Ok(reports) => {
-                inbox.players.insert(name, snapshot_player(&reports));
+                let notices = notices_for(db, &name).await.unwrap_or_default();
+                inbox
+                    .players
+                    .insert(name, snapshot_player(&reports, &notices));
             }
             Err(error) => {
                 tracing::warn!(%error, username = %name, "ticket inbox slice failed");
@@ -854,9 +863,10 @@ async fn write_inbox_slice(
 
     match inbox_for(db, username).await {
         Ok(reports) => {
+            let notices = notices_for(db, username).await.unwrap_or_default();
             inbox
                 .players
-                .insert(username.to_owned(), snapshot_player(&reports));
+                .insert(username.to_owned(), snapshot_player(&reports, &notices));
         }
         Err(error) => {
             tracing::warn!(%error, username, "ticket inbox slice query failed");
@@ -866,11 +876,40 @@ async fn write_inbox_slice(
     channel.write_inbox(&inbox).await
 }
 
-fn snapshot_player(reports: &[Report]) -> pz_bridge::TicketPlayerInbox {
+async fn notices_for(
+    db: &PgPool,
+    username: &str,
+) -> Result<Vec<pz_bridge::DeskNotice>, sqlx::Error> {
+    let user_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(username)
+            .fetch_optional(db)
+            .await?;
+    let Some(user_id) = user_id else {
+        return Ok(Vec::new());
+    };
+    let rows = crate::services::economy::notices::for_user(db, user_id).await?;
+    Ok(rows
+        .into_iter()
+        .map(|notice| pz_bridge::DeskNotice {
+            id: notice.id.to_string(),
+            kind: notice.kind,
+            title: notice.title,
+            body: notice.body,
+            unread: notice.unread,
+        })
+        .collect())
+}
+
+fn snapshot_player(
+    reports: &[Report],
+    notices: &[pz_bridge::DeskNotice],
+) -> pz_bridge::TicketPlayerInbox {
     let unread = reports.iter().filter(|report| report.unread).count() as i64;
     pz_bridge::TicketPlayerInbox {
         unread,
         updated_at: Utc::now().to_rfc3339(),
+        notices: notices.to_vec(),
         reports: reports
             .iter()
             .map(|report| pz_bridge::TicketSnapshot {

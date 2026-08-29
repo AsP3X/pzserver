@@ -158,7 +158,8 @@ export function VaultPage() {
 
   const retrieveUnits =
     stored && stored.cargo_count > 0 ? 1 + stored.cargo_count : quantity
-  const retrieveFee = view ? view.fees.flat + view.fees.per_item * retrieveUnits : 0
+  const retrieveFee =
+    stored?.held || !view ? 0 : view.fees.flat + view.fees.per_item * retrieveUnits
   const canAfford = (view?.wallet.available ?? 0) >= retrieveFee
   const canUpgrade =
     view !== undefined &&
@@ -329,6 +330,7 @@ export function VaultPage() {
                             className={cn(
                               'flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-ash-raised',
                               stored?.id === item.id ? 'bg-hazard-soft' : '',
+                              item.held ? 'border-l-2 border-hazard' : '',
                             )}
                           >
                             <Package
@@ -344,6 +346,7 @@ export function VaultPage() {
                                 </span>
                               </span>
                               <span className="mt-0.5 font-mono text-[0.6875rem] tracking-wide text-dust uppercase">
+                                {item.held ? `${t('vault.held')} · ` : ''}
                                 {item.category}
                                 {item.cargo_count > 0
                                   ? ` · ${t('vault.cargo', { count: item.cargo_count })}`
@@ -517,9 +520,15 @@ function InspectStored({
           }
         />
       )}
-      <p className="text-sm text-smoke">
-        {t('vault.retrieve_fee', { fee: formatCoins(fee, locale) })}
-      </p>
+      {item.held ? (
+        <p className="border border-hazard/40 bg-hazard-soft px-3 py-2 text-sm text-hazard">
+          {t('vault.held_hint')}
+        </p>
+      ) : (
+        <p className="text-sm text-smoke">
+          {t('vault.retrieve_fee', { fee: formatCoins(fee, locale) })}
+        </p>
+      )}
       <Button
         disabled={busy || !canAfford}
         onClick={onRetrieve}

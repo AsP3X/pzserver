@@ -54,6 +54,9 @@ pub struct VaultItem {
     pub condition_bp: i16,
     pub quantity: i32,
     pub cargo_count: i32,
+    #[serde(default)]
+    pub held: bool,
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -150,7 +153,7 @@ pub async fn view(state: &AppState, user_id: Uuid) -> ApiResult<VaultView> {
     let capacity_slots = ensure_vault(&state.db, user_id, settings.default_slots).await?;
     let items = items(&state.db, user_id).await?;
     let reserved = reserved_new_stacks(&state.db, user_id).await?;
-    let used = i32::try_from(items.len()).unwrap_or(i32::MAX);
+    let used = i32::try_from(items.iter().filter(|item| !item.held).count()).unwrap_or(i32::MAX);
     let increment = settings
         .slot_upgrade_increment
         .min((settings.max_slots - capacity_slots).max(0));
@@ -179,7 +182,7 @@ pub async fn admin_view(db: &PgPool) -> ApiResult<AdminVault> {
     let settings = settings(db).await?;
     let vaults = sqlx::query_as::<_, (Uuid, String, i32, i32)>(
         r#"SELECT v.user_id, u.username,
-                  (SELECT COUNT(*)::int FROM vault_items i WHERE i.user_id = v.user_id),
+                  (SELECT COUNT(*)::int FROM vault_items i WHERE i.user_id = v.user_id AND NOT i.held),
                   v.slot_capacity
            FROM vaults v
            JOIN users u ON u.id = v.user_id
@@ -381,7 +384,8 @@ pub async fn retrieve(
 
     let mut tx = state.db.begin().await?;
     let item = sqlx::query_as::<_, VaultItem>(
-        r#"SELECT id, item_type, item_name, category, condition_bp, quantity, cargo_count
+        r#"SELECT id, item_type, item_name, category, condition_bp, quantity, cargo_count,
+                  held, origin
            FROM vault_items
            WHERE id = $1 AND user_id = $2
            FOR UPDATE"#,
@@ -414,7 +418,11 @@ pub async fn retrieve(
     }
 
     let units = retrieve_units(quantity, item.cargo_count);
-    let fee = fee_for(&settings, units);
+    let fee = if item.held {
+        0
+    } else {
+        fee_for(&settings, units)
+    };
     if fee > 0 {
         let available = wallet::available_tx(&mut tx, user_id).await?;
         if available < fee {
@@ -769,10 +777,11 @@ async fn ensure_vault_tx(
 
 async fn items(db: &PgPool, user_id: Uuid) -> Result<Vec<VaultItem>, sqlx::Error> {
     sqlx::query_as::<_, VaultItem>(
-        r#"SELECT id, item_type, item_name, category, condition_bp, quantity, cargo_count
+        r#"SELECT id, item_type, item_name, category, condition_bp, quantity, cargo_count,
+                  held, origin
            FROM vault_items
            WHERE user_id = $1
-           ORDER BY item_name, condition_bp DESC"#,
+           ORDER BY held DESC, item_name, condition_bp DESC"#,
     )
     .bind(user_id)
     .fetch_all(db)
@@ -810,6 +819,7 @@ async fn reserved_new_stacks(db: &PgPool, user_id: Uuid) -> Result<i32, sqlx::Er
                            AND i.item_type = m.item_type
                            AND i.condition_bp = m.condition_bp
                            AND i.cargo_count = 0
+                           AND NOT i.held
                      )
                  )
            ) pending"#,
@@ -828,11 +838,12 @@ async fn has_room_tx(
     packed: bool,
 ) -> Result<bool, sqlx::Error> {
     if packed {
-        let used: i32 =
-            sqlx::query_scalar("SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1")
-                .bind(user_id)
-                .fetch_one(&mut **tx)
-                .await?;
+        let used: i32 = sqlx::query_scalar(
+            "SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1 AND NOT held",
+        )
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await?;
         let reserved: i32 = sqlx::query_scalar(
             r#"SELECT COUNT(*)::int FROM (
                    SELECT m.id
@@ -848,6 +859,7 @@ async fn has_room_tx(
                                AND i.item_type = m.item_type
                                AND i.condition_bp = m.condition_bp
                                AND i.cargo_count = 0
+                               AND NOT i.held
                          )
                      )
                ) pending"#,
@@ -862,7 +874,7 @@ async fn has_room_tx(
         r#"SELECT EXISTS(
                SELECT 1 FROM vault_items
                WHERE user_id = $1 AND item_type = $2 AND condition_bp = $3
-                 AND cargo_count = 0
+                 AND cargo_count = 0 AND NOT held
            )
            OR EXISTS(
                SELECT 1 FROM vault_moves
@@ -879,10 +891,11 @@ async fn has_room_tx(
     if existing {
         return Ok(true);
     }
-    let used: i32 = sqlx::query_scalar("SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_one(&mut **tx)
-        .await?;
+    let used: i32 =
+        sqlx::query_scalar("SELECT COUNT(*)::int FROM vault_items WHERE user_id = $1 AND NOT held")
+            .bind(user_id)
+            .fetch_one(&mut **tx)
+            .await?;
     let reserved: i32 = sqlx::query_scalar(
         r#"SELECT COUNT(*)::int FROM (
                SELECT m.id
@@ -898,6 +911,7 @@ async fn has_room_tx(
                            AND i.item_type = m.item_type
                            AND i.condition_bp = m.condition_bp
                            AND i.cargo_count = 0
+                           AND NOT i.held
                      )
                  )
            ) pending"#,
@@ -961,7 +975,7 @@ async fn restore_item(
         let merged = sqlx::query(
             r#"UPDATE vault_items SET quantity = quantity + $4
                WHERE user_id = $1 AND item_type = $2 AND condition_bp = $3
-                 AND cargo_count = 0"#,
+                 AND cargo_count = 0 AND NOT held"#,
         )
         .bind(user_id)
         .bind(item_type)
@@ -975,8 +989,8 @@ async fn restore_item(
     }
     sqlx::query(
         r#"INSERT INTO vault_items
-            (user_id, item_type, item_name, category, condition_bp, quantity, cargo, cargo_count)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"#,
+            (user_id, item_type, item_name, category, condition_bp, quantity, cargo, cargo_count, held)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)"#,
     )
     .bind(user_id)
     .bind(item_type)
@@ -987,6 +1001,54 @@ async fn restore_item(
     .bind(&cargo_json)
     .bind(cargo_count)
     .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// An unsold listing comes home as a held row: no slot, no retrieve fee.
+pub async fn receive_held(
+    state: &AppState,
+    user_id: Uuid,
+    item_type: &str,
+    item_name: &str,
+    quantity: i32,
+    condition: Option<f32>,
+    origin: &str,
+) -> Result<(), sqlx::Error> {
+    if quantity < 1 {
+        return Ok(());
+    }
+    let settings = settings(&state.db).await?;
+    let _ = ensure_vault(&state.db, user_id, settings.default_slots).await?;
+    let condition_bp = condition_bp(condition);
+    let merged = sqlx::query(
+        r#"UPDATE vault_items SET quantity = quantity + $5
+           WHERE user_id = $1 AND item_type = $2 AND condition_bp = $3
+             AND cargo_count = 0 AND held AND origin IS NOT DISTINCT FROM $4"#,
+    )
+    .bind(user_id)
+    .bind(item_type)
+    .bind(condition_bp)
+    .bind(origin)
+    .bind(quantity)
+    .execute(&state.db)
+    .await?;
+    if merged.rows_affected() > 0 {
+        return Ok(());
+    }
+    sqlx::query(
+        r#"INSERT INTO vault_items
+            (user_id, item_type, item_name, category, condition_bp, quantity,
+             cargo, cargo_count, held, origin)
+           VALUES ($1,$2,$3,'General',$4,$5,'[]'::jsonb,0,true,$6)"#,
+    )
+    .bind(user_id)
+    .bind(item_type)
+    .bind(item_name)
+    .bind(condition_bp)
+    .bind(quantity)
+    .bind(origin)
+    .execute(&state.db)
     .await?;
     Ok(())
 }

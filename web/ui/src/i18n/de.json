@@ -1549,6 +1549,8 @@
   "vault.cargo": ":count Gegenstände darin",
   "vault.cargo_fee": "Diese Tasche ist ein Platz. Holen berechnet die Tasche plus den Inhalt (:count Gegenstände).",
   "vault.one_bag": "Taschen werden einzeln eingelagert, damit der Inhalt zusammenbleibt.",
+  "vault.held": "Gehalten",
+  "vault.held_hint": "Aus dem Auktionshaus zurück. Abrufen ist kostenlos und dieser Stapel belegt keinen Platz.",
   "vault.retrieve_hint": "Die Gebühr fällt an, wenn die Gegenstände wieder im Inventar sind. Eine volle Tasche kommt als Tasche plus Inhalt in die Taschen zurück, damit jeder Client sie sieht.",
   "vault.retrieve_confirm": ":name holen",
   "vault.retrieve_body": ":count × :name für :fee zurück ins Inventar holen.",

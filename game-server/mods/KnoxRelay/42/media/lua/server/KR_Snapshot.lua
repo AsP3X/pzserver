@@ -10,9 +10,9 @@
 -- a player carrying two Wallets would otherwise have both sets of contents
 -- reported as one container.
 --
--- Laravel can also ask for a snapshot out of band by dropping usernames into
--- export_requests.json; that file is checked on every tick and cleared once
--- the requested players have been written.
+-- The panel can also ask for a snapshot out of band by dropping usernames into
+-- export_requests.json or a typed panel_jobs.json snapshot job. Requests are
+-- served on the real-time pulse and cleared once the named players are written.
 --
 
 local Codec = require("KR_Codec")
@@ -252,14 +252,9 @@ function KR_Snapshot.serveRequests()
         return 0
     end
 
-    local online = Roster.byUsername()
-    if not online then
-        return 0
-    end
-
     local written = 0
     for _, username in ipairs(request.usernames) do
-        local player = online[username]
+        local player = Roster.find(username)
         if player and KR_Snapshot.capture(player) then
             written = written + 1
         end

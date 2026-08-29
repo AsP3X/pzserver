@@ -1,0 +1,11 @@
+{
+  "mod_version": "1.25",
+  "features": [
+    "force_snapshot",
+    "panel_jobs",
+    "held_vault",
+    "desk_inbox",
+    "case_insensitive_roster"
+  ],
+  "paused": false
+}

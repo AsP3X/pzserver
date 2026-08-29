@@ -239,6 +239,7 @@ function KR_World.export()
     end
 
     state.mod_version = Bridge.VERSION
+    state.features = Bridge.FEATURES
 
     local gotTime, epoch = pcall(os.time)
     if gotTime then

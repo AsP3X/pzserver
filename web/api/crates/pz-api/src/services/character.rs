@@ -110,6 +110,15 @@ pub fn is_online(online_players: &[String], username: &str) -> bool {
         .any(|player| player.eq_ignore_ascii_case(username))
 }
 
+/// The in-game spelling of this account, when the player is on the roster.
+pub fn roster_name<'a>(players: &'a [String], username: &'a str) -> &'a str {
+    players
+        .iter()
+        .find(|player| player.eq_ignore_ascii_case(username))
+        .map(String::as_str)
+        .unwrap_or(username)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +130,15 @@ mod tests {
         assert!(is_online(&roster, "rook"));
         assert!(is_online(&roster, "ROOK"));
         assert!(is_online(&roster, "Vesper"));
+    }
+
+    #[test]
+    fn roster_name_keeps_the_in_game_spelling() {
+        let roster = vec!["Rook".to_owned(), "vesper".to_owned()];
+
+        assert_eq!(roster_name(&roster, "rook"), "Rook");
+        assert_eq!(roster_name(&roster, "VESPER"), "vesper");
+        assert_eq!(roster_name(&roster, "ghost"), "ghost");
     }
 
     #[test]

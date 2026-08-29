@@ -527,7 +527,33 @@ async fn settle(state: &AppState, listing_id: Uuid) -> ApiResult<()> {
                 listing.id,
             )
             .await?;
+            let _ = crate::services::economy::notices::push(
+                state,
+                winner,
+                "auction_won",
+                "Auction won",
+                &format!(
+                    "{}× {} is on its way into your pack.",
+                    listing.quantity, listing.item_name
+                ),
+                Some("auction_listing"),
+                Some(listing.id),
+            )
+            .await;
         }
+        let _ = crate::services::economy::notices::push(
+            state,
+            listing.seller_id,
+            "auction_sold",
+            "Listing sold",
+            &format!(
+                "{}× {} sold for {} coins.",
+                listing.quantity, listing.item_name, proceeds
+            ),
+            Some("auction_listing"),
+            Some(listing.id),
+        )
+        .await;
     } else {
         sqlx::query(
             r#"UPDATE auction_listings SET status = 'expired', settled_at = now()
@@ -542,20 +568,31 @@ async fn settle(state: &AppState, listing_id: Uuid) -> ApiResult<()> {
 }
 
 async fn return_item(state: &AppState, listing: &Listing) -> ApiResult<()> {
-    let Some(username) = username_of(&state.db, listing.seller_id).await? else {
-        return Ok(());
-    };
-    delivery::give_with_condition(
+    crate::services::economy::vault::receive_held(
         state,
-        &username,
+        listing.seller_id,
         &listing.item_type,
+        &listing.item_name,
         listing.quantity,
         listing.condition,
         "auction_return",
-        "auction_listing",
-        listing.id,
     )
     .await?;
+    let title = "Auction returned";
+    let body = format!(
+        "{}× {} came back to the vault. No slot, no retrieve fee.",
+        listing.quantity, listing.item_name
+    );
+    let _ = crate::services::economy::notices::push(
+        state,
+        listing.seller_id,
+        "auction_return",
+        title,
+        &body,
+        Some("auction_listing"),
+        Some(listing.id),
+    )
+    .await;
     Ok(())
 }
 

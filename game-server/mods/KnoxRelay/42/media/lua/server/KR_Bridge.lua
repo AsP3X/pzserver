@@ -20,6 +20,16 @@ KR_Bridge = {}
 --- with modversion in mod.info; nothing else reads that file at runtime.
 KR_Bridge.VERSION = "1.25"
 
+--- What this build can do. The panel reads these from game_state.json and
+--- degrades when a flag is missing, instead of assuming git matches Workshop.
+KR_Bridge.FEATURES = {
+    "force_snapshot",
+    "panel_jobs",
+    "held_vault",
+    "desk_inbox",
+    "case_insensitive_roster",
+}
+
 local LOG = "[KnoxRelay] "
 
 local announcedRoot = false

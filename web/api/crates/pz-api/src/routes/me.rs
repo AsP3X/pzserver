@@ -10,7 +10,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use pz_bridge::{InventoryReader, InventorySnapshot, PlayerFile, PlayerVitals, VitalsReader};
+use pz_bridge::{
+    InventoryReader, InventorySnapshot, JobsChannel, PanelJob, PlayerFile, PlayerVitals,
+    VitalsReader,
+};
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::AuthUser;
@@ -136,7 +139,7 @@ async fn my_inventory(
     let online = character::is_online(&status.players, username);
 
     let reader = InventoryReader::new(&state.config.lua_bridge_path);
-    let queued_as = roster_username(&status.players, username);
+    let queued_as = character::roster_name(&status.players, username);
 
     let read = read_snapshot(&reader, queued_as, username).await?;
 
@@ -261,18 +264,33 @@ async fn refresh_inventory(
     // The mod looks up names exactly as the game spelled them. Accounts match
     // case-insensitively, so queue the roster spelling rather than the
     // registration spelling or the request is dropped on the next tick.
-    let queued_as = roster_username(&status.players, username);
+    let queued_as = character::roster_name(&status.players, username);
     let reader = InventoryReader::new(&state.config.lua_bridge_path);
+    let jobs = JobsChannel::new(&state.config.lua_bridge_path);
+    let job_id = uuid::Uuid::new_v4().to_string();
 
     reader.request_snapshot(queued_as).await.map_err(|error| {
         tracing::error!(%error, "could not queue an inventory snapshot");
         ApiError::Internal("could not queue a snapshot".to_owned())
     })?;
 
-    let served = reader
-        .await_served(queued_as, SNAPSHOT_WAIT)
-        .await
-        .unwrap_or(false);
+    let _ = jobs
+        .enqueue(PanelJob {
+            id: job_id.clone(),
+            kind: "snapshot".to_owned(),
+            username: queued_as.to_owned(),
+            title: None,
+            body: None,
+        })
+        .await;
+
+    let served = match jobs.await_result(&job_id, SNAPSHOT_WAIT).await {
+        Ok(Some(result)) => result.ok,
+        _ => reader
+            .await_served(queued_as, SNAPSHOT_WAIT)
+            .await
+            .unwrap_or(false),
+    };
 
     tracing::info!(username, served, "forced an inventory snapshot");
 
