@@ -1,5 +1,5 @@
 {
-  "mod_version": "1.25",
+  "mod_version": "1.26",
   "features": [
     "force_snapshot",
     "panel_jobs",

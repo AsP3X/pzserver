@@ -322,15 +322,6 @@ fn snapshot_unreadable(error: impl std::fmt::Display) -> ApiError {
     ApiError::Internal("inventory snapshot unreadable".to_owned())
 }
 
-/// The in-game spelling of this account, when the player is on the roster.
-fn roster_username<'a>(players: &'a [String], username: &'a str) -> &'a str {
-    players
-        .iter()
-        .find(|player| player.eq_ignore_ascii_case(username))
-        .map(String::as_str)
-        .unwrap_or(username)
-}
-
 async fn inventory_response(
     state: &AppState,
     user_id: Uuid,
@@ -421,18 +412,4 @@ async fn read_report(
     let report = reports::mark_read(&state.db, user.id, id).await?;
     reports::refresh_inbox(&state.db, &state.config.lua_bridge_path, &user.username).await;
     Ok(Json(report))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn queues_the_roster_spelling_when_the_account_differs_in_case() {
-        let roster = vec!["Rook".to_owned(), "vesper".to_owned()];
-
-        assert_eq!(roster_username(&roster, "rook"), "Rook");
-        assert_eq!(roster_username(&roster, "VESPER"), "vesper");
-        assert_eq!(roster_username(&roster, "ghost"), "ghost");
-    }
 }
