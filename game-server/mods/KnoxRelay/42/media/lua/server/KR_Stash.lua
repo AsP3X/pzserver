@@ -341,4 +341,74 @@ function KR_Stash.detach(player, item)
     end
 end
 
+--- Make a just-spawned item actually usable.
+---
+--- B42 water bottles list Water and CarbonatedWater with PickRandomFluid.
+--- inventory:AddItem() can load both as a mixture. The game will pour a
+--- mixture but will not drink it (isWaterSource is false, and Water is not
+--- a Beverage). Empty the container and fill it with one fluid instead.
+function KR_Stash.primeSpawned(item)
+    if not item then
+        return
+    end
+
+    if item.setUsedDelta then
+        pcall(function()
+            item:setUsedDelta(1)
+        end)
+    end
+
+    if not item.getFluidContainer then
+        return
+    end
+
+    local container = item:getFluidContainer()
+    if not container then
+        return
+    end
+
+    local water = nil
+    if Fluid and Fluid.Water then
+        water = Fluid.Water
+    elseif FluidType and FluidType.Water then
+        water = FluidType.Water
+    end
+
+    local function allows(fluid)
+        if not fluid or not container.canAddFluid then
+            return fluid ~= nil
+        end
+        local ok, allowed = pcall(function()
+            return container:canAddFluid(fluid)
+        end)
+        if not ok then
+            return true
+        end
+        return allowed == true
+    end
+
+    local empty = container.isEmpty and container:isEmpty()
+    local mixed = container.isMixture and container:isMixture()
+    local hasWater = water and container.contains and container:contains(water)
+    local pureWater = water and container.isPureFluid and container:isPureFluid(water)
+
+    local fillWith = nil
+    if allows(water) and (empty or mixed or (hasWater and not pureWater)) then
+        fillWith = water
+    elseif empty and container.getPrimaryFluid then
+        fillWith = container:getPrimaryFluid()
+    end
+
+    if not fillWith or not allows(fillWith) then
+        return
+    end
+
+    if container.Empty then
+        container:Empty()
+    end
+    if container.addFluid and container.getCapacity then
+        container:addFluid(fillWith, container:getCapacity())
+    end
+end
+
 return KR_Stash

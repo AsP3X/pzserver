@@ -122,8 +122,76 @@ local function mirrorAddition(inventory, itemType, count)
     print(LOG .. "addItem: type=" .. tostring(itemType) .. " count=" .. tostring(count))
 
     for attempt = 1, count do
-        inventory:AddItem(itemType)
+        local item = inventory:AddItem(itemType)
+        primeSpawned(item)
         print(LOG .. "addItem: added instance " .. tostring(attempt) .. " of " .. tostring(itemType))
+    end
+end
+
+--- Same job as KR_Stash.primeSpawned: client AddItem is a separate object
+--- from the server's, and a mixed Water+CarbonatedWater bottle pours but
+--- will not drink.
+local function primeSpawned(item)
+    if not item then
+        return
+    end
+
+    if item.setUsedDelta then
+        pcall(function()
+            item:setUsedDelta(1)
+        end)
+    end
+
+    if not item.getFluidContainer then
+        return
+    end
+
+    local container = item:getFluidContainer()
+    if not container then
+        return
+    end
+
+    local water = nil
+    if Fluid and Fluid.Water then
+        water = Fluid.Water
+    elseif FluidType and FluidType.Water then
+        water = FluidType.Water
+    end
+
+    local function allows(fluid)
+        if not fluid or not container.canAddFluid then
+            return fluid ~= nil
+        end
+        local ok, allowed = pcall(function()
+            return container:canAddFluid(fluid)
+        end)
+        if not ok then
+            return true
+        end
+        return allowed == true
+    end
+
+    local empty = container.isEmpty and container:isEmpty()
+    local mixed = container.isMixture and container:isMixture()
+    local hasWater = water and container.contains and container:contains(water)
+    local pureWater = water and container.isPureFluid and container:isPureFluid(water)
+
+    local fillWith = nil
+    if allows(water) and (empty or mixed or (hasWater and not pureWater)) then
+        fillWith = water
+    elseif empty and container.getPrimaryFluid then
+        fillWith = container:getPrimaryFluid()
+    end
+
+    if not fillWith or not allows(fillWith) then
+        return
+    end
+
+    if container.Empty then
+        container:Empty()
+    end
+    if container.addFluid and container.getCapacity then
+        container:addFluid(fillWith, container:getCapacity())
     end
 end
 
@@ -158,6 +226,7 @@ local function fillContainer(container, cargo)
             for _ = 1, count do
                 local item = container:AddItem(itemType)
                 if item then
+                    primeSpawned(item)
                     local condition = piece.condition
                     if piece.condition_bp ~= nil then
                         condition = (tonumber(piece.condition_bp) or 100) / 100
@@ -181,6 +250,7 @@ local function mirrorFillBag(inventory, itemType, fraction, cargo)
         return
     end
 
+    primeSpawned(bag)
     wearOn(bag, fraction)
     if cargo then
         fillContainer(bag.getItemContainer and bag:getItemContainer(), cargo)

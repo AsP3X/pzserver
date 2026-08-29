@@ -152,6 +152,19 @@ local function takeOneDescribed(player, itemType)
     return record
 end
 
+local function spawnOne(container, itemType)
+    if not container or not itemType then
+        return nil
+    end
+
+    local item = container:AddItem(itemType)
+    if item then
+        Stash.primeSpawned(item)
+    end
+
+    return item
+end
+
 local function wearOn(item, fraction)
     if not item or not item.setCondition or not item.getConditionMax then
         return
@@ -181,7 +194,7 @@ local function fillContainer(container, cargo)
         local count = tonumber(piece.quantity or piece.count) or 1
         if itemType then
             for _ = 1, count do
-                local item = container:AddItem(itemType)
+                local item = spawnOne(container, itemType)
                 if not item then
                     return false
                 end
@@ -213,7 +226,7 @@ local function actionGive(player, itemType, count)
     end
 
     for attempt = 1, count do
-        if not inventory:AddItem(itemType) then
+        if not spawnOne(inventory, itemType) then
             return false, "failed to add item " .. itemType .. " (attempt " .. attempt .. "/" .. count .. ")"
         end
     end
@@ -232,7 +245,7 @@ local function actionGiveVerified(player, itemType, count)
     local before = Stash.count(player, itemType)
 
     for attempt = 1, count do
-        if not inventory:AddItem(itemType) then
+        if not spawnOne(inventory, itemType) then
             -- Undo whatever did land so the caller sees a clean failure.
             local landed = Stash.count(player, itemType) - before
             for _ = 1, landed do
@@ -279,7 +292,7 @@ local function actionGiveWithCondition(player, itemType, count, fraction)
     local landed = 0
 
     for attempt = 1, count do
-        local item = inventory:AddItem(itemType)
+        local item = spawnOne(inventory, itemType)
         if not item then
             for _ = 1, landed do
                 takeOne(player, itemType)
@@ -402,7 +415,7 @@ local function actionGiveKit(player, itemType, fraction, cargo)
     -- Dump the bag and its cargo into the main pack so every client (including
     -- a Steam copy without fillBag) can see the items. The vault still stored
     -- the packed bag as one slot.
-    local bag = inventory:AddItem(itemType)
+    local bag = spawnOne(inventory, itemType)
     if not bag then
         return false, "failed to add container " .. tostring(itemType), nil
     end
@@ -413,7 +426,7 @@ local function actionGiveKit(player, itemType, fraction, cargo)
     flattenCargo(cargo, counts)
     for nestedType, nestedCount in pairs(counts) do
         for _ = 1, nestedCount do
-            if not inventory:AddItem(nestedType) then
+            if not spawnOne(inventory, nestedType) then
                 return false, "failed to restore " .. tostring(nestedType), nil
             end
         end
