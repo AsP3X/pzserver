@@ -192,10 +192,16 @@ map-tiles-recompress:
 	$(COMPOSE) --profile tools run --rm --no-deps --entrypoint python map-tiles /tools/recompress.py /pack/tiles.sqlite
 
 # Sprite isometric catalogue (parallel to the JPEG pack). Needs texture packs.
+# -t when stdout is a tty so extract.py can rewrite one progress line in place
+# (same as map-tiles-import).
 map-sprites:
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	$(COMPOSE) --profile tools run --rm --no-deps --entrypoint python map-tiles /tools/map_sprites/extract.py --out /sprites/sprites.sqlite
+	@tty=; if [ -t 1 ]; then tty=-t; fi; \
+	cols=$${COLUMNS:-$$(tput cols 2>/dev/null || echo 80)}; \
+	$(COMPOSE) --profile tools run --rm --no-deps $$tty \
+		-e TERM -e NO_COLOR -e COLUMNS="$$cols" \
+		--entrypoint python map-tiles /tools/map_sprites/extract.py --out /sprites/sprites.sqlite
 
 # Copy an existing host pack into the named volume. Run with web-api down, or
 # against an empty volume — overwriting a live open sqlite is the Windows

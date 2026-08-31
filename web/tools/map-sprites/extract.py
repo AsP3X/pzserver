@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atlas import pack as pack_atlas
 from iso import CELL
+from progress import Bar
 from store import open_write, write_atlas, write_cell, write_meta
 from thumbs import render_thumb
 
@@ -58,9 +59,12 @@ def load_textures(texture_dir: Path):
         print("make map-sprites. Same packs as make map-tiles. See", file=sys.stderr)
         print("docs/map-sprites.md.", file=sys.stderr)
         raise SystemExit(1)
-    for pack in packs:
-        print(f"==> pack {pack.name}", flush=True)
-        lib.add_pack(str(pack))
+    print(f"==> textures: {len(packs)} packs", flush=True)
+    with Bar("packs", len(packs)) as bar:
+        for pack in packs:
+            lib.add_pack(str(pack))
+            bar.tick(extra=pack.name)
+        bar.finish()
     return lib
 
 
@@ -107,29 +111,39 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
     cells: dict[tuple[int, int], list[tuple[int, int, int, str]]] = {}
     z_min, z_max = 0, 0
 
+    lotpacks: list[tuple[Path, Path]] = []
     for root in roots:
-        print(f"==> map {root.name}", flush=True)
         for lotpack in sorted(root.glob("world_*.lotpack")):
+            if LOTPACK.match(lotpack.name):
+                lotpacks.append((root, lotpack))
+    print(f"==> maps: {len(roots)}  lotpacks: {len(lotpacks)}", flush=True)
+
+    with Bar("scan", len(lotpacks) or 1) as bar:
+        for root, lotpack in lotpacks:
             match = LOTPACK.match(lotpack.name)
             if not match:
+                bar.tick()
                 continue
             cx, cy = int(match.group(1)), int(match.group(2))
             cell = load_cell(root, cx, cy)
             if cell is None:
+                bar.tick(extra=f"{cx},{cy}")
                 continue
             rows = cell_records(cell)
-            if not rows:
-                continue
-            key = (cx, cy)
-            cells[key] = cells.get(key, []) + rows
-            for _lx, _ly, z, name in rows:
-                z_min = min(z_min, z)
-                z_max = max(z_max, z + 1)
-                if name not in used:
-                    texture = lib.get_by_name(name)
-                    if texture is not None and texture.im.size[0] > 0:
-                        used[name] = texture
+            if rows:
+                key = (cx, cy)
+                cells[key] = cells.get(key, []) + rows
+                for _lx, _ly, z, name in rows:
+                    z_min = min(z_min, z)
+                    z_max = max(z_max, z + 1)
+                    if name not in used:
+                        texture = lib.get_by_name(name)
+                        if texture is not None and texture.im.size[0] > 0:
+                            used[name] = texture
+            bar.tick(extra=f"{root.name} {cx},{cy}")
+        bar.finish()
 
+    print(f"==> packing {len(used)} sprites", flush=True)
     sprite_list = [
         (name, texture.im, int(texture.ox), int(texture.oy)) for name, texture in used.items()
     ]
@@ -142,21 +156,25 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
     for sprite in packed:
         reach = max(reach, abs(sprite.ox) + sprite.w, abs(sprite.oy) + sprite.h)
 
-    for (cx, cy), rows in sorted(cells.items()):
-        numbered = []
-        blit = []
-        for lx, ly, z, name in rows:
-            sprite_id = ids.get(name)
-            if sprite_id is None:
-                continue
-            numbered.append((lx, ly, z, sprite_id))
-            sprite = page_map[name]
-            texture = used[name]
-            blit.append((lx, ly, z, texture.im, sprite.ox, sprite.oy))
-        blit.sort(key=lambda row: (row[0] + row[1], row[2]))
-        thumb = render_thumb(blit, cx, cy)
-        write_cell(con, cx, cy, numbered, thumb)
-        print(f"    cell {cx},{cy} {len(numbered)} sprites", flush=True)
+    items = sorted(cells.items())
+    print(f"==> thumbs: {len(items)} cells", flush=True)
+    with Bar("cells", len(items) or 1) as bar:
+        for (cx, cy), rows in items:
+            numbered = []
+            blit = []
+            for lx, ly, z, name in rows:
+                sprite_id = ids.get(name)
+                if sprite_id is None:
+                    continue
+                numbered.append((lx, ly, z, sprite_id))
+                sprite = page_map[name]
+                texture = used[name]
+                blit.append((lx, ly, z, texture.im, sprite.ox, sprite.oy))
+            blit.sort(key=lambda row: (row[0] + row[1], row[2]))
+            thumb = render_thumb(blit, cx, cy)
+            write_cell(con, cx, cy, numbered, thumb)
+            bar.tick(extra=f"{cx},{cy}")
+        bar.finish()
 
     write_meta(
         con,
