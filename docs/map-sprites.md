@@ -47,6 +47,12 @@ renderer, `/map-sprites` in web-api). Does not write `tiles.sqlite`. After a
 successful bake, recreate `web-api` so it opens the new file, then use
 **Sprites** on the map.
 
+Ctrl+C (or `docker stop` on the bake container) writes a checkpoint to
+`sprites.sqlite.work` and exits. The live catalogue is not replaced until the
+bake finishes, so an existing pack stays served. Re-run `make map-sprites` to
+resume; already-scanned lotpacks and already-written cell thumbs are skipped.
+A second Ctrl+C aborts immediately.
+
 ## API
 
 All under `/api/v1/map-sprites/`. Public, like tiles.

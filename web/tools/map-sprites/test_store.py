@@ -1,10 +1,21 @@
+import sqlite3
 from pathlib import Path
 
 from PIL import Image
 
 from atlas import pack
 from occupancy import decode
-from store import open_write, write_atlas, write_cell, write_meta
+from store import (
+    bake_get,
+    bake_set,
+    open_work,
+    open_write,
+    publish_work,
+    write_atlas,
+    write_cell,
+    write_meta,
+    written_cells,
+)
 from thumbs import render_thumb
 
 
@@ -27,3 +38,26 @@ def test_store_round_trip(tmp_path: Path):
     assert stored is not None
     assert len(stored[0]) > 0
     con.close()
+
+
+def test_work_db_resume_and_publish(tmp_path: Path):
+    work = tmp_path / "sprites.sqlite.work"
+    live = tmp_path / "sprites.sqlite"
+    con = open_work(work)
+    bake_set(con, "stage", "thumbs")
+    bake_set(con, "fingerprint", "abc")
+    con.commit()
+    image = Image.new("RGBA", (6, 10), (10, 20, 30, 255))
+    pages, packed = pack([("wall", image, -3, -10)])
+    ids = write_atlas(con, [b"png"], packed)
+    write_cell(con, 1, 2, [(0, 0, 0, ids["wall"])], b"thumb")
+    con.commit()
+    assert bake_get(con, "stage") == "thumbs"
+    assert written_cells(con) == {(1, 2)}
+    write_meta(con, {"generated_at": "now"})
+    publish_work(con, work, live)
+    assert live.is_file()
+    assert not work.is_file()
+    read = sqlite3.connect(live)
+    assert read.execute("SELECT count(*) FROM cells").fetchone()[0] == 1
+    read.close()

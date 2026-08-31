@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import io
+import json
 import multiprocessing
 import os
 import re
+import signal
 import struct
 import sys
 from datetime import datetime, timezone
@@ -24,7 +27,20 @@ from atlas import pack as pack_atlas
 from iso import CELL
 from occupancy import encode as encode_occupancy
 from progress import Bar
-from store import open_write, write_atlas, write_cell, write_meta
+from store import (
+    bake_get,
+    bake_set,
+    load_sprite_ids,
+    load_sprite_oxoy,
+    open_work,
+    publish_work,
+    reset_work,
+    work_path,
+    write_atlas,
+    write_cell,
+    write_meta,
+    written_cells,
+)
 from thumbs import png_bytes, render_thumb, scale_stamp, thumb_scale
 
 LOTPACK = re.compile(r"^world_(-?\d+)_(-?\d+)\.lotpack$")
@@ -35,6 +51,7 @@ _load_cell = None
 _THUMB_STAMPS: dict = {}
 _THUMB_IDS: dict = {}
 _THUMB_OXOY: dict = {}
+_COMMIT_EVERY = 8
 
 
 def map_roots(maps: Path) -> list[Path]:
@@ -58,6 +75,132 @@ def _mp_ctx():
     # The bake image is Linux; fork shares the pre-scaled stamp dict via COW.
     method = "fork" if sys.platform.startswith("linux") else "spawn"
     return multiprocessing.get_context(method)
+
+
+class StopFlag:
+    def __init__(self) -> None:
+        self.stop = False
+
+    def arm(self) -> None:
+        signal.signal(signal.SIGINT, self._on)
+        signal.signal(signal.SIGTERM, self._on)
+
+    def _on(self, signum: int, _frame: object) -> None:
+        if self.stop:
+            sys.stderr.write("\n==> second interrupt: aborting without a further checkpoint\n")
+            sys.stderr.flush()
+            os._exit(130)
+        self.stop = True
+        name = "Ctrl+C" if signum == signal.SIGINT else "SIGTERM"
+        sys.stderr.write(
+            f"\n==> {name}: writing checkpoint. Re-run make map-sprites to resume.\n"
+        )
+        sys.stderr.flush()
+
+
+def _ignore_signals() -> None:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
+def fingerprint(lotpacks: list[tuple[str, str, str]], textures: Path, game_version: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(game_version.encode())
+    digest.update(b"\n")
+    for root, map_name, filename in lotpacks:
+        path = Path(root) / filename
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        digest.update(f"{map_name}/{filename}:{size}\n".encode())
+    if textures.is_dir():
+        for pack in sorted(textures.glob("*.pack")):
+            try:
+                size = pack.stat().st_size
+            except OSError:
+                size = 0
+            digest.update(f"pack:{pack.name}:{size}\n".encode())
+    return digest.hexdigest()
+
+
+def job_coords(filename: str) -> tuple[int, int] | None:
+    match = LOTPACK.match(filename)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+class Checkpointer:
+    def __init__(self, con) -> None:
+        self.con = con
+        self.pending = 0
+
+    def persist_scan(
+        self,
+        map_name: str,
+        cx: int,
+        cy: int,
+        *,
+        empty: bool,
+        names: list[str] | None = None,
+        blob: bytes | None = None,
+        z_min: int = 0,
+        z_max: int = 0,
+    ) -> None:
+        self.con.execute(
+            """INSERT OR REPLACE INTO scan_cell
+               (map_name, cx, cy, empty, names, blob, z_min, z_max)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                map_name,
+                cx,
+                cy,
+                1 if empty else 0,
+                json.dumps(names) if names is not None else None,
+                blob,
+                z_min,
+                z_max,
+            ),
+        )
+        self.flush()
+
+    def flush(self, *, force: bool = False) -> None:
+        if not force:
+            self.pending += 1
+            if self.pending < _COMMIT_EVERY:
+                return
+        self.con.commit()
+        self.pending = 0
+
+    def load_scan(
+        self,
+    ) -> tuple[
+        dict[tuple[int, int], tuple[list[str], bytes]],
+        set[str],
+        int,
+        int,
+        set[tuple[str, int, int]],
+    ]:
+        cells: dict[tuple[int, int], tuple[list[str], bytes]] = {}
+        unique: set[str] = set()
+        z_min, z_max = 0, 0
+        done: set[tuple[str, int, int]] = set()
+        rows = self.con.execute(
+            "SELECT map_name, cx, cy, empty, names, blob, z_min, z_max FROM scan_cell"
+        )
+        for map_name, cx, cy, empty, names_json, blob, cell_z0, cell_z1 in rows:
+            done.add((str(map_name), int(cx), int(cy)))
+            if empty:
+                continue
+            names = json.loads(names_json)
+            packed = (list(names), bytes(blob or b""))
+            key = (int(cx), int(cy))
+            cells[key] = merge_named(cells[key], packed) if key in cells else packed
+            unique.update(names)
+            z_min = min(z_min, int(cell_z0))
+            z_max = max(z_max, int(cell_z1))
+        return cells, unique, z_min, z_max, done
 
 
 def load_textures(texture_dir: Path):
@@ -217,24 +360,29 @@ def merge_named(
 
 
 def _init_scan() -> None:
+    _ignore_signals()
     _ensure_load_cell()
+
+
+def _init_thumbs() -> None:
+    _ignore_signals()
 
 
 def _scan_one(job: tuple[str, str, str]):
     root, map_name, filename = job
-    match = LOTPACK.match(filename)
-    if not match:
+    coords = job_coords(filename)
+    if not coords:
         return None
-    cx, cy = int(match.group(1)), int(match.group(2))
+    cx, cy = coords
     try:
         cell = load_cell(Path(root), cx, cy)
     except Exception as error:
         return ("err", map_name, cx, cy, str(error))
     if cell is None:
-        return None
+        return ("skip", map_name, cx, cy)
     rows = cell_records(cell)
     if not rows:
-        return None
+        return ("skip", map_name, cx, cy)
     names, blob = pack_named_rows(rows)
     z_min = min(z for _lx, _ly, z, _name in rows)
     z_max = max(z for _lx, _ly, z, _name in rows) + 1
@@ -257,6 +405,14 @@ def _thumb_one(item):
     return cx, cy, encode_occupancy(numbered), thumb
 
 
+def _pause(check: Checkpointer, bar: Bar | None, _stop: StopFlag, done: int, total: int) -> None:
+    if bar is not None:
+        bar.interrupt()
+    check.flush(force=True)
+    print(f"==> paused at {done}/{total}. Re-run make map-sprites to resume.", flush=True)
+    raise SystemExit(130)
+
+
 def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
     roots = map_roots(maps)
     if not roots:
@@ -264,54 +420,153 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
         raise SystemExit(1)
 
     lotpacks: list[tuple[str, str, str]] = []
+    sizes: dict[tuple[str, int, int], int] = {}
     for root in roots:
         for lotpack in sorted(root.glob("world_*.lotpack")):
-            if LOTPACK.match(lotpack.name):
-                lotpacks.append((str(root), root.name, lotpack.name))
+            coords = job_coords(lotpack.name)
+            if not coords:
+                continue
+            cx, cy = coords
+            lotpacks.append((str(root), root.name, lotpack.name))
+            try:
+                size = lotpack.stat().st_size
+            except OSError:
+                size = 1
+            sizes[(root.name, cx, cy)] = max(1, size)
+
     workers = worker_count()
+    sig = fingerprint(lotpacks, textures, game_version)
+    work = work_path(out)
     print(f"==> maps: {len(roots)}  lotpacks: {len(lotpacks)}  workers: {workers}", flush=True)
+    print("==> Ctrl+C checkpoints; re-run make map-sprites to resume", flush=True)
 
-    cells: dict[tuple[int, int], tuple[list[str], bytes]] = {}
-    unique: set[str] = set()
-    z_min, z_max = 0, 0
-    errors = 0
-    chunksize = 8 if len(lotpacks) > 32 else 1
-    with _mp_ctx().Pool(workers, initializer=_init_scan) as pool:
-        with Bar("scan", len(lotpacks) or 1) as bar:
-            iterator = (
-                pool.imap_unordered(_scan_one, lotpacks, chunksize=chunksize)
-                if lotpacks
-                else []
-            )
-            for result in iterator:
-                if result is None:
-                    bar.tick()
-                    continue
-                if result[0] == "err":
-                    _kind, map_name, cx, cy, message = result
-                    errors += 1
-                    print(f"FAIL: {map_name} {cx},{cy}: {message}", file=sys.stderr, flush=True)
-                    bar.tick(extra=f"{map_name} {cx},{cy}")
-                    continue
-                _kind, map_name, cx, cy, names, blob, cell_z0, cell_z1 = result
-                key = (cx, cy)
-                packed = (names, blob)
-                cells[key] = merge_named(cells[key], packed) if key in cells else packed
-                unique.update(names)
-                z_min = min(z_min, cell_z0)
-                z_max = max(z_max, cell_z1)
-                bar.tick(extra=f"{map_name} {cx},{cy}")
-            bar.finish()
-    if errors:
-        print(f"==> scan errors: {errors} (those cells skipped)", flush=True)
+    if work.is_file():
+        con = open_work(work)
+        stored = bake_get(con, "fingerprint")
+        if stored is not None and stored != sig:
+            print("==> maps or textures changed; starting a new bake", flush=True)
+            con.close()
+            con = reset_work(work)
+            stored = None
+    else:
+        con = open_work(work)
+        stored = None
 
-    lib = load_textures(textures)
+    if stored != sig:
+        bake_set(con, "fingerprint", sig)
+        bake_set(con, "stage", "scan")
+        con.commit()
+    elif bake_get(con, "stage") is None:
+        bake_set(con, "stage", "scan")
+        con.commit()
+
+    if bake_get(con, "stage") == "done":
+        print("==> previous bake finished; publishing", flush=True)
+        publish_work(con, work, out)
+        print(f"==> wrote {out}", flush=True)
+        return
+
+    check = Checkpointer(con)
+    stop = StopFlag()
+    cells, unique, z_min, z_max, scanned = check.load_scan()
+    pending_scan = []
+    for job in lotpacks:
+        coords = job_coords(job[2])
+        if coords is None:
+            continue
+        if (job[1], coords[0], coords[1]) not in scanned:
+            pending_scan.append(job)
+
+    already_scan = len(lotpacks) - len(pending_scan)
+    if already_scan:
+        print(f"==> resume: {already_scan}/{len(lotpacks)} lotpacks already scanned", flush=True)
+
+    stop.arm()
+    if pending_scan and bake_get(con, "stage") == "scan":
+        work_total = float(sum(sizes.values()) or 1)
+        work_done = float(
+            sum(sz for (map_name, cx, cy), sz in sizes.items() if (map_name, cx, cy) in scanned)
+        )
+        chunksize = 8 if len(pending_scan) > 32 else 1
+        bar = Bar(
+            "scan",
+            len(lotpacks) or 1,
+            done=already_scan,
+            work_done=work_done,
+            work_total=work_total,
+        )
+        errors = 0
+        try:
+            with _mp_ctx().Pool(workers, initializer=_init_scan) as pool:
+                for result in pool.imap_unordered(_scan_one, pending_scan, chunksize=chunksize):
+                    if result is None:
+                        bar.tick()
+                        if stop.stop:
+                            _pause(check, bar, stop, bar.done, bar.total)
+                        continue
+                    kind = result[0]
+                    map_name, cx, cy = result[1], result[2], result[3]
+                    weight = float(sizes.get((map_name, cx, cy), 1))
+                    if kind == "err":
+                        errors += 1
+                        print(f"FAIL: {map_name} {cx},{cy}: {result[4]}", file=sys.stderr, flush=True)
+                        check.persist_scan(map_name, cx, cy, empty=True)
+                    elif kind == "skip":
+                        check.persist_scan(map_name, cx, cy, empty=True)
+                    else:
+                        names, blob, cell_z0, cell_z1 = result[4], result[5], result[6], result[7]
+                        check.persist_scan(
+                            map_name,
+                            cx,
+                            cy,
+                            empty=False,
+                            names=names,
+                            blob=blob,
+                            z_min=cell_z0,
+                            z_max=cell_z1,
+                        )
+                        key = (cx, cy)
+                        packed = (names, blob)
+                        cells[key] = merge_named(cells[key], packed) if key in cells else packed
+                        unique.update(names)
+                        z_min = min(z_min, cell_z0)
+                        z_max = max(z_max, cell_z1)
+                    bar.tick(extra=f"{map_name} {cx},{cy}", work=weight)
+                    if stop.stop:
+                        _pause(check, bar, stop, bar.done, bar.total)
+        except KeyboardInterrupt:
+            stop.stop = True
+            _pause(check, bar, stop, bar.done, bar.total)
+        bar.finish()
+        check.flush(force=True)
+        if errors:
+            print(f"==> scan errors: {errors} (those cells skipped)", flush=True)
+        bake_set(con, "stage", "atlas")
+        con.commit()
+    elif bake_get(con, "stage") == "scan" and not pending_scan:
+        bake_set(con, "stage", "atlas")
+        con.commit()
+
+    if stop.stop:
+        _pause(check, None, stop, already_scan, len(lotpacks))
+
+    # Atlas + thumbs need textures in this process. Skip packing if thumbs already started.
+    stage = bake_get(con, "stage") or "atlas"
     used: dict[str, object] = {}
-    missing: set[str] = set()
-    names_sorted = sorted(unique)
-    print(f"==> lookup {len(names_sorted)} tile names", flush=True)
-    getter = getattr(lib, "get_by_name_ignore_filter", None) or lib.get_by_name
-    with Bar("lookup", len(names_sorted) or 1) as bar:
+    pages_count = int(bake_get(con, "pages") or 0)
+    sprites_count = int(bake_get(con, "sprites") or 0)
+    reach = int(bake_get(con, "max_reach") or 0)
+
+    need_textures = stage in ("atlas", "thumbs")
+    if need_textures:
+        lib = load_textures(textures)
+        if stop.stop:
+            _pause(check, None, stop, 0, 1)
+        names_sorted = sorted(unique)
+        print(f"==> lookup {len(names_sorted)} tile names", flush=True)
+        getter = getattr(lib, "get_by_name_ignore_filter", None) or lib.get_by_name
+        missing: set[str] = set()
+        bar = Bar("lookup", len(names_sorted) or 1)
         with contextlib.redirect_stdout(io.StringIO()):
             for name in names_sorted:
                 texture = getter(name)
@@ -320,51 +575,105 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
                 else:
                     missing.add(name)
                 bar.tick()
+                if stop.stop:
+                    _pause(check, bar, stop, bar.done, bar.total)
         bar.finish()
+        if missing:
+            sample = ", ".join(sorted(missing)[:8])
+            more = "" if len(missing) <= 8 else f" (+{len(missing) - 8} more)"
+            print(f"==> {len(missing)} textures not in the packs: {sample}{more}", flush=True)
 
-    if missing:
-        sample = ", ".join(sorted(missing)[:8])
-        more = "" if len(missing) <= 8 else f" (+{len(missing) - 8} more)"
-        print(f"==> {len(missing)} textures not in the packs: {sample}{more}", flush=True)
-    print(f"==> packing {len(used)} sprites", flush=True)
-    sprite_list = [
-        (name, texture.im, int(texture.ox), int(texture.oy)) for name, texture in used.items()
-    ]
-    pages, packed = pack_atlas(sprite_list)
-    con = open_write(out)
-    ids = write_atlas(con, [png_bytes(page) for page in pages], packed)
+        if stage == "atlas":
+            print(f"==> packing {len(used)} sprites", flush=True)
+            sprite_list = [
+                (name, texture.im, int(texture.ox), int(texture.oy)) for name, texture in used.items()
+            ]
+            pages, packed = pack_atlas(sprite_list)
+            ids = write_atlas(con, [png_bytes(page) for page in pages], packed)
+            reach = 0
+            for sprite in packed:
+                reach = max(reach, abs(sprite.ox) + sprite.w, abs(sprite.oy) + sprite.h)
+            pages_count = len(pages)
+            sprites_count = len(packed)
+            bake_set(con, "pages", str(pages_count))
+            bake_set(con, "sprites", str(sprites_count))
+            bake_set(con, "max_reach", str(reach))
+            bake_set(con, "stage", "thumbs")
+            con.commit()
+        else:
+            ids = load_sprite_ids(con)
+            if not ids:
+                print("==> atlas missing from checkpoint; packing again", flush=True)
+                sprite_list = [
+                    (name, texture.im, int(texture.ox), int(texture.oy))
+                    for name, texture in used.items()
+                ]
+                pages, packed = pack_atlas(sprite_list)
+                ids = write_atlas(con, [png_bytes(page) for page in pages], packed)
+                pages_count = len(pages)
+                sprites_count = len(packed)
+                reach = 0
+                for sprite in packed:
+                    reach = max(reach, abs(sprite.ox) + sprite.w, abs(sprite.oy) + sprite.h)
+                bake_set(con, "pages", str(pages_count))
+                bake_set(con, "sprites", str(sprites_count))
+                bake_set(con, "max_reach", str(reach))
+                con.commit()
 
-    reach = 0
-    oxoy: dict[str, tuple[int, int]] = {}
-    for sprite in packed:
-        reach = max(reach, abs(sprite.ox) + sprite.w, abs(sprite.oy) + sprite.h)
-        oxoy[sprite.name] = (sprite.ox, sprite.oy)
+        oxoy = load_sprite_oxoy(con)
+        scale = thumb_scale()
+        stamps = {name: scale_stamp(texture.im, scale) for name, texture in used.items() if name in ids}
+        global _THUMB_STAMPS, _THUMB_IDS, _THUMB_OXOY
+        _THUMB_STAMPS = stamps
+        _THUMB_IDS = ids
+        _THUMB_OXOY = oxoy
 
-    scale = thumb_scale()
-    stamps = {name: scale_stamp(texture.im, scale) for name, texture in used.items()}
-    global _THUMB_STAMPS, _THUMB_IDS, _THUMB_OXOY
-    _THUMB_STAMPS = stamps
-    _THUMB_IDS = ids
-    _THUMB_OXOY = oxoy
-
-    items = sorted((cx, cy, names, blob) for (cx, cy), (names, blob) in cells.items())
-    print(f"==> thumbs: {len(items)} cells", flush=True)
-    thumb_chunk = 4 if len(items) > 16 else 1
-    with _mp_ctx().Pool(workers) as pool:
-        with Bar("cells", len(items) or 1) as bar:
-            iterator = pool.imap_unordered(_thumb_one, items, chunksize=thumb_chunk) if items else []
-            for cx, cy, occupancy, thumb in iterator:
-                write_cell(con, cx, cy, occupancy, thumb)
-                bar.tick(extra=f"{cx},{cy}")
-            bar.finish()
+    already_thumbs = written_cells(con)
+    all_items = sorted((cx, cy, names, blob) for (cx, cy), (names, blob) in cells.items())
+    pending_thumbs = [item for item in all_items if (item[0], item[1]) not in already_thumbs]
+    thumb_weight = {(cx, cy): float(max(1, len(blob))) for cx, cy, _names, blob in all_items}
+    if already_thumbs:
+        print(
+            f"==> resume: {len(already_thumbs)}/{len(all_items)} cell thumbs already written",
+            flush=True,
+        )
+    print(f"==> thumbs: {len(all_items)} cells", flush=True)
+    if pending_thumbs:
+        work_total = float(sum(thumb_weight.values()) or 1)
+        work_done = float(
+            sum(thumb_weight[key] for key in thumb_weight if key in already_thumbs)
+        )
+        thumb_chunk = 4 if len(pending_thumbs) > 16 else 1
+        bar = Bar(
+            "cells",
+            len(all_items) or 1,
+            done=len(already_thumbs),
+            work_done=work_done,
+            work_total=work_total,
+        )
+        try:
+            with _mp_ctx().Pool(workers, initializer=_init_thumbs) as pool:
+                for cx, cy, occupancy, thumb in pool.imap_unordered(
+                    _thumb_one, pending_thumbs, chunksize=thumb_chunk
+                ):
+                    write_cell(con, cx, cy, occupancy, thumb)
+                    check.flush()
+                    bar.tick(extra=f"{cx},{cy}", work=thumb_weight.get((cx, cy), 1.0))
+                    if stop.stop:
+                        _pause(check, bar, stop, bar.done, bar.total)
+        except KeyboardInterrupt:
+            stop.stop = True
+            _pause(check, bar, stop, bar.done, bar.total)
+        bar.finish()
+        check.flush(force=True)
 
     write_meta(
         con,
         {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "game_version": game_version,
-            "pages": str(len(pages)),
-            "sprites": str(len(packed)),
+            "pages": str(pages_count),
+            "sprites": str(sprites_count),
             "cells": str(len(cells)),
             "z_min": str(z_min),
             "z_max": str(z_max),
@@ -373,8 +682,9 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
             "cell_size": str(CELL),
         },
     )
+    bake_set(con, "stage", "done")
     con.commit()
-    con.close()
+    publish_work(con, work, out)
     print(f"==> wrote {out}", flush=True)
 
 
