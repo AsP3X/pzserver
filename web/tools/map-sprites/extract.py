@@ -8,6 +8,7 @@ Does not write tiles.sqlite.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import os
 import re
@@ -62,9 +63,25 @@ def load_textures(texture_dir: Path):
     print(f"==> textures: {len(packs)} packs", flush=True)
     with Bar("packs", len(packs)) as bar:
         for pack in packs:
-            lib.add_pack(str(pack))
+            # add_pack writes "Processing pages: n/m" with CR on stdout, which
+            # fights the progress line on a merged docker log.
+            with contextlib.redirect_stdout(io.StringIO()):
+                lib.add_pack(str(pack))
             bar.tick(extra=pack.name)
         bar.finish()
+    # Lotpack names like vegetation_trees_01_10 and jumbo_tree_01_0 are not in
+    # the .pack files. pzmap2dzi blends real e_* / d_plants_1_* tiles for them.
+    lib.config_plants(
+        {
+            "season": "summer2",
+            "snow": False,
+            "flower": False,
+            "large_bush": False,
+            "tree_size": 2,
+            "jumbo_tree_size": 4,
+            "jumbo_tree_type": 1,
+        }
+    )
     return lib
 
 
@@ -108,6 +125,7 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
 
     lib = load_textures(textures)
     used: dict[str, object] = {}
+    missing: set[str] = set()
     cells: dict[tuple[int, int], list[tuple[int, int, int, str]]] = {}
     z_min, z_max = 0, 0
 
@@ -136,13 +154,19 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
                 for _lx, _ly, z, name in rows:
                     z_min = min(z_min, z)
                     z_max = max(z_max, z + 1)
-                    if name not in used:
-                        texture = lib.get_by_name(name)
+                    if name not in used and name not in missing:
+                        texture = lib.get_by_name_ignore_filter(name)
                         if texture is not None and texture.im.size[0] > 0:
                             used[name] = texture
+                        else:
+                            missing.add(name)
             bar.tick(extra=f"{root.name} {cx},{cy}")
         bar.finish()
 
+    if missing:
+        sample = ", ".join(sorted(missing)[:8])
+        more = "" if len(missing) <= 8 else f" (+{len(missing) - 8} more)"
+        print(f"==> {len(missing)} textures not in the packs: {sample}{more}", flush=True)
     print(f"==> packing {len(used)} sprites", flush=True)
     sprite_list = [
         (name, texture.im, int(texture.ox), int(texture.oy)) for name, texture in used.items()

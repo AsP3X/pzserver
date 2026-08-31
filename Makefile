@@ -192,14 +192,13 @@ map-tiles-recompress:
 	$(COMPOSE) --profile tools run --rm --no-deps --entrypoint python map-tiles /tools/recompress.py /pack/tiles.sqlite
 
 # Sprite isometric catalogue (parallel to the JPEG pack). Needs texture packs.
-# -t when stdout is a tty so extract.py can rewrite one progress line in place
-# (same as map-tiles-import).
+# Always allocate a tty so the progress bar can CR-rewrite one line. COLUMNS
+# is also exported so extract.py stays in-place even if isatty() is false.
 map-sprites:
 	@mkdir -p data/server/media/texturepacks
 	$(COMPOSE) --profile tools build map-tiles
-	@tty=; if [ -t 1 ]; then tty=-t; fi; \
-	cols=$${COLUMNS:-$$(tput cols 2>/dev/null || echo 80)}; \
-	$(COMPOSE) --profile tools run --rm --no-deps $$tty \
+	@cols=$${COLUMNS:-$$(tput cols 2>/dev/null || echo 80)}; \
+	$(COMPOSE) --profile tools run --rm --no-deps -t \
 		-e TERM -e NO_COLOR -e COLUMNS="$$cols" \
 		--entrypoint python map-tiles /tools/map_sprites/extract.py --out /sprites/sprites.sqlite
 
