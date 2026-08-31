@@ -5,13 +5,15 @@
  * /api/v1/map-sprites. JPEG URLs are never used here.
  */
 
-import { ISO_DZI, dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
+import { ISO_DZI, ISO_LAYER_HEIGHT, dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
 
 const CELL = 256
 const HALF = 64
 const THUMB_PAD = HALF * 24
-/** Live sprites only once a street is on screen. County/town stay on thumbs. */
-const NEAR_SCALE = 0.22
+/** Live sprites only closer than the default street zoom (0.35). */
+const NEAR_SCALE = 0.5
+const BUCKET = 16
+const BUCKETS = CELL / BUCKET
 /** More cells than this → one county overview blit instead of thousands of thumbs. */
 const OVERVIEW_CELLS = 28
 const OVERVIEW_W = 2048
@@ -51,6 +53,8 @@ interface PackedCell {
   ly: Uint8Array
   z: Int8Array
   sprite: Uint32Array
+  bucketStart: Uint32Array
+  bucketCount: Uint16Array
 }
 
 interface VisibleSprite {
@@ -101,6 +105,7 @@ interface RasterJob {
   mapping: IsoMapping
   width: number
   height: number
+  cover: { cx: number; cy: number }[]
   rows: VisibleSprite[]
   index: number
   centerX: number
@@ -119,6 +124,10 @@ function notify() {
       listener()
     }
   })
+}
+
+export function spriteMapMoving(): boolean {
+  return cameraMoving
 }
 
 export function setSpriteMapMoving(moving: boolean) {
@@ -369,13 +378,35 @@ function decodeOccupancy(buffer: ArrayBuffer): PackedCell | 'empty' {
   const ly = new Uint8Array(filled)
   const z = new Int8Array(filled)
   const sprite = new Uint32Array(filled)
+  const bucketCount = new Uint16Array(BUCKETS * BUCKETS)
   for (let i = 0; i < filled; i += 1) {
     lx[i] = rows[i].lx
     ly[i] = rows[i].ly
     z[i] = rows[i].z
     sprite[i] = rows[i].sprite
+    bucketCount[(lx[i] >> 4) * BUCKETS + (ly[i] >> 4)] += 1
   }
-  return { count: filled, lx, ly, z, sprite }
+  const bucketStart = new Uint32Array(BUCKETS * BUCKETS)
+  let cursor = 0
+  for (let b = 0; b < bucketStart.length; b += 1) {
+    bucketStart[b] = cursor
+    cursor += bucketCount[b]
+  }
+  const heads = bucketStart.slice()
+  const olx = new Uint8Array(filled)
+  const oly = new Uint8Array(filled)
+  const oz = new Int8Array(filled)
+  const osprite = new Uint32Array(filled)
+  for (let i = 0; i < filled; i += 1) {
+    const b = (lx[i] >> 4) * BUCKETS + (ly[i] >> 4)
+    const at = heads[b]
+    heads[b] = at + 1
+    olx[at] = lx[i]
+    oly[at] = ly[i]
+    oz[at] = z[i]
+    osprite[at] = sprite[i]
+  }
+  return { count: filled, lx: olx, ly: oly, z: oz, sprite: osprite, bucketStart, bucketCount }
 }
 
 function dropCell(key: string): boolean {
@@ -409,7 +440,9 @@ function requestCell(cx: number, cy: number) {
   }, true)
 }
 
-function cellBox(cx: number, cy: number) {
+const cellBoxCache = new Map<string, ReturnType<typeof computeCellBox>>()
+
+function computeCellBox(cx: number, cy: number) {
   const x0 = cx * CELL
   const y0 = cy * CELL
   const corners = [
@@ -443,6 +476,48 @@ function cellBox(cx: number, cy: number) {
     right: right + THUMB_PAD,
     bottom: bottom + THUMB_PAD,
   }
+}
+
+function cellBox(cx: number, cy: number) {
+  const key = `${cx}_${cy}`
+  const cached = cellBoxCache.get(key)
+  if (cached) {
+    return cached
+  }
+  const box = computeCellBox(cx, cy)
+  cellBoxCache.set(key, box)
+  return box
+}
+
+function drawClipped(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  destX: number,
+  destY: number,
+  destW: number,
+  destH: number,
+  viewW: number,
+  viewH: number,
+  srcW: number,
+  srcH: number,
+  srcX = 0,
+  srcY = 0,
+) {
+  const x0 = destX > 0 ? destX : 0
+  const y0 = destY > 0 ? destY : 0
+  const x1 = destX + destW < viewW ? destX + destW : viewW
+  const y1 = destY + destH < viewH ? destY + destH : viewH
+  if (x1 <= x0 || y1 <= y0 || destW <= 0 || destH <= 0 || srcW <= 0 || srcH <= 0) {
+    return
+  }
+  const sx = srcX + ((x0 - destX) / destW) * srcW
+  const sy = srcY + ((y0 - destY) / destH) * srcH
+  const sw = ((x1 - x0) / destW) * srcW
+  const sh = ((y1 - y0) / destH) * srcH
+  if (sw < 0.5 || sh < 0.5) {
+    return
+  }
+  ctx.drawImage(image, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0)
 }
 
 function visibleCells(mapping: IsoMapping, width: number, height: number, near: boolean) {
@@ -506,10 +581,18 @@ function drawThumb(
   const topLeft = dziToScreen(mapping, box.left, box.top)
   const destW = (box.right - box.left) * mapping.isoScale
   const destH = (box.bottom - box.top) * mapping.isoScale
-  if (topLeft.x > width || topLeft.y > height || topLeft.x + destW < 0 || topLeft.y + destH < 0) {
-    return
-  }
-  ctx.drawImage(image, topLeft.x, topLeft.y, destW, destH)
+  drawClipped(
+    ctx,
+    image,
+    topLeft.x,
+    topLeft.y,
+    destW,
+    destH,
+    width,
+    height,
+    image.naturalWidth,
+    image.naturalHeight,
+  )
 }
 
 function drawOverview(
@@ -527,7 +610,7 @@ function drawOverview(
   const destW = ISO_DZI.width * mapping.isoScale
   const destH = ISO_DZI.height * mapping.isoScale
   ctx.imageSmoothingEnabled = true
-  ctx.drawImage(overview, destX, destY, destW, destH)
+  drawClipped(ctx, overview, destX, destY, destW, destH, width, height, overview.width, overview.height)
   return stampedOverview.size > 0
 }
 
@@ -538,17 +621,8 @@ function drawThumbsOrOverview(
   height: number,
   cover: { cx: number; cy: number }[],
 ) {
-  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingEnabled = mapping.isoScale < 0.4
   if (cover.length >= OVERVIEW_CELLS) {
-    const focus = mapping.toWorld(width / 2, height / 2)
-    const fx = Math.floor(focus.x / CELL)
-    const fy = Math.floor(focus.y / CELL)
-    cover.sort(
-      (a, b) =>
-        Math.abs(a.cx - fx) +
-        Math.abs(a.cy - fy) -
-        (Math.abs(b.cx - fx) + Math.abs(b.cy - fy)),
-    )
     for (const { cx, cy } of cover) {
       requestThumb(cx, cy, false)
     }
@@ -576,19 +650,31 @@ function blitSprite(
     return
   }
   const scale = mapping.isoScale
+  if (occupant.z <= 0 && sprite.h <= 48 && scale < 0.75) {
+    return
+  }
   const destW = sprite.w * scale
   const destH = sprite.h * scale
-  if (destW < 0.75 || destH < 0.75) {
+  if (destW < 1.2 || destH < 1.2) {
     return
   }
   const top = mapping.toScreen(occupant.wx, occupant.wy)
   const dx = top.x + sprite.ox * scale
-  const dy = top.y + HALF * scale + sprite.oy * scale
-  const margin = (meta?.max_reach ?? 512) * scale + 8
-  if (dx > width + margin || dy > height + margin || dx + destW < -margin || dy + destH < -margin) {
-    return
-  }
-  ctx.drawImage(page, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, destW, destH)
+  const dy = top.y + HALF * scale + sprite.oy * scale - occupant.z * ISO_LAYER_HEIGHT * scale
+  drawClipped(
+    ctx,
+    page,
+    dx,
+    dy,
+    destW,
+    destH,
+    width,
+    height,
+    sprite.w,
+    sprite.h,
+    sprite.x,
+    sprite.y,
+  )
 }
 
 function collectVisible(
@@ -607,23 +693,41 @@ function collectVisible(
     }
     const originX = cx * CELL
     const originY = cy * CELL
-    const { count, lx, ly, z, sprite } = occupants
-    for (let i = 0; i < count; i += 1) {
-      const wx = originX + lx[i]
-      const wy = originY + ly[i]
-      if (wx < minX || wx > maxX || wy < minY || wy > maxY) {
-        continue
+    const { lx, ly, z, sprite, bucketStart, bucketCount } = occupants
+    const lx0 = Math.max(0, Math.floor(minX - originX))
+    const lx1 = Math.min(CELL - 1, Math.ceil(maxX - originX))
+    const ly0 = Math.max(0, Math.floor(minY - originY))
+    const ly1 = Math.min(CELL - 1, Math.ceil(maxY - originY))
+    if (lx1 < lx0 || ly1 < ly0) {
+      continue
+    }
+    const bx0 = lx0 >> 4
+    const bx1 = lx1 >> 4
+    const by0 = ly0 >> 4
+    const by1 = ly1 >> 4
+    for (let bx = bx0; bx <= bx1; bx += 1) {
+      for (let by = by0; by <= by1; by += 1) {
+        const bucket = bx * BUCKETS + by
+        const start = bucketStart[bucket]
+        const end = start + bucketCount[bucket]
+        for (let i = start; i < end; i += 1) {
+          const wx = originX + lx[i]
+          const wy = originY + ly[i]
+          if (wx < minX || wx > maxX || wy < minY || wy > maxY) {
+            continue
+          }
+          const row = visiblePool[visibleCount]
+          if (row) {
+            row.wx = wx
+            row.wy = wy
+            row.z = z[i]
+            row.sprite = sprite[i]
+          } else {
+            visiblePool.push({ wx, wy, z: z[i], sprite: sprite[i] })
+          }
+          visibleCount += 1
+        }
       }
-      const row = visiblePool[visibleCount]
-      if (row) {
-        row.wx = wx
-        row.wy = wy
-        row.z = z[i]
-        row.sprite = sprite[i]
-      } else {
-        visiblePool.push({ wx, wy, z: z[i], sprite: sprite[i] })
-      }
-      visibleCount += 1
     }
   }
   return visibleCount
@@ -639,6 +743,7 @@ function pumpRaster() {
   if (job.index === 0) {
     job.ctx.fillStyle = '#141611'
     job.ctx.fillRect(0, 0, job.width, job.height)
+    drawThumbsOrOverview(job.ctx, job.mapping, job.width, job.height, job.cover)
     job.ctx.imageSmoothingEnabled = job.scale < 0.85
   }
   while (job.index < job.rows.length && performance.now() - started < 6) {
@@ -701,7 +806,7 @@ function startRaster(
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(width))
   canvas.height = Math.max(1, Math.round(height))
-  const ctx = canvas.getContext('2d', { alpha: false })
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true })
   if (!ctx) {
     return
   }
@@ -711,6 +816,7 @@ function startRaster(
     mapping,
     width,
     height,
+    cover,
     rows,
     index: 0,
     centerX: mapping.center.x,

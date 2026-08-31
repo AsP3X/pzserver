@@ -10,6 +10,8 @@ SQR = 128
 HALF = SQR // 2
 QUARTER = SQR // 4
 CELL = 256
+# pzmap2dzi IsoDZI.LAYER_HEIGHT — DZI pixels to raise each lotpack z.
+LAYER_HEIGHT = 192
 
 
 def world_to_dzi(x: float, y: float) -> tuple[float, float]:
@@ -22,7 +24,10 @@ def dzi_to_world(px: float, py: float) -> tuple[float, float]:
     return (a + b) / 2, (b - a) / 2
 
 
-def square_anchor(wx: int, wy: int) -> tuple[int, int]:
-    """DZI pixel of the square's bottom-centre — Texture.ox/oy origin."""
+def square_anchor(wx: int, wy: int, z: int = 0) -> tuple[int, int]:
+    """DZI pixel of the square's bottom-centre — Texture.ox/oy origin.
+
+    `z` lifts the square: without it, storeys and roofs sit on the ground.
+    """
     top_x, top_y = world_to_dzi(wx, wy)
-    return int(top_x), int(top_y) + HALF
+    return int(top_x), int(top_y) + HALF - int(z) * LAYER_HEIGHT

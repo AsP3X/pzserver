@@ -21,6 +21,7 @@ import {
   loadSpriteMap,
   onSpriteMapChange,
   setSpriteMapMoving,
+  spriteMapMoving,
   spriteMapReady,
 } from '@/lib/iso-sprites'
 import type { TileMeta, UpdatingJob } from '@/lib/iso-tiles'
@@ -443,7 +444,7 @@ export function WorldmapView({
         element.style.height = `${height}px`
       }
 
-      const ctx = element.getContext('2d', { alpha: false })
+      const ctx = element.getContext('2d', { alpha: false, desynchronized: true })
       if (!ctx) {
         return
       }
@@ -487,12 +488,28 @@ export function WorldmapView({
         } else {
           drawIsoTiles(ctx, mapping, width, height)
         }
-        drawMapOverlays(ctx, overlay, (x, y) => mapping.toScreen(x, y), 2)
+        const moving = spriteMapMoving()
+        drawMapOverlays(
+          ctx,
+          moving
+            ? { ...overlay, markers: [], zones: [], updating: [], destination: null }
+            : overlay,
+          (x, y) => mapping.toScreen(x, y),
+          2,
+        )
         return
       }
 
       if (map) {
-        drawWorldmap(ctx, map, latest, overlay)
+        const moving = spriteMapMoving()
+        drawWorldmap(
+          ctx,
+          map,
+          latest,
+          moving
+            ? { ...overlay, markers: [], zones: [], updating: [], destination: null }
+            : overlay,
+        )
         return
       }
 

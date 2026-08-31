@@ -29,6 +29,9 @@ export const ISO_DZI = {
   minLevel: 8,
 } as const
 
+/** DZI pixels to raise each lotpack z. pzmap2dzi IsoDZI.LAYER_HEIGHT. */
+export const ISO_LAYER_HEIGHT = 192
+
 /**
  * Deepest level we actually ask for. 22 is native 1:1 but a full county of
  * it is ~200 GB. 21 is one step past the complete pack (0–20): sharp enough

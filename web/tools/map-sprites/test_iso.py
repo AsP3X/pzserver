@@ -1,4 +1,4 @@
-from iso import dzi_to_world, square_anchor, world_to_dzi
+from iso import LAYER_HEIGHT, dzi_to_world, square_anchor, world_to_dzi
 
 
 def test_origin_matches_iso_dzi():
@@ -26,3 +26,11 @@ def test_square_anchor_is_bottom_centre():
     tx, ty = world_to_dzi(0, 0)
     assert ax == int(tx)
     assert ay == int(ty) + 64
+
+
+def test_square_anchor_lifts_each_storey():
+    _ax0, ay0 = square_anchor(10, 20, 0)
+    _ax1, ay1 = square_anchor(10, 20, 1)
+    _ax2, ay2 = square_anchor(10, 20, 2)
+    assert ay0 - ay1 == LAYER_HEIGHT
+    assert ay0 - ay2 == LAYER_HEIGHT * 2

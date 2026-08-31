@@ -10,6 +10,15 @@ def test_thumb_scale_is_the_same_in_every_cell():
     assert abs(thumb_scale() - 512 / (right0 - left0)) < 1e-12
 
 
+def test_upper_storey_is_drawn_above_ground():
+    image = Image.new("RGBA", (8, 8), (255, 0, 0, 255))
+    ground = render_thumb([(4, 5, 0, image, 0, 0)], 0, 0)
+    storey = render_thumb([(4, 5, 1, image, 0, 0)], 0, 0)
+    assert ground is not None
+    assert storey is not None
+    assert ground != storey
+
+
 def test_pre_scaled_stamp_matches_inline_resize():
     image = Image.new("RGBA", (64, 128), (10, 20, 30, 255))
     records = [(4, 5, 0, image, -3, -10)]

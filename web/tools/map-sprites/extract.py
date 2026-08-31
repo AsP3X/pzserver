@@ -103,8 +103,14 @@ def _ignore_signals() -> None:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
+# Bump when occupancy/thumb geometry changes so an old work file is not resumed.
+BAKE_VERSION = "z192"
+
+
 def fingerprint(lotpacks: list[tuple[str, str, str]], textures: Path, game_version: str) -> str:
     digest = hashlib.sha256()
+    digest.update(BAKE_VERSION.encode())
+    digest.update(b"\n")
     digest.update(game_version.encode())
     digest.update(b"\n")
     for root, map_name, filename in lotpacks:

@@ -6,7 +6,7 @@ import io
 
 from PIL import Image
 
-from iso import CELL, HALF, square_anchor, world_to_dzi
+from iso import CELL, HALF, LAYER_HEIGHT, square_anchor, world_to_dzi
 
 THUMB_W = 512
 
@@ -21,8 +21,8 @@ def cell_dzi_box(cx: int, cy: int) -> tuple[int, int, int, int]:
     ]
     xs = [c[0] for c in corners]
     ys = [c[1] for c in corners]
-    # Sprites extend above the diamond; pad a storey of jumbo trees.
-    pad = HALF * 24
+    # Sprites extend above the diamond; jumbo trees plus several storeys.
+    pad = HALF * 16 + LAYER_HEIGHT * 8
     return (
         int(min(xs) - pad),
         int(min(ys) - pad),
@@ -80,8 +80,8 @@ def render_thumb(
     canvas = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
     origin_x = cx * CELL
     origin_y = cy * CELL
-    for lx, ly, _z, image, ox, oy in records:
-        ax, ay = square_anchor(origin_x + lx, origin_y + ly)
+    for lx, ly, z, image, ox, oy in records:
+        ax, ay = square_anchor(origin_x + lx, origin_y + ly, z)
         stamp = image if pre_scaled else scale_stamp(image, scale)
         dx = round((ax + ox - left) * scale)
         dy = round((ay + oy - top) * scale)
