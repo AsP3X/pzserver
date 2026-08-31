@@ -11,6 +11,7 @@ pub mod economy;
 pub mod friends;
 pub mod i18n;
 pub mod items;
+pub mod map_sprites;
 pub mod map_tile_jobs;
 pub mod map_tile_world;
 pub mod map_tiles;

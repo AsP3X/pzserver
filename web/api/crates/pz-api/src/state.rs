@@ -31,6 +31,7 @@ pub struct AppState {
     pub backup_job: JobLock,
     /// Packed isometric basemap. Absent until `make map-tiles` has run.
     pub map_tiles: crate::services::map_tiles::MapTiles,
+    pub map_sprites: crate::services::map_sprites::MapSprites,
     /// Why the archive directory is unusable, if it is. `None` means the
     /// start-up probe wrote a file there and removed it again. `/api/health`
     /// reads this, so a bad bind-mount mode surfaces in `docker ps` instead of
@@ -86,6 +87,7 @@ impl AppState {
             .map(Arc::from);
 
         let map_tiles = crate::services::map_tiles::MapTiles::open(&config.map_tiles_path);
+        let map_sprites = crate::services::map_sprites::MapSprites::open(&config.map_sprites_path);
 
         Self {
             db,
@@ -97,6 +99,7 @@ impl AppState {
             item_catalog,
             backup_job: backups::new_job_lock(),
             map_tiles,
+            map_sprites,
             backups_error,
             lua_bridge_error,
             workshop_update: Arc::new(tokio::sync::Mutex::new(())),

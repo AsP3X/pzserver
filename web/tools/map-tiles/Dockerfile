@@ -29,12 +29,11 @@ RUN git clone --depth 1 --branch "${PZMAP2DZI_REF}" \
 
 WORKDIR /opt/pzmap2dzi
 
-# Overwrites the shipped config, deliberately. parse_map() resolves map_conf and
-# map_conf_default relative to the config file's own directory, so conf.yaml has
-# to sit beside vanilla.txt, default_b42.txt and mod/ — putting it anywhere else
-# makes the render fail looking for map descriptions that are not there.
-COPY conf.yaml /opt/pzmap2dzi/conf/conf.yaml
-COPY verify.py pack.py unpack.py cells.py region.py levels.py set_render_range.py set_omit_levels.py align_map_info_skip.py recompress.py check_cache.py audit.py chunks.py set_save_game.py snapshot_save.py composite.py progress.py run.sh patch_scheduler.py chunk_sprites.py patch_save_render.py rcon_save.py save_skip.py patch_base_skip.py wait_save.py ensure_map_info.py open_squares.py fill_unpainted.py rebuild_pyramid.py heal_black.py patch_unit_range.py patch_render_margin.py patch_merge_filter.py lotpack_leaves.py tiledef_map.py pack_size.py /tools/
+# Build context is web/tools (parent of this Dockerfile) so the sprite baker
+# can ship in the same image without a second Python stack.
+COPY map-tiles/conf.yaml /opt/pzmap2dzi/conf/conf.yaml
+COPY map-tiles/verify.py map-tiles/pack.py map-tiles/unpack.py map-tiles/cells.py map-tiles/region.py map-tiles/levels.py map-tiles/set_render_range.py map-tiles/set_omit_levels.py map-tiles/align_map_info_skip.py map-tiles/recompress.py map-tiles/check_cache.py map-tiles/audit.py map-tiles/chunks.py map-tiles/set_save_game.py map-tiles/snapshot_save.py map-tiles/composite.py map-tiles/progress.py map-tiles/run.sh map-tiles/patch_scheduler.py map-tiles/chunk_sprites.py map-tiles/patch_save_render.py map-tiles/rcon_save.py map-tiles/save_skip.py map-tiles/patch_base_skip.py map-tiles/wait_save.py map-tiles/ensure_map_info.py map-tiles/open_squares.py map-tiles/fill_unpainted.py map-tiles/rebuild_pyramid.py map-tiles/heal_black.py map-tiles/patch_unit_range.py map-tiles/patch_render_margin.py map-tiles/patch_merge_filter.py map-tiles/lotpack_leaves.py map-tiles/tiledef_map.py map-tiles/pack_size.py /tools/
+COPY map-sprites /tools/map_sprites
 # region.py and set_render_range.py import cells.py by name.
 ENV PYTHONPATH=/tools:/opt/pzmap2dzi:/opt
 # omit_levels + cache eviction paints black holes; pin children until merged.

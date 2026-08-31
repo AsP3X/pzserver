@@ -405,8 +405,14 @@ fn is_website_map(path: &Path) -> bool {
             || name == "tiles.sqlite-wal"
             || name == "tiles.sqlite-shm"
             || name == "tiles.sqlite-journal"
+            || name == "sprites.sqlite"
+            || name == "sprites.sqlite-wal"
+            || name == "sprites.sqlite-shm"
     }) || path.components().any(|component| {
-        component.as_os_str() == "map-tiles" || component.as_os_str() == "pz-map-tiles-sqlite"
+        component.as_os_str() == "map-tiles"
+            || component.as_os_str() == "pz-map-tiles-sqlite"
+            || component.as_os_str() == "map-sprites"
+            || component.as_os_str() == "pz-map-sprites"
     })
 }
 

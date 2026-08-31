@@ -16,6 +16,12 @@ import {
   refreshTileMeta,
   worldToDzi,
 } from '@/lib/iso-tiles'
+import {
+  drawIsoSprites,
+  loadSpriteMap,
+  onSpriteMapChange,
+  spriteMapReady,
+} from '@/lib/iso-sprites'
 import type { TileMeta, UpdatingJob } from '@/lib/iso-tiles'
 import {
   clampView,
@@ -40,7 +46,11 @@ import type { TranslationKey } from '@/i18n/locales'
 
 export type { MapPin, MapRect, MapZone }
 
-export type MapBasemap = 'vector' | 'iso'
+export type MapBasemap = 'vector' | 'iso' | 'iso-sprite'
+
+function isoCamera(mode: MapBasemap): boolean {
+  return mode === 'iso' || mode === 'iso-sprite'
+}
 
 export interface MapFocus {
   x: number
@@ -124,7 +134,11 @@ function readMode(): MapBasemap {
   if (!ISO_BASEMAP) {
     return 'vector'
   }
-  return window.localStorage.getItem(MODE_KEY) === 'iso' ? 'iso' : 'vector'
+  const stored = window.localStorage.getItem(MODE_KEY)
+  if (stored === 'iso' || stored === 'iso-sprite' || stored === 'vector') {
+    return stored
+  }
+  return 'vector'
 }
 
 function boundsMap(bounds: Worldmap['bounds']): Worldmap {
@@ -229,6 +243,10 @@ export function WorldmapView({
   }, [])
 
   useEffect(() => isoTiles.subscribe(() => setIsoTick((tick) => tick + 1)), [])
+  useEffect(() => onSpriteMapChange(() => setIsoTick((tick) => tick + 1)), [])
+  useEffect(() => {
+    void loadSpriteMap()
+  }, [])
 
   /**
    * Pyramid bounds, plus any cells a tile job is painting. Poll so a
@@ -296,7 +314,7 @@ export function WorldmapView({
   )
 
   const mappingAt = useCallback((current: View, width: number, height: number): WorldMapping => {
-    if (modeRef.current === 'iso') {
+    if (isoCamera(modeRef.current)) {
       return isoMapping(current.x, current.y, isoScaleRef.current, width, height)
     }
     return vectorMapping(current, width, height)
@@ -308,7 +326,7 @@ export function WorldmapView({
   const centreOn = useCallback(
     (x: number, y: number) => {
       centred.current = true
-      if (modeRef.current === 'iso') {
+      if (isoCamera(modeRef.current)) {
         isoScaleRef.current = DEFAULT_ISO_SCALE
         setBoth({ x, y, scale: DEFAULT_ISO_SCALE })
         return
@@ -332,7 +350,7 @@ export function WorldmapView({
 
     const [minX, minY, maxX, maxY] = bounds
     centred.current = false
-    if (modeRef.current === 'iso') {
+    if (isoCamera(modeRef.current)) {
       isoScaleRef.current = fitIsoScale(box.width, box.height)
       setBoth({ x: (minX + maxX) / 2, y: (minY + maxY) / 2, scale: isoScaleRef.current })
       return
@@ -418,13 +436,17 @@ export function WorldmapView({
         })),
       }
 
-      if (modeRef.current === 'iso') {
+      if (isoCamera(modeRef.current)) {
         const floor = minIsoScaleForViewport(rect.width, rect.height)
         if (isoScaleRef.current < floor) {
           isoScaleRef.current = floor
         }
         const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, rect.width, rect.height)
-        drawIsoTiles(ctx, mapping, rect.width, rect.height)
+        if (modeRef.current === 'iso-sprite') {
+          drawIsoSprites(ctx, mapping, rect.width, rect.height)
+        } else {
+          drawIsoTiles(ctx, mapping, rect.width, rect.height)
+        }
         drawMapOverlays(ctx, overlay, (x, y) => mapping.toScreen(x, y), 2)
         return
       }
@@ -472,7 +494,7 @@ export function WorldmapView({
       const anchorX = clientX === undefined ? box.width / 2 : clientX - box.left
       const anchorY = clientY === undefined ? box.height / 2 : clientY - box.top
 
-      if (modeRef.current === 'iso') {
+      if (isoCamera(modeRef.current)) {
         const held = isoMapping(
           current.x,
           current.y,
@@ -604,7 +626,7 @@ export function WorldmapView({
     setMode(next)
     const current = viewRef.current
     const box = frame.current?.getBoundingClientRect()
-    if (current && next === 'iso') {
+    if (current && isoCamera(next)) {
       // Street-level only when we are already sitting on a survivor.
       // Otherwise keep the county in frame — 0.35 at the world centre puts
       // every pin off-screen.
@@ -622,7 +644,7 @@ export function WorldmapView({
 
   const waitingForVector = mode === 'vector' && map === null
   const zoomLevel = view
-    ? mode === 'iso'
+    ? isoCamera(mode)
       ? levelForScale(view.scale)
       : Math.round(zoomOf(view.scale))
     : null
@@ -733,7 +755,7 @@ export function WorldmapView({
           const dx = event.clientX - held.lastX
           const dy = event.clientY - held.lastY
 
-          if (modeRef.current === 'iso') {
+          if (isoCamera(modeRef.current)) {
             const center = worldToDzi(current.x, current.y)
             const next = dziToWorld(
               center.x - dx / isoScaleRef.current,
@@ -848,6 +870,12 @@ export function WorldmapView({
             onClick={() => selectMode('iso')}
           />
           <ModeButton
+            active={mode === 'iso-sprite'}
+            disabled={!spriteMapReady()}
+            label={t('map.mode_iso_sprite')}
+            onClick={() => selectMode('iso-sprite')}
+          />
+          <ModeButton
             active={mode === 'vector'}
             label={t('map.mode_vector')}
             onClick={() => selectMode('vector')}
@@ -894,7 +922,11 @@ export function WorldmapView({
           <p className="text-hazard">{t('map.updating')}</p>
         ) : null}
         <p className="text-dust">
-          {mode === 'iso' ? t('map.attribution_iso') : t('map.attribution')}
+          {mode === 'iso'
+            ? t('map.attribution_iso')
+            : mode === 'iso-sprite'
+              ? t('map.attribution_iso_sprite')
+              : t('map.attribution')}
         </p>
       </div>
     </div>

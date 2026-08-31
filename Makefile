@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-heal map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-heal map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import map-sprites restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -190,6 +190,12 @@ map-tiles-detail:
 map-tiles-recompress:
 	$(COMPOSE) --profile tools build map-tiles
 	$(COMPOSE) --profile tools run --rm --no-deps --entrypoint python map-tiles /tools/recompress.py /pack/tiles.sqlite
+
+# Sprite isometric catalogue (parallel to the JPEG pack). Needs texture packs.
+map-sprites:
+	@mkdir -p data/server/media/texturepacks
+	$(COMPOSE) --profile tools build map-tiles
+	$(COMPOSE) --profile tools run --rm --no-deps --entrypoint python map-tiles /tools/map_sprites/extract.py --out /sprites/sprites.sqlite
 
 # Copy an existing host pack into the named volume. Run with web-api down, or
 # against an empty volume — overwriting a live open sqlite is the Windows
@@ -527,6 +533,7 @@ help:
 	@echo "    map-tiles-detail CELLS=\"x,y,w,h\" - Paint z21 for those cells (minutes)"
 	@echo "    map-tiles-recompress - Re-encode packed JPEGs at quality 70"
 	@echo "    map-tiles-import - Copy data/map-tiles/tiles.sqlite into the named volume (prints progress)"
+	@echo "    map-sprites    - Bake sprite isometric catalogue (parallel to the JPEG pack)"
 	@echo "    logs SVC=...   - Follow logs for the named services (all if unset)"
 	@echo "    restart SVC=.. - Restart the named services (all if unset)"
 	@echo ""

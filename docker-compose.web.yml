@@ -78,7 +78,7 @@ services:
       - sh
       - -c
       - |
-        for dir in /backups /lua-bridge /map-tiles; do
+        for dir in /backups /lua-bridge /map-tiles /map-sprites; do
           chmod 0777 "$$dir" 2>/dev/null || true
           mode=$$(stat -c '%a' "$$dir" 2>/dev/null || echo '?')
           case "$$mode" in
@@ -97,6 +97,7 @@ services:
       - ${PZ_DATA_HOST:-./data/zomboid}/Lua:/lua-bridge
       # Named volume: WAL readers (uid 10001) write -shm next to tiles.sqlite.
       - pz-map-tiles-sqlite:/map-tiles
+      - pz-map-sprites:/map-sprites
     # Nothing to talk to; staying off both networks keeps it out of the way.
     network_mode: none
 
@@ -143,6 +144,7 @@ services:
       # readers write a slot in the -shm file. The API still opens the
       # database read-only; the directory must allow shm.
       - pz-map-tiles-sqlite:/map-tiles
+      - pz-map-sprites:/map-sprites
     tmpfs:
       - /tmp
     environment:
@@ -237,8 +239,8 @@ services:
   map-tiles:
     image: ${PZ_MAP_TILES_IMAGE:-pzserver-map-tiles:local}
     build:
-      context: ./web/tools/map-tiles
-      dockerfile: Dockerfile
+      context: ./web/tools
+      dockerfile: map-tiles/Dockerfile
     pull_policy: build
     container_name: pz-map-tiles
     profiles: ["tools"]
@@ -283,6 +285,8 @@ services:
       # Live pack. Same volume web-api reads, so a region job updates the
       # file the site is serving.
       - pz-map-tiles-sqlite:/pack
+      # Sprite catalogue. Separate from the JPEG pack; `make map-sprites` writes it.
+      - pz-map-sprites:/sprites
       # Dedicated-server worlds. Region jobs snapshot dirty chunks from here
       # and paint them as a save overlay. Read-only: never write the live save.
       - ${PZ_DATA_HOST:-./data/zomboid}/Saves:/saves:ro
@@ -306,3 +310,5 @@ services:
 volumes:
   pz-map-tiles-sqlite:
     name: pz-map-tiles-sqlite
+  pz-map-sprites:
+    name: pz-map-sprites

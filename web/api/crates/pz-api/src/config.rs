@@ -43,6 +43,8 @@ pub struct Config {
     /// `pz-map-tiles-sqlite` volume — not the host bind. Render scratch still
     /// uses `map_tiles_host`.
     pub map_tiles_path: PathBuf,
+    /// Sprite isometric catalogue (`make map-sprites`). Parallel to the JPEG pack.
+    pub map_sprites_path: PathBuf,
     /// Image used to spawn a one-shot `pz-map-tiles` renderer.
     pub map_tiles_image: String,
     /// Host paths for the renderer binds (Docker API `HostConfig.Binds`).
@@ -153,6 +155,10 @@ impl Config {
             lua_bridge_path,
             backup_path: PathBuf::from(string("BACKUP_PATH", "/backups")),
             map_tiles_path: PathBuf::from(string("MAP_TILES_PATH", "/map-tiles/tiles.sqlite")),
+            map_sprites_path: PathBuf::from(string(
+                "MAP_SPRITES_PATH",
+                "/map-sprites/sprites.sqlite",
+            )),
             map_tiles_image: string("MAP_TILES_IMAGE", "pzserver-map-tiles:local"),
             pz_server_host: string("PZ_SERVER_HOST", "./data/server"),
             pz_texturepacks_host: string(
