@@ -1010,23 +1010,42 @@ function FlowBoard({
           {quest.description ? (
             <p className="border-b border-fence px-5 py-3 text-sm text-smoke">{quest.description}</p>
           ) : null}
-          <ul className="divide-y divide-fence">
-            {quest.nodes
-              .filter((node) =>
-                ['task', 'objective', 'reward', 'area', 'find', 'collect', 'kills'].includes(node.kind),
-              )
-              .map((node) => (
-                <FlowNodeRow
-                  key={node.id}
-                  node={node}
-                  busy={busy}
-                  onClaim={() => onClaim(quest.id, node.id)}
-                />
-              ))}
-          </ul>
+          <FlowSteps quest={quest} busy={busy} onClaim={onClaim} />
         </Panel>
       ))}
     </div>
+  )
+}
+
+function FlowSteps({
+  quest,
+  busy,
+  onClaim,
+}: {
+  quest: QuestProgress
+  busy: boolean
+  onClaim: (questId: string, nodeId: string) => void
+}) {
+  const { t } = useTranslation()
+  const steps = quest.nodes.filter((node) =>
+    ['task', 'objective', 'reward', 'area', 'find', 'collect', 'kills'].includes(node.kind),
+  )
+
+  if (steps.length === 0) {
+    return <p className="px-5 py-3 text-sm text-dust">{t('economy.flow_no_steps')}</p>
+  }
+
+  return (
+    <ul className="divide-y divide-fence">
+      {steps.map((node) => (
+        <FlowNodeRow
+          key={node.id}
+          node={node}
+          busy={busy}
+          onClaim={() => onClaim(quest.id, node.id)}
+        />
+      ))}
+    </ul>
   )
 }
 

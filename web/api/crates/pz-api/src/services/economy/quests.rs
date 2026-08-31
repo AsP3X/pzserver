@@ -36,7 +36,7 @@ pub struct Graph {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", alias = "kind")]
     pub kind: String,
     pub x: f64,
     pub y: f64,
@@ -265,12 +265,35 @@ pub async fn for_player(
 
     let mut out = Vec::new();
     for row in rows {
-        let quest = Quest::try_from(row)?;
-        if !visible_to(&state.db, &quest, user_id, username).await? {
-            continue;
+        let quest = match Quest::try_from(row) {
+            Ok(quest) => quest,
+            Err(error) => {
+                tracing::warn!(%error, "skipping a live flow the player view cannot read");
+                continue;
+            }
+        };
+        match visible_to(&state.db, &quest, user_id, username).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    quest_id = %quest.id,
+                    "could not check who a live flow is for"
+                );
+                continue;
+            }
         }
-        if let Some(view) = progress(state, user_id, username, today, &quest).await? {
-            out.push(view);
+        match progress(state, user_id, username, today, &quest).await {
+            Ok(Some(view)) => out.push(view),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    quest_id = %quest.id,
+                    "could not build progress for a live flow"
+                );
+            }
         }
     }
     Ok(out)
@@ -1157,5 +1180,23 @@ impl TryFrom<QuestRow> for Quest {
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GraphNode;
+
+    #[test]
+    fn graph_node_reads_type_or_kind() {
+        let from_type: GraphNode =
+            serde_json::from_str(r#"{"id":"a","type":"start","x":1,"y":2}"#).unwrap();
+        assert_eq!(from_type.kind, "start");
+        assert_eq!(from_type.x, 1.0);
+
+        let from_kind: GraphNode =
+            serde_json::from_str(r#"{"id":"b","kind":"stage","x":3,"y":4}"#).unwrap();
+        assert_eq!(from_kind.kind, "stage");
+        assert_eq!(from_kind.y, 4.0);
     }
 }

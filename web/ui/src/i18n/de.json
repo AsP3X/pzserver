@@ -1443,6 +1443,8 @@
   "economy.flow_duplicate": "Duplizieren",
   "economy.flow_copy_of": ":name (Kopie)",
   "economy.flow_live": "Live",
+  "economy.flow_live_needs_graph": "Reparier den Ablauf, bevor du ihn live schaltest.",
+  "economy.flow_no_steps": "Dieser Ablauf hat noch keine Aufgaben.",
   "economy.flow_draft": "Entwurf",
   "economy.flow_node_count": ":count Knoten",
   "economy.flow_gate_count": ":count Hürden",

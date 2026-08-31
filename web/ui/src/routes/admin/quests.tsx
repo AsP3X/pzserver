@@ -62,6 +62,7 @@ export function AdminQuestsPage() {
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['admin', 'quests'] })
+    await queryClient.invalidateQueries({ queryKey: ['me', 'rewards'] })
   }
 
   function fail(cause: unknown) {

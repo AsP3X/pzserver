@@ -204,25 +204,43 @@ export function AdminQuestEditorPage() {
     fitTo(next)
   }, [fitTo, quest.data, reset])
 
-  const save = useMutation({
-    mutationFn: () =>
-      api.adminUpdateQuest(questId, {
+  function draftPatch(nextActive: boolean) {
+    return {
+      title,
+      description: description || null,
+      audience,
+      audience_usernames: usernames
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean),
+      audience_group_id: audience === 'group' && groupId ? groupId : null,
+      active: nextActive,
+      graph: value,
+    }
+  }
+
+  async function remember(questActive: boolean) {
+    setNotice(t('economy.saved'))
+    setError(null)
+    setSaved(
+      JSON.stringify({
         title,
-        description: description || null,
+        description,
         audience,
-        audience_usernames: usernames
-          .split(',')
-          .map((name) => name.trim())
-          .filter(Boolean),
-        audience_group_id: audience === 'group' && groupId ? groupId : null,
-        active,
+        usernames,
+        groupId,
+        active: questActive,
         graph: value,
       }),
+    )
+    await queryClient.invalidateQueries({ queryKey: ['admin', 'quests'] })
+    await queryClient.invalidateQueries({ queryKey: ['me', 'rewards'] })
+  }
+
+  const save = useMutation({
+    mutationFn: () => api.adminUpdateQuest(questId, draftPatch(active)),
     onSuccess: async () => {
-      setNotice(t('economy.saved'))
-      setError(null)
-      setSaved(draft)
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'quests'] })
+      await remember(active)
     },
     onError: (cause) => {
       setNotice(null)
@@ -230,7 +248,47 @@ export function AdminQuestEditorPage() {
     },
   })
 
-  const savable = errors.length === 0 && title.trim().length > 0 && !save.isPending
+  /**
+   * Live publishes the board that is on screen. Sending only `{ active }` left
+   * unsaved tasks in the editor, so the player wallet had nothing to show on
+   * either tab.
+   */
+  const publish = useMutation({
+    mutationFn: (next: boolean) =>
+      next
+        ? api.adminUpdateQuest(questId, draftPatch(true))
+        : api.adminUpdateQuest(questId, { active: false }),
+    onMutate: (next) => {
+      setActive(next)
+    },
+    onSuccess: async (quest, next) => {
+      setActive(quest.active)
+      if (next) {
+        await remember(quest.active)
+        return
+      }
+      setError(null)
+      setNotice(t('economy.saved'))
+      setSaved((current) => {
+        if (current.length === 0) {
+          return current
+        }
+        const snapshot = JSON.parse(current) as { active: boolean }
+        snapshot.active = quest.active
+        return JSON.stringify(snapshot)
+      })
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'quests'] })
+      await queryClient.invalidateQueries({ queryKey: ['me', 'rewards'] })
+    },
+    onError: (cause, next) => {
+      setActive(!next)
+      setNotice(null)
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
+  const savable =
+    errors.length === 0 && title.trim().length > 0 && !save.isPending && !publish.isPending
   const submit = useCallback(() => {
     if (savable) {
       save.mutate()
@@ -433,9 +491,18 @@ export function AdminQuestEditorPage() {
             type="button"
             role="switch"
             aria-checked={active}
-            onClick={() => setActive((state) => !state)}
+            disabled={save.isPending || publish.isPending}
+            onClick={() => {
+              const next = !active
+              if (next && (errors.length > 0 || title.trim().length === 0)) {
+                setNotice(null)
+                setError(t('economy.flow_live_needs_graph'))
+                return
+              }
+              publish.mutate(next)
+            }}
             className={cn(
-              'flex items-center gap-2 border px-3 py-2 font-mono text-[0.625rem] tracking-widest uppercase',
+              'flex items-center gap-2 border px-3 py-2 font-mono text-[0.625rem] tracking-widest uppercase disabled:opacity-40',
               active ? 'border-moss bg-moss-soft text-moss' : 'border-fence text-dust hover:text-bone',
             )}
           >

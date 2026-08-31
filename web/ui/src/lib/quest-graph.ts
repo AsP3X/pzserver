@@ -140,8 +140,11 @@ export function flatKey(item: FlatObjective): string {
  * Objectives used to be their own table and their own page. They are flows now,
  * but a flow holding a single step with nothing gated behind it is still just a
  * daily task, and drawing it as a one-node graph would be a worse way to show
- * the same thing. So anything that degenerate is handed back flat, and only
- * genuinely staged flows keep the board.
+ * the same thing.
+ *
+ * A new flow starts with a Stage node. Counting only gates used to flatten
+ * "Stage 1 + one task" onto the objectives tab, so going live looked like the
+ * flow had vanished. Stages or a payout keep it on the board.
  */
 export function splitFlows(quests: QuestProgress[]): {
   flat: FlatObjective[]
@@ -153,9 +156,11 @@ export function splitFlows(quests: QuestProgress[]): {
   for (const quest of quests) {
     const steps = quest.nodes.filter((node) => isCondition(node.kind))
     const rewards = quest.nodes.filter((node) => node.kind === 'reward')
+    const stages = quest.nodes.filter((node) => node.kind === 'stage')
+    const step = steps[0]
 
-    if (steps.length === 1 && rewards.length === 0) {
-      flat.push({ ...steps[0], questId: quest.id, questTitle: quest.title })
+    if (steps.length === 1 && rewards.length === 0 && stages.length === 0 && step) {
+      flat.push({ ...step, questId: quest.id, questTitle: quest.title })
     } else {
       staged.push(quest)
     }

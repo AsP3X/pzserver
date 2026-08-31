@@ -1443,6 +1443,8 @@
   "economy.flow_duplicate": "Duplicate",
   "economy.flow_copy_of": ":name (copy)",
   "economy.flow_live": "Live",
+  "economy.flow_live_needs_graph": "Fix the graph before going live.",
+  "economy.flow_no_steps": "This flow has no tasks yet.",
   "economy.flow_draft": "Draft",
   "economy.flow_node_count": ":count nodes",
   "economy.flow_gate_count": ":count gates",
