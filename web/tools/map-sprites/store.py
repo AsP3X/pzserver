@@ -41,6 +41,10 @@ CREATE TABLE meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE overview (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    data BLOB NOT NULL
+);
 """
 
 WORK_SCHEMA = """
@@ -176,6 +180,10 @@ def write_cell(
             "INSERT OR REPLACE INTO thumbs(cx, cy, data) VALUES (?, ?, ?)",
             (cx, cy, thumb),
         )
+
+
+def write_overview(con: sqlite3.Connection, blob: bytes) -> None:
+    con.execute("INSERT OR REPLACE INTO overview(id, data) VALUES (1, ?)", (blob,))
 
 
 def publish_work(con: sqlite3.Connection, work: Path, live: Path) -> None:

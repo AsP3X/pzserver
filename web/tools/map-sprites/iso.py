@@ -12,6 +12,9 @@ QUARTER = SQR // 4
 CELL = 256
 # pzmap2dzi IsoDZI.LAYER_HEIGHT — DZI pixels to raise each lotpack z.
 LAYER_HEIGHT = 192
+DZI_WIDTH = 2_318_656
+DZI_HEIGHT = 1_019_040
+OVERVIEW_W = 2048
 
 
 def world_to_dzi(x: float, y: float) -> tuple[float, float]:

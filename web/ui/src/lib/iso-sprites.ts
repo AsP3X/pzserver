@@ -10,14 +10,14 @@ import { ISO_DZI, ISO_LAYER_HEIGHT, dziToWorld, worldToDzi, type IsoMapping } fr
 const CELL = 256
 const HALF = 64
 const THUMB_PAD = HALF * 24
-/** Live sprites only closer than the default street zoom (0.35). */
-const NEAR_SCALE = 0.5
+/** Live sprites from about a neighbourhood in. County/town stay on the overview. */
+const NEAR_SCALE = 0.2
 const BUCKET = 16
 const BUCKETS = CELL / BUCKET
 /** More cells than this → one county overview blit instead of thousands of thumbs. */
 const OVERVIEW_CELLS = 28
 const OVERVIEW_W = 2048
-const MAX_INFLIGHT = 6
+const MAX_INFLIGHT = 8
 const CELL_LIMIT = 48
 const THUMB_LIMIT = 96
 
@@ -84,7 +84,9 @@ const waitQueue: Array<() => void> = []
 let overview: HTMLCanvasElement | null = null
 let overviewCtx: CanvasRenderingContext2D | null = null
 let overviewH = 0
+let bakedOverview: HTMLImageElement | null = null
 let cameraMoving = false
+let atlasGeneration = 0
 let rasterFrame = 0
 let rasterJob: RasterJob | null = null
 let spriteLayer: SpriteLayer | null = null
@@ -97,6 +99,7 @@ interface SpriteLayer {
   width: number
   height: number
   ready: number
+  atlas: number
 }
 
 interface RasterJob {
@@ -112,7 +115,10 @@ interface RasterJob {
   centerY: number
   scale: number
   ready: number
+  atlas: number
 }
+
+let thumbNotifyWait = 0
 
 function notify() {
   if (notifyFrame) {
@@ -126,6 +132,19 @@ function notify() {
   })
 }
 
+function notifyThumbs() {
+  if (bakedOverview) {
+    return
+  }
+  if (thumbNotifyWait) {
+    return
+  }
+  thumbNotifyWait = window.setTimeout(() => {
+    thumbNotifyWait = 0
+    notify()
+  }, 80)
+}
+
 export function spriteMapMoving(): boolean {
   return cameraMoving
 }
@@ -135,11 +154,9 @@ export function setSpriteMapMoving(moving: boolean) {
     return
   }
   cameraMoving = moving
-  if (moving) {
-    cancelRaster()
-    return
+  if (!moving) {
+    notify()
   }
-  notify()
 }
 
 function cancelRaster() {
@@ -173,7 +190,7 @@ export function onSpriteMapChange(listener: () => void): () => void {
 }
 
 export function spriteMapReady(): boolean {
-  return meta?.ready === true && sprites.length > 0
+  return meta?.ready === true
 }
 
 export async function loadSpriteMap(): Promise<void> {
@@ -186,17 +203,29 @@ export async function loadSpriteMap(): Promise<void> {
       (response) => response.json() as Promise<SpriteMeta>,
     )
     meta = next
+    loading = false
+    notify()
     if (!next.ready) {
       return
     }
-    const rows = await fetch(`/api/v1/map-sprites/sprites?v=${next.generated_at ?? ''}`).then(
+    const version = next.generated_at ?? ''
+    const overviewImage = new Image()
+    overviewImage.decoding = 'async'
+    overviewImage.onload = () => {
+      if (overviewImage.naturalWidth > 0) {
+        bakedOverview = overviewImage
+        notify()
+      }
+    }
+    overviewImage.src = `/api/v1/map-sprites/overview?v=${version}`
+    const rows = await fetch(`/api/v1/map-sprites/sprites?v=${version}`).then(
       (response) => response.json() as Promise<SpriteRecord[]>,
     )
     sprites = rows
     spriteById = new Map(rows.map((row) => [row.id, row]))
+    notify()
   } catch {
     meta = { ready: false } as SpriteMeta
-  } finally {
     loading = false
     notify()
   }
@@ -258,8 +287,7 @@ function atlasPage(page: number): HTMLImageElement {
   image.decoding = 'async'
   atlasImages.set(page, image)
   image.onload = () => {
-    spriteLayer = null
-    cancelRaster()
+    atlasGeneration += 1
     notify()
   }
   image.src = `/api/v1/map-sprites/atlas/${page}?v=${revision()}`
@@ -326,7 +354,7 @@ function requestThumb(cx: number, cy: number, keep: boolean): HTMLImageElement |
           })
         }
         queuedThumbs.delete(key)
-        notify()
+        notifyThumbs()
         resolve()
       }
       image.onerror = () => {
@@ -601,15 +629,30 @@ function drawOverview(
   width: number,
   height: number,
 ) {
-  ensureOverview()
-  if (!overview) {
-    return false
-  }
   const destX = (0 - mapping.center.x) * mapping.isoScale + width / 2
   const destY = (0 - mapping.center.y) * mapping.isoScale + height / 2
   const destW = ISO_DZI.width * mapping.isoScale
   const destH = ISO_DZI.height * mapping.isoScale
   ctx.imageSmoothingEnabled = true
+  if (bakedOverview && bakedOverview.naturalWidth > 0) {
+    drawClipped(
+      ctx,
+      bakedOverview,
+      destX,
+      destY,
+      destW,
+      destH,
+      width,
+      height,
+      bakedOverview.naturalWidth,
+      bakedOverview.naturalHeight,
+    )
+    return true
+  }
+  ensureOverview()
+  if (!overview) {
+    return false
+  }
   drawClipped(ctx, overview, destX, destY, destW, destH, width, height, overview.width, overview.height)
   return stampedOverview.size > 0
 }
@@ -623,8 +666,10 @@ function drawThumbsOrOverview(
 ) {
   ctx.imageSmoothingEnabled = mapping.isoScale < 0.4
   if (cover.length >= OVERVIEW_CELLS) {
-    for (const { cx, cy } of cover) {
-      requestThumb(cx, cy, false)
+    if (!bakedOverview) {
+      for (const { cx, cy } of cover) {
+        requestThumb(cx, cy, false)
+      }
     }
     drawOverview(ctx, mapping, width, height)
     return
@@ -736,7 +781,11 @@ function collectVisible(
 function pumpRaster() {
   rasterFrame = 0
   const job = rasterJob
-  if (!job || cameraMoving) {
+  if (!job) {
+    return
+  }
+  if (cameraMoving) {
+    rasterFrame = requestAnimationFrame(pumpRaster)
     return
   }
   const started = performance.now()
@@ -762,6 +811,7 @@ function pumpRaster() {
     width: job.width,
     height: job.height,
     ready: job.ready,
+    atlas: job.atlas,
   }
   rasterJob = null
   notify()
@@ -789,7 +839,12 @@ function startRaster(
   maxY: number,
 ) {
   const ready = readyCells(cover)
-  if (rasterJob && cameraMatches(rasterJob, mapping, width, height) && rasterJob.ready === ready) {
+  if (
+    rasterJob &&
+    cameraMatches(rasterJob, mapping, width, height) &&
+    rasterJob.ready === ready &&
+    rasterJob.atlas === atlasGeneration
+  ) {
     return
   }
   cancelRaster()
@@ -823,6 +878,7 @@ function startRaster(
     centerY: mapping.center.y,
     scale: mapping.isoScale,
     ready,
+    atlas: atlasGeneration,
   }
   rasterFrame = requestAnimationFrame(pumpRaster)
 }
@@ -836,30 +892,43 @@ export function drawIsoSprites(
   ctx.fillStyle = '#141611'
   ctx.fillRect(0, 0, width, height)
 
-  if (!spriteMapReady()) {
+  if (!meta?.ready) {
     void loadSpriteMap()
     return
   }
 
-  const near = mapping.isoScale >= NEAR_SCALE && !cameraMoving
+  const near = mapping.isoScale >= NEAR_SCALE
   const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
 
+  if (
+    spriteLayer &&
+    spriteLayer.scale === mapping.isoScale &&
+    spriteLayer.width === width &&
+    spriteLayer.height === height
+  ) {
+    const dx = (spriteLayer.centerX - mapping.center.x) * mapping.isoScale
+    const dy = (spriteLayer.centerY - mapping.center.y) * mapping.isoScale
+    ctx.drawImage(spriteLayer.canvas, dx, dy)
+    if (
+      !cameraMoving &&
+      sprites.length > 0 &&
+      (Math.abs(dx) > 4 ||
+        Math.abs(dy) > 4 ||
+        spriteLayer.ready < readyCells(cover) ||
+        spriteLayer.atlas !== atlasGeneration)
+    ) {
+      startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
+    }
+    return
+  }
+
   if (!near) {
-    cancelRaster()
     drawThumbsOrOverview(ctx, mapping, width, height, cover)
     return
   }
 
-  const ready = readyCells(cover)
-  if (
-    spriteLayer &&
-    cameraMatches(spriteLayer, mapping, width, height) &&
-    spriteLayer.ready >= ready
-  ) {
-    ctx.drawImage(spriteLayer.canvas, 0, 0)
-    return
-  }
-
   drawThumbsOrOverview(ctx, mapping, width, height, cover)
-  startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
+  if (!cameraMoving && sprites.length > 0) {
+    startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
+  }
 }

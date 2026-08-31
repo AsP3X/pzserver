@@ -17,6 +17,7 @@ pub fn routes() -> Router<AppState> {
         .route("/map-sprites/atlas/{page}", get(atlas))
         .route("/map-sprites/cells/{cell}", get(cell))
         .route("/map-sprites/thumbs/{cell}", get(thumb))
+        .route("/map-sprites/overview", get(overview))
 }
 
 async fn meta(State(state): State<AppState>) -> impl IntoResponse {
@@ -55,6 +56,10 @@ async fn thumb(State(state): State<AppState>, Path(cell): Path<String>) -> Respo
         return StatusCode::NOT_FOUND.into_response();
     };
     blob(state.map_sprites.thumb(cx, cy).await, "image/png")
+}
+
+async fn overview(State(state): State<AppState>) -> Response {
+    blob(state.map_sprites.overview().await, "image/png")
 }
 
 fn blob(result: crate::error::ApiResult<Option<Vec<u8>>>, content_type: &'static str) -> Response {

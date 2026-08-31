@@ -6,7 +6,7 @@ import io
 
 from PIL import Image
 
-from iso import CELL, HALF, LAYER_HEIGHT, square_anchor, world_to_dzi
+from iso import CELL, DZI_HEIGHT, DZI_WIDTH, HALF, LAYER_HEIGHT, OVERVIEW_W, square_anchor, world_to_dzi
 
 THUMB_W = 512
 
@@ -44,6 +44,24 @@ def scale_stamp(image: Image.Image, scale: float) -> Image.Image:
     if (dw, dh) == (w, h):
         return image
     return image.resize((dw, dh), Image.Resampling.BILINEAR)
+
+
+def compose_overview(thumbs: list[tuple[int, int, bytes]]) -> bytes:
+    """One county stamp from cell thumbs. Client loads this instead of 4000 images."""
+    height = max(1, round(OVERVIEW_W * DZI_HEIGHT / DZI_WIDTH))
+    canvas = Image.new("RGBA", (OVERVIEW_W, height), (20, 22, 17, 255))
+    for cx, cy, blob in thumbs:
+        if not blob:
+            continue
+        image = Image.open(io.BytesIO(blob)).convert("RGBA")
+        left, top, right, bottom = cell_dzi_box(cx, cy)
+        sx = (left / DZI_WIDTH) * OVERVIEW_W
+        sy = (top / DZI_HEIGHT) * height
+        sw = max(1, round(((right - left) / DZI_WIDTH) * OVERVIEW_W))
+        sh = max(1, round(((bottom - top) / DZI_HEIGHT) * height))
+        stamp = image.resize((sw, sh), Image.Resampling.BILINEAR)
+        canvas.alpha_composite(stamp, (int(round(sx)), int(round(sy))))
+    return png_bytes(canvas)
 
 
 def png_bytes(image: Image.Image) -> bytes:

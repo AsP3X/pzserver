@@ -1,6 +1,8 @@
+import io
+
 from PIL import Image
 
-from thumbs import cell_dzi_box, render_thumb, scale_stamp, thumb_scale
+from thumbs import cell_dzi_box, compose_overview, render_thumb, scale_stamp, thumb_scale
 
 
 def test_thumb_scale_is_the_same_in_every_cell():
@@ -8,6 +10,14 @@ def test_thumb_scale_is_the_same_in_every_cell():
     left1, _t1, right1, _b1 = cell_dzi_box(40, -12)
     assert right0 - left0 == right1 - left1
     assert abs(thumb_scale() - 512 / (right0 - left0)) < 1e-12
+
+
+def test_compose_overview_returns_png():
+    cell = Image.new("RGBA", (16, 16), (10, 20, 30, 255))
+    buf = io.BytesIO()
+    cell.save(buf, format="PNG")
+    blob = compose_overview([(0, 0, buf.getvalue())])
+    assert blob[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_upper_storey_is_drawn_above_ground():

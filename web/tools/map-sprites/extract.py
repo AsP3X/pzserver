@@ -39,9 +39,10 @@ from store import (
     write_atlas,
     write_cell,
     write_meta,
+    write_overview,
     written_cells,
 )
-from thumbs import png_bytes, render_thumb, scale_stamp, thumb_scale
+from thumbs import compose_overview, png_bytes, render_thumb, scale_stamp, thumb_scale
 
 LOTPACK = re.compile(r"^world_(-?\d+)_(-?\d+)\.lotpack$")
 # Compact per-cell occupancy while names are still strings (before atlas ids).
@@ -104,7 +105,7 @@ def _ignore_signals() -> None:
 
 
 # Bump when occupancy/thumb geometry changes so an old work file is not resumed.
-BAKE_VERSION = "z192"
+BAKE_VERSION = "z192-ov1"
 
 
 def fingerprint(lotpacks: list[tuple[str, str, str]], textures: Path, game_version: str) -> str:
@@ -672,6 +673,11 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
             _pause(check, bar, stop, bar.done, bar.total)
         bar.finish()
         check.flush(force=True)
+
+    print("==> overview", flush=True)
+    thumb_rows = list(con.execute("SELECT cx, cy, data FROM thumbs"))
+    write_overview(con, compose_overview([(int(cx), int(cy), bytes(blob)) for cx, cy, blob in thumb_rows]))
+    con.commit()
 
     write_meta(
         con,

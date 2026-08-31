@@ -163,6 +163,13 @@ impl MapSprites {
             .await
     }
 
+    pub async fn overview(&self) -> ApiResult<Option<Vec<u8>>> {
+        match self.blob("SELECT data FROM overview WHERE id = ?1", 1).await {
+            Ok(bytes) => Ok(bytes),
+            Err(_) => Ok(None),
+        }
+    }
+
     async fn blob(&self, sql: &'static str, a: i64) -> ApiResult<Option<Vec<u8>>> {
         let Some(inner) = self.inner.clone() else {
             return Ok(None);
