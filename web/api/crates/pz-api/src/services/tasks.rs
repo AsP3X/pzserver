@@ -35,6 +35,7 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(account_registration_loop(state.clone())),
         tokio::spawn(ingame_report_loop(state.clone())),
         tokio::spawn(ticket_desk_loop(state.clone())),
+        tokio::spawn(friends_desk_loop(state.clone())),
         tokio::spawn(session_cleanup_loop(state.clone())),
         tokio::spawn(sanction_expiry_loop(state.clone())),
         tokio::spawn(backup_schedule_loop(state.clone())),
@@ -446,16 +447,6 @@ async fn account_registration_loop(state: AppState) {
                         at: Utc::now().to_rfc3339(),
                     }
                 }
-                // Kept for older ledgers. New opens always issue a code so a
-                // player can recover email and password on this character.
-                Ok(OpenOutcome::AlreadyRegistered) => pz_bridge::LinkResult {
-                    id: request.id,
-                    username: request.username,
-                    status: "already_registered".to_owned(),
-                    code: None,
-                    expires_at: None,
-                    at: Utc::now().to_rfc3339(),
-                },
                 Err(error) => {
                     // Left unanswered on purpose: no result means the next pass
                     // tries again, which is what a transient failure deserves.
@@ -673,6 +664,120 @@ async fn ticket_desk_loop(state: AppState) {
                 &state.db,
                 &state.config.lua_bridge_path,
                 &username,
+            )
+            .await;
+        }
+    }
+}
+
+/// Drain Knox Desk / right-click friend actions and keep `friends_inbox.json`.
+async fn friends_desk_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(REGISTRATION_INTERVAL);
+    let channel = pz_bridge::FriendsChannel::new(&state.config.lua_bridge_path);
+    let online = state.status.current().await.players;
+    crate::services::friends::rebuild_inbox(&state.db, &state.config.lua_bridge_path, &online)
+        .await;
+
+    loop {
+        ticker.tick().await;
+
+        let mut box_ = match channel.outbox().await {
+            Ok(box_) => box_,
+            Err(error) => {
+                tracing::warn!(%error, "friends outbox unreadable");
+                continue;
+            }
+        };
+
+        if box_.requests.is_empty() {
+            continue;
+        }
+
+        let pending = std::mem::take(&mut box_.requests);
+        let mut leftover = Vec::new();
+        let mut touched: HashSet<String> = HashSet::new();
+        let mut new_results = Vec::new();
+
+        for request in pending {
+            let username = request.username.clone();
+            let outcome = crate::services::friends::apply_from_game(
+                &state.db,
+                &username,
+                &request.action,
+                request.target.as_deref(),
+                request.friendship_id.as_deref(),
+                request.share_position,
+            )
+            .await;
+
+            match outcome {
+                Ok(applied) => {
+                    tracing::info!(
+                        actor = %username,
+                        action = %request.action,
+                        status = applied.status,
+                        "applied an in-game friends action",
+                    );
+                    touched.insert(username.clone());
+                    if let Some(name) = applied.other.filter(|name| !name.is_empty()) {
+                        touched.insert(name);
+                    }
+                    new_results.push(pz_bridge::FriendResult {
+                        id: request.id,
+                        username,
+                        status: applied.status.to_owned(),
+                        at: Utc::now().to_rfc3339(),
+                    });
+                }
+                Err(error) => {
+                    if crate::services::friends::retry_outbox(&error) {
+                        tracing::warn!(
+                            %error,
+                            id = %request.id,
+                            "friends outbox action failed"
+                        );
+                        leftover.push(request);
+                        continue;
+                    }
+                    new_results.push(pz_bridge::FriendResult {
+                        id: request.id,
+                        username,
+                        status: crate::services::friends::game_status(&error).to_owned(),
+                        at: Utc::now().to_rfc3339(),
+                    });
+                }
+            }
+        }
+
+        box_.requests = leftover;
+        if let Err(error) = channel.write_outbox(box_).await {
+            tracing::error!(%error, "could not rewrite the friends outbox");
+        }
+
+        if !new_results.is_empty() {
+            let mut ledger = match channel.results().await {
+                Ok(ledger) => ledger,
+                Err(error) => {
+                    tracing::error!(%error, "friends results unreadable");
+                    pz_bridge::FriendsResults::default()
+                }
+            };
+            ledger.version = 1;
+            ledger.updated_at = Utc::now().to_rfc3339();
+            ledger.results.extend(new_results);
+            if let Err(error) = channel.write_results(ledger).await {
+                tracing::error!(%error, "could not write the friends results ledger");
+            }
+        }
+
+        if !touched.is_empty() {
+            let names: Vec<&str> = touched.iter().map(String::as_str).collect();
+            let online = state.status.current().await.players;
+            crate::services::friends::refresh_inbox(
+                &state.db,
+                &state.config.lua_bridge_path,
+                &names,
+                &online,
             )
             .await;
         }

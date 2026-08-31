@@ -8,6 +8,7 @@ pub mod backups;
 pub mod character;
 pub mod datadirs;
 pub mod economy;
+pub mod friends;
 pub mod i18n;
 pub mod items;
 pub mod map_tile_jobs;

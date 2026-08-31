@@ -168,6 +168,20 @@ enter("/report pike")
 check("a report without detail is consumed", vanillaCalls == 0)
 check("and does not send", #sent == 0, #sent)
 
+-- /friends add Name
+sent, halos, overheads, vanillaCalls = {}, {}, {}, 0
+enter("/friends add pike")
+check("a friends command is sent", #sent == 1, #sent)
+check("as friendRequest", sent[1] and sent[1].command == "friendRequest")
+check("the target is the name", sent[1] and sent[1].args.target == "pike", sent[1] and sent[1].args.target)
+check("vanilla never sees a friends command", vanillaCalls == 0, vanillaCalls)
+check("the ask is spoken overhead", (overheads[1] or ""):find("friends") ~= nil, overheads[1])
+
+sent, halos, vanillaCalls = {}, {}, 0
+enter("/friends")
+check("a bare /friends is consumed", vanillaCalls == 0)
+check("and shows the usage", (halos[1] or ""):find("Usage") ~= nil, halos[1])
+
 --------------------------------------------------------------------------
 -- The answer coming back
 --------------------------------------------------------------------------

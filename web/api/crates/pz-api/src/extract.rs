@@ -23,7 +23,6 @@ const ADMIN_ROLES: &[&str] = &["admin", "super_admin", "moderator"];
 pub struct AuthUser(pub User);
 
 /// A staff member. 401 when nobody is signed in, 403 when they are not staff.
-#[allow(dead_code)]
 pub struct AdminUser(pub User);
 
 impl FromRequestParts<AppState> for AdminUser {

@@ -13,6 +13,7 @@ pub mod catalog;
 pub mod delivery;
 pub mod deposit;
 pub mod docker;
+pub mod friends;
 pub mod ini;
 pub mod inventory;
 pub mod jobs;
@@ -39,6 +40,10 @@ pub use deposit::{
     DepositResults,
 };
 pub use docker::{ContainerState, ContainerStatus, DockerClient, DockerError, parse_docker_logs};
+pub use friends::{
+    FriendAction, FriendResult, FriendSnapshot, FriendsChannel, FriendsInbox, FriendsOutbox,
+    FriendsPlayerInbox, FriendsResults,
+};
 pub use ini::ServerIni;
 pub use inventory::{InventoryReader, InventorySnapshot};
 pub use jobs::{JobsChannel, JobsError, PanelJob, PanelResult};

@@ -294,6 +294,7 @@ test-game-server:
 		luajit game-server/tests/kr-vitals.test.lua && \
 		luajit game-server/tests/kr-enrol.test.lua && \
 		luajit game-server/tests/kr-report.test.lua && \
+		luajit game-server/tests/kr-friends.test.lua && \
 		luajit game-server/tests/kr-console.test.lua && \
 		luajit game-server/tests/kr-desk.test.lua; \
 	else \
@@ -480,6 +481,7 @@ web-test:
 	cd web/api && cargo test --workspace
 
 web-check:
+	bash scripts/check-no-dead-code-allow.sh
 	cd web/api && cargo clippy --all-targets --all-features -- -D warnings && cargo fmt --check
 	cd web/ui && npx tsc -b && npm run lint
 

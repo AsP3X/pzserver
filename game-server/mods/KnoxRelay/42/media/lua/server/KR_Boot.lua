@@ -42,6 +42,7 @@ local Vitals = require("KR_Vitals")
 local Enrol = require("KR_Enrol")
 local Report = require("KR_Report")
 local Tickets = require("KR_Tickets")
+local Friends = require("KR_Friends")
 local Jobs = require("KR_Jobs")
 
 local LOG = "[KnoxRelay] "
@@ -135,6 +136,7 @@ local function onCreatePlayer(playerIndex, player)
     Snapshot.capture(player)
     -- Unreliable on dedicated, but when it fires we settle before they move.
     Orders.settleOnline()
+    Friends.push(player)
 end
 
 --- Work the panel asked for: jobs, snapshots, codes, tickets, item settle.
@@ -146,6 +148,7 @@ local function panelWork()
     Enrol.poll()
     Report.poll()
     Tickets.poll()
+    Friends.poll()
 
     local delivered = Orders.settleOnline()
     if delivered > 0 then
@@ -296,6 +299,7 @@ local function onServerStarted()
     Enrol.seed()
     Report.seed()
     Tickets.seed()
+    Friends.seed()
     Holdings.export()
 
     local ok, count = pcall(Catalog.export)
@@ -315,12 +319,14 @@ Events.OnServerStarted.Add(onServerStarted)
 Events.OnClientCommand.Add(Enrol.onClientCommand)
 Events.OnClientCommand.Add(Report.onClientCommand)
 Events.OnClientCommand.Add(Tickets.onClientCommand)
+Events.OnClientCommand.Add(Friends.onClientCommand)
 
 -- Optional: without it a player who disconnects mid-registration leaves an
 -- entry that poll() drops on the answer timeout anyway.
 local disconnectHooked = pcall(function()
     Events.OnPlayerDisconnect.Add(Enrol.forget)
     Events.OnPlayerDisconnect.Add(Report.forget)
+    Events.OnPlayerDisconnect.Add(Friends.forget)
 end)
 
 -- No vanilla Lua subscribes to OnTickEvenPaused, so treat it as optional: an

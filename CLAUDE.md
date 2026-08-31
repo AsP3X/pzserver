@@ -154,6 +154,10 @@ Detailed plan with acceptance criteria in `IMPLEMENTATION_PLAN.md`. Status track
 - laravel/wayfinder v0, laravel/pint v1, pestphp/pest v3, phpunit/phpunit v11
 - @inertiajs/react v2, react v19, tailwindcss v4, eslint v9, prettier v3
 
+## Rust: never silence unused code
+
+`#[allow(dead_code)]` is forbidden. The workspace `deny`s `dead_code`; `make web-check` greps for the attribute. Unused items are deleted or wired into a real path — never allowed, expected, or dummy-read. Canonical copy: `AGENTS.md`.
+
 ## Laravel Conventions
 
 ### PHP

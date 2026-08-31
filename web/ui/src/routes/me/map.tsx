@@ -9,7 +9,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { WorldmapView, type MapFocus } from '@/components/ui/worldmap'
 import { formatNumber, formatRelativeTime } from '@/lib/format'
 import { worldToCell } from '@/lib/worldmap'
-import { myCharacterQuery, myPositionQuery } from '@/lib/queries'
+import { myCharacterQuery, myFriendsQuery, myPositionQuery } from '@/lib/queries'
+import type { MapPin } from '@/lib/worldmap'
 import { useTranslation } from '@/i18n/use-translation'
 
 /**
@@ -26,6 +27,7 @@ export function MapPage() {
 
   const { data, isPending, isError, refetch } = useQuery(myPositionQuery)
   const character = useQuery(myCharacterQuery)
+  const friends = useQuery(myFriendsQuery)
   const position = data?.position ?? null
   const isDead = character.data?.character?.is_dead ?? false
   const health = isDead
@@ -42,6 +44,24 @@ export function MapPage() {
         : null,
     [character.data?.character?.appearance, health, position],
   )
+
+  const friendPins = useMemo<MapPin[]>(() => {
+    const pins: MapPin[] = []
+    for (const card of friends.data?.friends ?? []) {
+      if (!card.their_share_position || !card.position) {
+        continue
+      }
+      pins.push({
+        id: card.id,
+        x: card.position.x,
+        y: card.position.y,
+        label: card.username,
+        color: card.online ? '#8bb04a' : '#9ca392',
+        look: card.appearance ?? null,
+      })
+    }
+    return pins
+  }, [friends.data?.friends])
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:p-5">
@@ -137,6 +157,7 @@ export function MapPage() {
 
           <WorldmapView
             marker={marker}
+            markers={friendPins}
             focus={focus}
             onPick={setCursor}
             className="min-h-64 flex-1"

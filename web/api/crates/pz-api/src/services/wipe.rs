@@ -28,8 +28,8 @@ const KNOX_RELAY_MOD_ID: &str = "KnoxRelay";
 /// Must name tables that still exist after the latest migration. A dropped
 /// table here aborts the website half of the wipe and leaves every account
 /// standing — that is how `account_link_codes` (dropped in 0006) kept logins
-/// alive after a world reset.
-#[cfg_attr(not(test), allow(dead_code))]
+/// alive after a world reset. `wipe_website` deletes these in this order
+/// before `users`, so a missing name here is a missing DELETE.
 const WORLD_DATA_TABLES: &[&str] = &[
     "game_events",
     "player_stats",
@@ -41,6 +41,23 @@ const WORLD_DATA_TABLES: &[&str] = &[
     "server_status_samples",
     "audit_logs",
 ];
+
+/// Static DELETE for one WORLD_DATA_TABLES name. sqlx 0.9 will not take a
+/// formatted string here; the match keeps the list and the SQL in lockstep.
+fn world_table_delete(table: &str) -> &'static str {
+    match table {
+        "game_events" => "DELETE FROM game_events",
+        "player_stats" => "DELETE FROM player_stats",
+        "pvp_violations" => "DELETE FROM pvp_violations",
+        "player_sanctions" => "DELETE FROM player_sanctions",
+        "player_reports" => "DELETE FROM player_reports",
+        "item_orders" => "DELETE FROM item_orders",
+        "account_registrations" => "DELETE FROM account_registrations",
+        "server_status_samples" => "DELETE FROM server_status_samples",
+        "audit_logs" => "DELETE FROM audit_logs",
+        unknown => panic!("WORLD_DATA_TABLES has {unknown} with no DELETE"),
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct WipeRequest {
@@ -295,33 +312,11 @@ async fn wipe_save_tree(data: &Path, server_name: &str, lua: &Path, errors: &mut
 async fn wipe_website(db: &PgPool, include_config: bool) -> ApiResult<i64> {
     let mut tx = db.begin().await?;
 
-    sqlx::query("DELETE FROM game_events")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM player_stats")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM pvp_violations")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM player_sanctions")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM player_reports")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM item_orders")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM account_registrations")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM server_status_samples")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM audit_logs")
-        .execute(&mut *tx)
-        .await?;
+    for table in WORLD_DATA_TABLES {
+        sqlx::query(world_table_delete(table))
+            .execute(&mut *tx)
+            .await?;
+    }
 
     let deleted = sqlx::query("DELETE FROM users")
         .execute(&mut *tx)
@@ -473,10 +468,15 @@ mod tests {
             .next()
             .expect("production source");
 
+        assert!(
+            production.contains("for table in WORLD_DATA_TABLES"),
+            "wipe_website must walk WORLD_DATA_TABLES rather than a parallel list of DELETEs"
+        );
         for table in WORLD_DATA_TABLES {
+            let _ = world_table_delete(table);
             assert!(
                 production.contains(&format!("DELETE FROM {table}")),
-                "wipe_website is missing DELETE FROM {table}"
+                "world_table_delete is missing DELETE FROM {table}"
             );
         }
         assert!(

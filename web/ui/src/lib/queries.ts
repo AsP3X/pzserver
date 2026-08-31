@@ -88,6 +88,18 @@ export const myPositionQuery = queryOptions({
   staleTime: 5_000,
 })
 
+/**
+ * Friend list, requests and blocks. Polled so an in-game accept shows up
+ * here without a refresh, and so the map can keep friend pins current.
+ */
+export const myFriendsQuery = queryOptions({
+  queryKey: ['me', 'friends'],
+  queryFn: api.myFriends,
+  refetchInterval: 10_000,
+  refetchIntervalInBackground: false,
+  staleTime: 5_000,
+})
+
 export const myCharacterQuery = queryOptions({
   queryKey: ['me', 'character'],
   queryFn: api.myCharacter,

@@ -32,6 +32,7 @@ import { AdminWhitelistPage } from '@/routes/admin/whitelist'
 import { CharacterPage } from '@/routes/character'
 import { InventoryPage } from '@/routes/me/inventory'
 import { MapPage } from '@/routes/me/map'
+import { FriendsPage } from '@/routes/me/friends'
 import { LandingPage } from '@/routes/landing'
 import { LoginPage } from '@/routes/auth/login'
 import { NotFoundPage } from '@/routes/not-found'
@@ -155,6 +156,12 @@ const mapRoute = createRoute({
   getParentRoute: () => playerLayout,
   path: '/me/map',
   component: MapPage,
+})
+
+const friendsRoute = createRoute({
+  getParentRoute: () => playerLayout,
+  path: '/me/friends',
+  component: FriendsPage,
 })
 
 const walletRoute = createRoute({
@@ -378,6 +385,7 @@ export const router = createRouter({
       characterRoute,
       inventoryRoute,
       mapRoute,
+      friendsRoute,
       walletRoute,
       auctionsRoute,
       vaultRoute,

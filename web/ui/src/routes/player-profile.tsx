@@ -1,15 +1,18 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
-import { Skull, Swords, Timer, Trophy } from 'lucide-react'
+import { Skull, Swords, Timer, Trophy, UserPlus } from 'lucide-react'
+import { useMemo } from 'react'
 
+import { Button } from '@/components/ui/button'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Container, Section } from '@/components/ui/section'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/cn'
 import { formatDateTime, formatNumber } from '@/lib/format'
-import { playerProfileQuery } from '@/lib/queries'
+import { myFriendsQuery, playerProfileQuery } from '@/lib/queries'
+import { useCurrentUser } from '@/lib/auth'
 import { useTranslation } from '@/i18n/use-translation'
-import type { PlayerProfile } from '@/lib/api'
+import { api, ApiError, type PlayerProfile } from '@/lib/api'
 
 /**
  * One survivor's public record.
@@ -24,6 +27,50 @@ export function PlayerProfilePage() {
   // tree types are not wired up, so the id cannot be checked at compile time.
   const { username } = useParams({ strict: false }) as { username: string }
   const { data, isPending, isError } = useQuery(playerProfileQuery(username))
+  const { user } = useCurrentUser()
+  const friends = useQuery({ ...myFriendsQuery, enabled: Boolean(user) })
+  const queryClient = useQueryClient()
+
+  const relation = useMemo(() => {
+    if (!user || !data) {
+      return 'none' as const
+    }
+    if (user.username.toLowerCase() === data.username.toLowerCase()) {
+      return 'self' as const
+    }
+    const lists = friends.data
+    if (!lists) {
+      return 'none' as const
+    }
+    const match = (card: { username: string }) =>
+      card.username.toLowerCase() === data.username.toLowerCase()
+    if (lists.friends.some(match)) {
+      return 'friends' as const
+    }
+    if (lists.outgoing.some(match)) {
+      return 'outgoing' as const
+    }
+    if (lists.incoming.some(match)) {
+      return 'incoming' as const
+    }
+    if (lists.blocked.some(match)) {
+      return 'blocked' as const
+    }
+    return 'none' as const
+  }, [data, friends.data, user])
+
+  const incoming = friends.data?.incoming.find(
+    (card) => card.username.toLowerCase() === username.toLowerCase(),
+  )
+
+  const send = useMutation({
+    mutationFn: () => api.sendFriendRequest(data?.username ?? username),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['me', 'friends'] }),
+  })
+  const accept = useMutation({
+    mutationFn: () => api.friendAction(incoming!.id, 'accept'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['me', 'friends'] }),
+  })
 
   if (isPending) {
     return (
@@ -66,7 +113,41 @@ export function PlayerProfilePage() {
                 {t('survivors.dead')}
               </span>
             ) : null}
+            {relation === 'none' && user ? (
+              <Button
+                size="sm"
+                onClick={() => send.mutate()}
+                disabled={send.isPending}
+              >
+                <UserPlus aria-hidden="true" className="size-3.5" />
+                {t('profile.add_friend')}
+              </Button>
+            ) : null}
+            {relation === 'outgoing' ? (
+              <span className="border border-fence px-2 py-1 font-mono text-[0.625rem] tracking-widest text-smoke uppercase">
+                {t('profile.request_sent')}
+              </span>
+            ) : null}
+            {relation === 'friends' ? (
+              <span className="border border-moss/40 bg-moss-soft px-2 py-1 font-mono text-[0.625rem] tracking-widest text-moss uppercase">
+                {t('profile.already_friends')}
+              </span>
+            ) : null}
+            {relation === 'incoming' && incoming ? (
+              <Button
+                size="sm"
+                onClick={() => accept.mutate()}
+                disabled={accept.isPending}
+              >
+                {t('profile.accept_friend')}
+              </Button>
+            ) : null}
           </div>
+          {send.isError ? (
+            <p className="mt-2 text-sm text-blood">
+              {send.error instanceof ApiError ? send.error.message : t('auth.unexpected_error')}
+            </p>
+          ) : null}
           <p className="mt-2 text-sm text-smoke">
             {data.profession
               ? t('profile.since_as', {

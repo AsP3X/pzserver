@@ -189,6 +189,7 @@ pub async fn credit_tx(
     reference_type: Option<&str>,
     reference_id: Option<Uuid>,
 ) -> ApiResult<WalletTransaction> {
+    let source = super::wallet_source(source)?;
     if amount < 1 {
         return Err(ApiError::Validation(
             "Amount must be at least 1 coin.".to_owned(),
@@ -228,6 +229,7 @@ pub async fn debit_tx(
     reference_type: Option<&str>,
     reference_id: Option<Uuid>,
 ) -> ApiResult<WalletTransaction> {
+    let source = super::wallet_source(source)?;
     if amount < 1 {
         return Err(ApiError::Validation(
             "Amount must be at least 1 coin.".to_owned(),

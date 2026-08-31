@@ -11,6 +11,12 @@ license = "MIT"
 pz-bridge = { path = "crates/pz-bridge" }
 pz-rcon = { path = "crates/pz-rcon" }
 
+[workspace.lints.rust]
+# Unused items must fail the build. Do not silence this with `#[allow(dead_code)]`
+# — that attribute is banned by `scripts/check-no-dead-code-allow.sh`. `forbid`
+# is not used: sqlx macros emit `allow(dead_code)` in generated code.
+dead_code = "deny"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

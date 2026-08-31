@@ -74,3 +74,9 @@ Never bump first and ask later. Never treat “the UI is done” as permission t
 4. After the user publishes on Steam: Steam change notes, the server, and the client must report that same X.Y. If Steam shows 1.13 and `game_state.json` shows anything else — or the other way around — the job is not done.
 
 Full publish flow: `docs/workshop-updates.md`.
+
+## Rust: never silence unused code
+
+`#[allow(dead_code)]` (and `cfg_attr(..., allow(dead_code))`) is forbidden. The workspace `deny`s `dead_code`. `scripts/check-no-dead-code-allow.sh` / `make web-check` greps for the attribute so it cannot be used to silence that deny.
+
+If rustc says an item is unused: delete it, or wire it into a real path. Do not add an allow, an `expect`, or a dummy read. Reserved constants belong on an allowlist that production code consults (see `WALLET_SOURCES`), not behind a lint exception.

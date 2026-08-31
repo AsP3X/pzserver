@@ -34,12 +34,6 @@ pub enum OpenOutcome {
         code: String,
         expires_at: DateTime<Utc>,
     },
-    /// That character already has an account. Nothing to do.
-    ///
-    /// No longer produced by [`open`]: a second `/account register` issues a
-    /// recovery code instead. Kept so older result ledgers still deserialise.
-    #[allow(dead_code)]
-    AlreadyRegistered,
 }
 
 #[derive(FromRow)]
@@ -237,12 +231,5 @@ mod tests {
 
         assert!(json.contains(r#""status":"issued""#));
         assert!(json.contains(r#""code":"NYUY2Z""#));
-    }
-
-    #[test]
-    fn an_already_registered_outcome_carries_no_code() {
-        let json = serde_json::to_string(&OpenOutcome::AlreadyRegistered).expect("serialise");
-
-        assert_eq!(json, r#"{"status":"already_registered"}"#);
     }
 }

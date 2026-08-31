@@ -376,6 +376,39 @@ export interface MyCharacterResponse {
   body: PlayerBody | null
 }
 
+export interface FriendPosition {
+  x: number
+  y: number
+  z: number
+}
+
+export interface FriendCard {
+  id: string
+  username: string
+  status: 'pending' | 'accepted' | 'declined' | 'blocked' | string
+  online: boolean
+  share_position: boolean
+  their_share_position: boolean
+  position?: FriendPosition | null
+  appearance?: PlayerLook | null
+  created_at: string
+}
+
+export interface FriendsView {
+  incoming: FriendCard[]
+  outgoing: FriendCard[]
+  friends: FriendCard[]
+  blocked: FriendCard[]
+}
+
+export type FriendAction =
+  | 'accept'
+  | 'decline'
+  | 'cancel'
+  | 'unfriend'
+  | 'block'
+  | 'unblock'
+
 export type UserRole = 'super_admin' | 'admin' | 'moderator' | 'player'
 
 export interface User {
@@ -1418,6 +1451,17 @@ export const api = {
     post<PlayerReport>(`/api/v1/me/reports/${id}/messages`, { body }),
 
   readMyReport: (id: number) => post<PlayerReport>(`/api/v1/me/reports/${id}/read`, {}),
+
+  myFriends: () => request<FriendsView>('/api/v1/me/friends'),
+
+  sendFriendRequest: (username: string) =>
+    post<FriendCard>('/api/v1/me/friends', { username }),
+
+  friendAction: (id: string, action: FriendAction) =>
+    post<FriendCard>(`/api/v1/me/friends/${id}/${action}`, {}),
+
+  setFriendShare: (id: string, sharePosition: boolean) =>
+    patch<FriendCard>(`/api/v1/me/friends/${id}`, { share_position: sharePosition }),
 
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),

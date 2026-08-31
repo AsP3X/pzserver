@@ -6,6 +6,6 @@
     "previewfile"       "./KnoxRelay/preview.png"
     "visibility"        "0"
     "title"             "Knox Relay"
-    "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, and /report for filing a player report from inside the game."
-    "changenote"        "[h1]1.27 — Shop water bottles are drinkable[/h1]\n[b]Fixed[/b]\n[list]\n[*]Items given by the panel (shop, vault, auctions) no longer spawn as a Water + CarbonatedWater mixture. Those bottles could be poured but not drunk. They now fill with clean water.\n[/list]"
+    "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, /report for filing a player report from inside the game, and a friends list: right-click a survivor to ask, accept from the Knox Desk or the website."
+    "changenote"        "[h1]1.28 — Friends[/h1]\n[b]Added[/b]\n[list]\n[*]Right-click another survivor to send a friend request. They see \"Want to be friends?\" over your head.\n[*]Accept, decline, unfriend and block from the Knox Desk FRIENDS page, or from the website.\n[*]/friends add Name from chat does the same ask.\n[*]Friends who share a pin appear on your website map.\n[/list]"
 }

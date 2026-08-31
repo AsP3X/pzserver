@@ -19,6 +19,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::extract::AuthUser;
 use crate::services::character::{self, Character};
 use crate::services::economy::inventory as holdings;
+use crate::services::friends;
 use crate::services::reports;
 use crate::state::AppState;
 
@@ -32,6 +33,9 @@ pub fn routes() -> Router<AppState> {
         .route("/me/reports/{id}", get(my_report))
         .route("/me/reports/{id}/messages", post(reply_report))
         .route("/me/reports/{id}/read", post(read_report))
+        .route("/me/friends", get(my_friends).post(send_friend_request))
+        .route("/me/friends/{id}", axum::routing::patch(patch_friend))
+        .route("/me/friends/{id}/{action}", post(friend_action))
 }
 
 #[derive(Serialize)]
@@ -412,4 +416,94 @@ async fn read_report(
     let report = reports::mark_read(&state.db, user.id, id).await?;
     reports::refresh_inbox(&state.db, &state.config.lua_bridge_path, &user.username).await;
     Ok(Json(report))
+}
+
+async fn my_friends(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<friends::FriendsView>> {
+    let (online, live) = friend_presence(&state).await;
+    Ok(Json(
+        friends::view(&state.db, user.id, &online, &live).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct NewFriend {
+    username: String,
+}
+
+async fn send_friend_request(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(body): Json<NewFriend>,
+) -> Result<(StatusCode, Json<friends::FriendCard>), ApiError> {
+    let card = friends::request(&state.db, user.id, &body.username).await?;
+    refresh_friends(&state, &[&user.username, &card.username]).await;
+    Ok((StatusCode::CREATED, Json(card)))
+}
+
+#[derive(Deserialize)]
+struct FriendShare {
+    share_position: bool,
+}
+
+async fn patch_friend(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<FriendShare>,
+) -> ApiResult<Json<friends::FriendCard>> {
+    let card = friends::set_share(&state.db, user.id, id, body.share_position).await?;
+    refresh_friends(&state, &[&user.username, &card.username]).await;
+    Ok(Json(card))
+}
+
+async fn friend_action(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path((id, action)): Path<(Uuid, String)>,
+) -> ApiResult<Json<friends::FriendCard>> {
+    let card = friends::act(&state.db, user.id, id, &action).await?;
+    refresh_friends(&state, &[&user.username, &card.username]).await;
+    Ok(Json(card))
+}
+
+async fn friend_presence(state: &AppState) -> (Vec<String>, Vec<friends::LiveMark>) {
+    let online = state.status.current().await.players;
+    let live = match pz_bridge::LuaBridge::new(&state.config.lua_bridge_path)
+        .players_live()
+        .await
+    {
+        Ok(Some(read)) => read
+            .data
+            .players
+            .into_iter()
+            .map(|player| friends::LiveMark {
+                username: player.username,
+                x: player.x,
+                y: player.y,
+                z: player.z,
+                appearance: player.appearance,
+            })
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(error) => {
+            tracing::warn!(%error, "friends presence export unreadable");
+            Vec::new()
+        }
+    };
+
+    (online, live)
+}
+
+async fn refresh_friends(state: &AppState, names: &[&str]) {
+    let status = state.status.current().await;
+    friends::refresh_inbox(
+        &state.db,
+        &state.config.lua_bridge_path,
+        names,
+        &status.players,
+    )
+    .await;
 }

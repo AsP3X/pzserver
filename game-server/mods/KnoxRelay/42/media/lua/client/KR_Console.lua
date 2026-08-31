@@ -20,8 +20,9 @@ local LOG = "[KnoxRelay] "
 local CHANNEL = "KnoxRelay"
 local ACCOUNT = "/account"
 local REPORT = "/report"
+local FRIENDS = "/friends"
 
-print(LOG .. "Lua file loaded — /account and /report commands are active")
+print(LOG .. "Lua file loaded — /account, /report and /friends commands are active")
 
 --------------------------------------------------------------------------
 -- Showing the player something
@@ -209,6 +210,38 @@ local function consumeReport(trimmed)
     return true
 end
 
+local function consumeFriends(trimmed)
+    local argument = squeeze(string.sub(trimmed, #FRIENDS + 1))
+    local space = string.find(argument, "%s")
+    local verb = argument
+    local target = ""
+
+    if space then
+        verb = squeeze(string.sub(argument, 1, space - 1))
+        target = squeeze(string.sub(argument, space + 1))
+    end
+
+    if string.lower(verb) ~= "add" or target == "" then
+        notify("Usage: /friends add <name>  — or right-click them, or open the Knox Desk.", 200, 200, 200)
+        return true
+    end
+
+    local player = getSpecificPlayer(0)
+    if not player then
+        return true
+    end
+
+    pcall(function()
+        player:addLineChatElement("Want to be friends, " .. target .. "?", 0.95, 0.64, 0.05)
+    end)
+    notify("Asking " .. target .. "...", 242, 162, 12)
+    pcall(function()
+        sendClientCommand(player, CHANNEL, "friendRequest", { target = target })
+    end)
+
+    return true
+end
+
 --- Handle the text, or return false to let the game have it.
 local function consume(text)
     local trimmed = squeeze(text)
@@ -220,6 +253,10 @@ local function consume(text)
 
     if startsWith(lowered, REPORT) then
         return consumeReport(trimmed)
+    end
+
+    if startsWith(lowered, FRIENDS) then
+        return consumeFriends(trimmed)
     end
 
     return false

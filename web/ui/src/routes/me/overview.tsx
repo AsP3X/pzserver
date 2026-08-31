@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, Clock, Coins, Crosshair, HeartPulse, Skull, Vault } from 'lucide-react'
+import { ArrowRight, Clock, Coins, Crosshair, HeartPulse, Skull, Users, Vault } from 'lucide-react'
 
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { StatusPill } from '@/components/ui/status-pill'
@@ -9,6 +9,7 @@ import { formatCoins, formatNumber, formatRelativeTime } from '@/lib/format'
 import { isCondition } from '@/lib/quest-graph'
 import {
   myCharacterQuery,
+  myFriendsQuery,
   myRewardsQuery,
   myVaultQuery,
   myWalletQuery,
@@ -30,6 +31,8 @@ export function PlayerOverviewPage() {
   const wallet = useQuery(myWalletQuery)
   const vault = useQuery(myVaultQuery)
   const rewards = useQuery(myRewardsQuery)
+  const friends = useQuery({ ...myFriendsQuery, enabled: Boolean(user) })
+  const incomingFriends = friends.data?.incoming.length ?? 0
 
   const character = characterQuery.data?.character
   const health =
@@ -154,6 +157,32 @@ export function PlayerOverviewPage() {
                 className="inline-flex items-center gap-2 font-mono text-xs tracking-widest text-hazard uppercase hover:underline"
               >
                 {t('me.open_status')}
+                <ArrowRight aria-hidden="true" className="size-3.5" />
+              </Link>
+            </div>
+          </Panel>
+
+          <Panel bracketed>
+            <PanelHeader
+              label={t('nav.friends')}
+              action={
+                incomingFriends > 0 ? (
+                  <span className="font-mono text-[0.6875rem] tracking-widest text-hazard uppercase">
+                    {t('me.friends_waiting', { count: incomingFriends })}
+                  </span>
+                ) : null
+              }
+            />
+            <div className="flex flex-col gap-3 p-5">
+              <p className="flex items-center gap-2 font-mono text-sm text-bone">
+                <Users aria-hidden="true" className="size-4 text-dust" strokeWidth={1.5} />
+                {t('me.friends_count', { count: friends.data?.friends.length ?? 0 })}
+              </p>
+              <Link
+                to="/me/friends"
+                className="inline-flex items-center gap-2 font-mono text-xs tracking-widest text-hazard uppercase hover:underline"
+              >
+                {t('me.open_friends')}
                 <ArrowRight aria-hidden="true" className="size-3.5" />
               </Link>
             </div>

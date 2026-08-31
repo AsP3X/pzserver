@@ -88,6 +88,7 @@ export const PLAYER_NAV: NavGroup[] = [
       { to: '/me/character', label: 'nav.character', icon: User },
       { to: '/me/inventory', label: 'nav.inventory', icon: Backpack },
       { to: '/me/map', label: 'nav.map', icon: MapPin },
+      { to: '/me/friends', label: 'nav.friends', icon: Users },
     ],
   },
   {
