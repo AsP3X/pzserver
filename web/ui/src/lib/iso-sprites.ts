@@ -5,12 +5,19 @@
  * /api/v1/map-sprites. JPEG URLs are never used here.
  */
 
-import { dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
+import { ISO_DZI, dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
 
 const CELL = 256
 const HALF = 64
 const THUMB_PAD = HALF * 24
-const NEAR_SCALE = 0.1
+/** Live sprites only once a street is on screen. County/town stay on thumbs. */
+const NEAR_SCALE = 0.22
+/** More cells than this → one county overview blit instead of thousands of thumbs. */
+const OVERVIEW_CELLS = 28
+const OVERVIEW_W = 2048
+const MAX_INFLIGHT = 6
+const CELL_LIMIT = 48
+const THUMB_LIMIT = 96
 
 export interface SpriteMeta {
   ready: boolean
@@ -38,26 +45,52 @@ export interface SpriteRecord {
   oy: number
 }
 
-interface Occupant {
-  lx: number
-  ly: number
+interface PackedCell {
+  count: number
+  lx: Uint8Array
+  ly: Uint8Array
+  z: Int8Array
+  sprite: Uint32Array
+}
+
+interface VisibleSprite {
+  wx: number
+  wy: number
   z: number
   sprite: number
 }
 
 const atlasImages = new Map<number, HTMLImageElement>()
 const thumbImages = new Map<string, HTMLImageElement>()
-const cells = new Map<string, Occupant[] | 'missing'>()
+const thumbOrder: string[] = []
+const cells = new Map<string, PackedCell | 'loading' | 'empty'>()
+const cellOrder: string[] = []
+const queuedThumbs = new Set<string>()
 const listeners = new Set<() => void>()
+const visiblePool: VisibleSprite[] = []
+const stampedOverview = new Set<string>()
+
 let meta: SpriteMeta | null = null
 let sprites: SpriteRecord[] = []
 let spriteById = new Map<number, SpriteRecord>()
 let loading = false
+let notifyFrame = 0
+let inflight = 0
+const waitQueue: Array<() => void> = []
+let overview: HTMLCanvasElement | null = null
+let overviewCtx: CanvasRenderingContext2D | null = null
+let overviewH = 0
 
 function notify() {
-  for (const listener of listeners) {
-    listener()
+  if (notifyFrame) {
+    return
   }
+  notifyFrame = requestAnimationFrame(() => {
+    notifyFrame = 0
+    for (const listener of listeners) {
+      listener()
+    }
+  })
 }
 
 export function onSpriteMapChange(listener: () => void): () => void {
@@ -97,13 +130,51 @@ export async function loadSpriteMap(): Promise<void> {
   }
 }
 
-function want(image: HTMLImageElement, url: string) {
-  if (image.dataset.src === url) {
-    return
+function enqueue(start: () => Promise<void>, urgent = false) {
+  const run = () => {
+    inflight += 1
+    void start().finally(() => {
+      inflight -= 1
+      const next = waitQueue.shift()
+      if (next) {
+        next()
+      }
+    })
   }
-  image.dataset.src = url
-  image.onload = () => notify()
-  image.src = url
+  if (inflight < MAX_INFLIGHT) {
+    run()
+  } else if (urgent) {
+    waitQueue.unshift(run)
+  } else {
+    waitQueue.push(run)
+  }
+}
+
+function touch(
+  order: string[],
+  key: string,
+  limit: number,
+  drop: (key: string) => boolean,
+) {
+  const index = order.indexOf(key)
+  if (index >= 0) {
+    order.splice(index, 1)
+  }
+  order.push(key)
+  while (order.length > limit) {
+    const oldest = order.shift()
+    if (!oldest || oldest === key) {
+      continue
+    }
+    if (!drop(oldest)) {
+      order.push(oldest)
+      break
+    }
+  }
+}
+
+function revision(): string {
+  return meta?.generated_at ?? ''
 }
 
 function atlasPage(page: number): HTMLImageElement {
@@ -112,27 +183,90 @@ function atlasPage(page: number): HTMLImageElement {
     return existing
   }
   const image = new Image()
+  image.decoding = 'async'
   atlasImages.set(page, image)
-  want(image, `/api/v1/map-sprites/atlas/${page}?v=${meta?.generated_at ?? ''}`)
+  image.onload = () => notify()
+  image.src = `/api/v1/map-sprites/atlas/${page}?v=${revision()}`
   return image
 }
 
-function thumbImage(cx: number, cy: number): HTMLImageElement {
+function ensureOverview() {
+  if (overview && overviewCtx) {
+    return
+  }
+  overviewH = Math.max(1, Math.round((OVERVIEW_W * ISO_DZI.height) / ISO_DZI.width))
+  overview = document.createElement('canvas')
+  overview.width = OVERVIEW_W
+  overview.height = overviewH
+  overviewCtx = overview.getContext('2d', { alpha: true })
+}
+
+function stampOverview(cx: number, cy: number, image: HTMLImageElement) {
+  const key = `${cx}_${cy}`
+  if (stampedOverview.has(key) || image.naturalWidth === 0) {
+    return
+  }
+  ensureOverview()
+  if (!overviewCtx || !overview) {
+    return
+  }
+  const box = cellBox(cx, cy)
+  const sx = (box.left / ISO_DZI.width) * OVERVIEW_W
+  const sy = (box.top / ISO_DZI.height) * overviewH
+  const sw = ((box.right - box.left) / ISO_DZI.width) * OVERVIEW_W
+  const sh = ((box.bottom - box.top) / ISO_DZI.height) * overviewH
+  overviewCtx.drawImage(image, sx, sy, sw, sh)
+  stampedOverview.add(key)
+}
+
+function requestThumb(cx: number, cy: number, keep: boolean): HTMLImageElement | null {
   const key = `${cx}_${cy}`
   const existing = thumbImages.get(key)
   if (existing) {
+    touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
+      thumbImages.delete(drop)
+      return true
+    })
     return existing
   }
-  const image = new Image()
-  thumbImages.set(key, image)
-  want(image, `/api/v1/map-sprites/thumbs/${key}?v=${meta?.generated_at ?? ''}`)
-  return image
+  if (!keep && stampedOverview.has(key)) {
+    return null
+  }
+  if (queuedThumbs.has(key)) {
+    return null
+  }
+  queuedThumbs.add(key)
+  enqueue(async () => {
+    await new Promise<void>((resolve) => {
+      const image = new Image()
+      image.decoding = 'async'
+      image.onload = () => {
+        stampOverview(cx, cy, image)
+        if (keep) {
+          thumbImages.set(key, image)
+          touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
+            thumbImages.delete(drop)
+            return true
+          })
+        }
+        queuedThumbs.delete(key)
+        notify()
+        resolve()
+      }
+      image.onerror = () => {
+        queuedThumbs.delete(key)
+        resolve()
+      }
+      image.src = `/api/v1/map-sprites/thumbs/${key}?v=${revision()}`
+    })
+  })
+  return null
 }
 
-function decodeOccupancy(buffer: ArrayBuffer): Occupant[] {
+function decodeOccupancy(buffer: ArrayBuffer): PackedCell | 'empty' {
   const view = new DataView(buffer)
   if (view.byteLength < 8) {
-    return []
+    return 'empty'
   }
   if (
     view.getUint8(0) !== 0x53 ||
@@ -140,41 +274,72 @@ function decodeOccupancy(buffer: ArrayBuffer): Occupant[] {
     view.getUint8(2) !== 0x52 ||
     view.getUint8(3) !== 0x31
   ) {
-    return []
+    return 'empty'
   }
   const count = view.getUint32(4, true)
-  const rows: Occupant[] = []
+  if (count <= 0) {
+    return 'empty'
+  }
+  const rows = new Array<{ lx: number; ly: number; z: number; sprite: number }>(count)
   let offset = 8
+  let filled = 0
   for (let i = 0; i < count; i += 1) {
     if (offset + 7 > view.byteLength) {
       break
     }
-    rows.push({
+    rows[filled] = {
       lx: view.getUint8(offset),
       ly: view.getUint8(offset + 1),
       z: view.getInt8(offset + 2),
       sprite: view.getUint32(offset + 3, true),
-    })
+    }
+    filled += 1
     offset += 7
   }
-  return rows
+  rows.length = filled
+  rows.sort((left, right) => left.lx + left.ly - (right.lx + right.ly) || left.z - right.z)
+  const lx = new Uint8Array(filled)
+  const ly = new Uint8Array(filled)
+  const z = new Int8Array(filled)
+  const sprite = new Uint32Array(filled)
+  for (let i = 0; i < filled; i += 1) {
+    lx[i] = rows[i].lx
+    ly[i] = rows[i].ly
+    z[i] = rows[i].z
+    sprite[i] = rows[i].sprite
+  }
+  return { count: filled, lx, ly, z, sprite }
+}
+
+function dropCell(key: string): boolean {
+  if (cells.get(key) === 'loading') {
+    return false
+  }
+  cells.delete(key)
+  return true
 }
 
 function requestCell(cx: number, cy: number) {
   const key = `${cx}_${cy}`
   if (cells.has(key)) {
+    touch(cellOrder, key, CELL_LIMIT, dropCell)
     return
   }
-  cells.set(key, 'missing')
-  void fetch(`/api/v1/map-sprites/cells/${key}?v=${meta?.generated_at ?? ''}`).then(
-    async (response) => {
+  cells.set(key, 'loading')
+  touch(cellOrder, key, CELL_LIMIT, dropCell)
+  enqueue(async () => {
+    try {
+      const response = await fetch(`/api/v1/map-sprites/cells/${key}?v=${revision()}`)
       if (!response.ok) {
+        cells.set(key, 'empty')
         return
       }
       cells.set(key, decodeOccupancy(await response.arrayBuffer()))
       notify()
-    },
-  )
+    } catch {
+      cells.set(key, 'empty')
+    }
+  }, true)
 }
 
 function cellBox(cx: number, cy: number) {
@@ -186,44 +351,117 @@ function cellBox(cx: number, cy: number) {
     worldToDzi(x0, y0 + CELL),
     worldToDzi(x0 + CELL, y0 + CELL),
   ]
-  const xs = corners.map((point) => point.x)
-  const ys = corners.map((point) => point.y)
+  let left = corners[0].x
+  let right = corners[0].x
+  let top = corners[0].y
+  let bottom = corners[0].y
+  for (let i = 1; i < 4; i += 1) {
+    const point = corners[i]
+    if (point.x < left) {
+      left = point.x
+    }
+    if (point.x > right) {
+      right = point.x
+    }
+    if (point.y < top) {
+      top = point.y
+    }
+    if (point.y > bottom) {
+      bottom = point.y
+    }
+  }
   return {
-    left: Math.min(...xs) - THUMB_PAD,
-    top: Math.min(...ys) - THUMB_PAD,
-    right: Math.max(...xs) + THUMB_PAD,
-    bottom: Math.max(...ys) + THUMB_PAD,
+    left: left - THUMB_PAD,
+    top: top - THUMB_PAD,
+    right: right + THUMB_PAD,
+    bottom: bottom + THUMB_PAD,
   }
 }
 
-function visibleCells(mapping: IsoMapping, width: number, height: number) {
+function visibleCells(mapping: IsoMapping, width: number, height: number, near: boolean) {
   const corners = [
     mapping.toWorld(0, 0),
     mapping.toWorld(width, 0),
     mapping.toWorld(0, height),
     mapping.toWorld(width, height),
   ]
-  const reach = (meta?.max_reach ?? 800) / HALF
-  const minX = Math.min(...corners.map((point) => point.x)) - reach
-  const maxX = Math.max(...corners.map((point) => point.x)) + reach
-  const minY = Math.min(...corners.map((point) => point.y)) - reach
-  const maxY = Math.max(...corners.map((point) => point.y)) + reach
-  const cx0 = Math.floor(minX / CELL)
-  const cy0 = Math.floor(minY / CELL)
-  const cx1 = Math.floor(maxX / CELL)
-  const cy1 = Math.floor(maxY / CELL)
+  const reach = near ? Math.ceil((meta?.max_reach ?? 512) / HALF) + 8 : 4
+  let minX = corners[0].x
+  let maxX = corners[0].x
+  let minY = corners[0].y
+  let maxY = corners[0].y
+  for (let i = 1; i < 4; i += 1) {
+    const point = corners[i]
+    if (point.x < minX) {
+      minX = point.x
+    }
+    if (point.x > maxX) {
+      maxX = point.x
+    }
+    if (point.y < minY) {
+      minY = point.y
+    }
+    if (point.y > maxY) {
+      maxY = point.y
+    }
+  }
+  const cx0 = Math.floor((minX - reach) / CELL)
+  const cy0 = Math.floor((minY - reach) / CELL)
+  const cx1 = Math.floor((maxX + reach) / CELL)
+  const cy1 = Math.floor((maxY + reach) / CELL)
   const out: { cx: number; cy: number }[] = []
   for (let cx = cx0; cx <= cx1; cx += 1) {
     for (let cy = cy0; cy <= cy1; cy += 1) {
       out.push({ cx, cy })
     }
   }
-  return out
+  return { cover: out, minX: minX - reach, maxX: maxX + reach, minY: minY - reach, maxY: maxY + reach }
 }
 
 function dziToScreen(mapping: IsoMapping, px: number, py: number) {
   const world = dziToWorld(px, py)
   return mapping.toScreen(world.x, world.y)
+}
+
+function drawThumb(
+  ctx: CanvasRenderingContext2D,
+  mapping: IsoMapping,
+  cx: number,
+  cy: number,
+  width: number,
+  height: number,
+) {
+  const image = requestThumb(cx, cy, true)
+  if (!image || !image.complete || image.naturalWidth === 0) {
+    return
+  }
+  const box = cellBox(cx, cy)
+  const topLeft = dziToScreen(mapping, box.left, box.top)
+  const destW = (box.right - box.left) * mapping.isoScale
+  const destH = (box.bottom - box.top) * mapping.isoScale
+  if (topLeft.x > width || topLeft.y > height || topLeft.x + destW < 0 || topLeft.y + destH < 0) {
+    return
+  }
+  ctx.drawImage(image, topLeft.x, topLeft.y, destW, destH)
+}
+
+function drawOverview(
+  ctx: CanvasRenderingContext2D,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+) {
+  ensureOverview()
+  if (!overview) {
+    return false
+  }
+  const destX = (0 - mapping.center.x) * mapping.isoScale + width / 2
+  const destY = (0 - mapping.center.y) * mapping.isoScale + height / 2
+  const destW = ISO_DZI.width * mapping.isoScale
+  const destH = ISO_DZI.height * mapping.isoScale
+  ctx.imageSmoothingEnabled = true
+  ctx.drawImage(overview, destX, destY, destW, destH)
+  return stampedOverview.size > 0
 }
 
 export function drawIsoSprites(
@@ -232,64 +470,74 @@ export function drawIsoSprites(
   width: number,
   height: number,
 ): void {
+  ctx.fillStyle = '#141611'
+  ctx.fillRect(0, 0, width, height)
+
   if (!spriteMapReady()) {
     void loadSpriteMap()
-    ctx.fillStyle = '#141611'
-    ctx.fillRect(0, 0, width, height)
     return
   }
 
   const near = mapping.isoScale >= NEAR_SCALE
-  const cover = visibleCells(mapping, width, height)
+  const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
 
   if (!near) {
-    for (const { cx, cy } of cover) {
-      const image = thumbImage(cx, cy)
-      if (!image.complete || image.naturalWidth === 0) {
-        continue
+    ctx.imageSmoothingEnabled = true
+    if (cover.length >= OVERVIEW_CELLS) {
+      const focus = mapping.toWorld(width / 2, height / 2)
+      const fx = Math.floor(focus.x / CELL)
+      const fy = Math.floor(focus.y / CELL)
+      cover.sort((a, b) => Math.abs(a.cx - fx) + Math.abs(a.cy - fy) - (Math.abs(b.cx - fx) + Math.abs(b.cy - fy)))
+      for (const { cx, cy } of cover) {
+        requestThumb(cx, cy, false)
       }
-      const box = cellBox(cx, cy)
-      const topLeft = dziToScreen(mapping, box.left, box.top)
-      const destW = (box.right - box.left) * mapping.isoScale
-      const destH = (box.bottom - box.top) * mapping.isoScale
-      ctx.drawImage(image, topLeft.x, topLeft.y, destW, destH)
+      drawOverview(ctx, mapping, width, height)
+      return
+    }
+    for (const { cx, cy } of cover) {
+      drawThumb(ctx, mapping, cx, cy, width, height)
     }
     return
   }
 
   const scale = mapping.isoScale
-  const drawn: Occupant[] = []
+  let visibleCount = 0
   for (const { cx, cy } of cover) {
     requestCell(cx, cy)
     const occupants = cells.get(`${cx}_${cy}`)
-    if (!occupants || occupants === 'missing') {
-      const image = thumbImage(cx, cy)
-      if (image.complete && image.naturalWidth > 0) {
-        const box = cellBox(cx, cy)
-        const topLeft = dziToScreen(mapping, box.left, box.top)
-        ctx.drawImage(
-          image,
-          topLeft.x,
-          topLeft.y,
-          (box.right - box.left) * scale,
-          (box.bottom - box.top) * scale,
-        )
-      }
+    if (!occupants || occupants === 'loading' || occupants === 'empty') {
+      drawThumb(ctx, mapping, cx, cy, width, height)
       continue
     }
-    for (const occupant of occupants) {
-      drawn.push({
-        lx: cx * CELL + occupant.lx,
-        ly: cy * CELL + occupant.ly,
-        z: occupant.z,
-        sprite: occupant.sprite,
-      })
+    const originX = cx * CELL
+    const originY = cy * CELL
+    const { count, lx, ly, z, sprite } = occupants
+    for (let i = 0; i < count; i += 1) {
+      const wx = originX + lx[i]
+      const wy = originY + ly[i]
+      if (wx < minX || wx > maxX || wy < minY || wy > maxY) {
+        continue
+      }
+      const row = visiblePool[visibleCount]
+      if (row) {
+        row.wx = wx
+        row.wy = wy
+        row.z = z[i]
+        row.sprite = sprite[i]
+      } else {
+        visiblePool.push({ wx, wy, z: z[i], sprite: sprite[i] })
+      }
+      visibleCount += 1
     }
   }
 
-  drawn.sort((left, right) => left.lx + left.ly - (right.lx + right.ly) || left.z - right.z)
+  const drawn = visiblePool.slice(0, visibleCount)
+  drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
 
-  for (const occupant of drawn) {
+  ctx.imageSmoothingEnabled = scale < 0.85
+  const margin = (meta?.max_reach ?? 512) * scale + 8
+  for (let i = 0; i < drawn.length; i += 1) {
+    const occupant = drawn[i]
     const sprite = spriteById.get(occupant.sprite)
     if (!sprite) {
       continue
@@ -298,19 +546,17 @@ export function drawIsoSprites(
     if (!page.complete || page.naturalWidth === 0) {
       continue
     }
-    const top = mapping.toScreen(occupant.lx, occupant.ly)
+    const destW = sprite.w * scale
+    const destH = sprite.h * scale
+    if (destW < 0.6 || destH < 0.6) {
+      continue
+    }
+    const top = mapping.toScreen(occupant.wx, occupant.wy)
     const dx = top.x + sprite.ox * scale
     const dy = top.y + HALF * scale + sprite.oy * scale
-    ctx.drawImage(
-      page,
-      sprite.x,
-      sprite.y,
-      sprite.w,
-      sprite.h,
-      dx,
-      dy,
-      sprite.w * scale,
-      sprite.h * scale,
-    )
+    if (dx > width + margin || dy > height + margin || dx + destW < -margin || dy + destH < -margin) {
+      continue
+    }
+    ctx.drawImage(page, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, destW, destH)
   }
 }

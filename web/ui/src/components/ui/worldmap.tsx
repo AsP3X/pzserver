@@ -204,8 +204,8 @@ export function WorldmapView({
     x: number
     y: number
   } | null>(null)
-  const [isoTick, setIsoTick] = useState(0)
   const [isoFellBack, setIsoFellBack] = useState(false)
+  const [spriteReady, setSpriteReady] = useState(spriteMapReady)
   const [tileMeta, setTileMeta] = useState<TileMeta | null>(null)
   const [tapeTick, setTapeTick] = useState(0)
   const updating = tileMeta?.updating ?? NO_UPDATING
@@ -217,7 +217,19 @@ export function WorldmapView({
   const viewRef = useRef<View | null>(null)
   const isoScaleRef = useRef(DEFAULT_ISO_SCALE)
   const modeRef = useRef(mode)
+  const drawRef = useRef<() => void>(() => {})
+  const drawFrame = useRef(0)
   modeRef.current = mode
+
+  const scheduleDraw = useCallback(() => {
+    if (drawFrame.current) {
+      return
+    }
+    drawFrame.current = window.requestAnimationFrame(() => {
+      drawFrame.current = 0
+      drawRef.current()
+    })
+  }, [])
 
   const setBoth = useCallback((next: View) => {
     viewRef.current = next
@@ -242,8 +254,24 @@ export function WorldmapView({
     }
   }, [])
 
-  useEffect(() => isoTiles.subscribe(() => setIsoTick((tick) => tick + 1)), [])
-  useEffect(() => onSpriteMapChange(() => setIsoTick((tick) => tick + 1)), [])
+  useEffect(
+    () =>
+      isoTiles.subscribe(() => {
+        scheduleDraw()
+        if (isoTiles.unreachable) {
+          setIsoFellBack(true)
+        }
+      }),
+    [scheduleDraw],
+  )
+  useEffect(
+    () =>
+      onSpriteMapChange(() => {
+        scheduleDraw()
+        setSpriteReady(spriteMapReady())
+      }),
+    [scheduleDraw],
+  )
   useEffect(() => {
     void loadSpriteMap()
   }, [])
@@ -398,12 +426,16 @@ export function WorldmapView({
       }
       const rect = box.getBoundingClientRect()
       const ratio = window.devicePixelRatio || 1
-      element.width = Math.round(rect.width * ratio)
-      element.height = Math.round(rect.height * ratio)
-      element.style.width = `${rect.width}px`
-      element.style.height = `${rect.height}px`
+      const pixelsW = Math.round(rect.width * ratio)
+      const pixelsH = Math.round(rect.height * ratio)
+      if (element.width !== pixelsW || element.height !== pixelsH) {
+        element.width = pixelsW
+        element.height = pixelsH
+        element.style.width = `${rect.width}px`
+        element.style.height = `${rect.height}px`
+      }
 
-      const ctx = element.getContext('2d')
+      const ctx = element.getContext('2d', { alpha: false })
       if (!ctx) {
         return
       }
@@ -460,14 +492,18 @@ export function WorldmapView({
       ctx.fillRect(0, 0, rect.width, rect.height)
     }
 
+    drawRef.current = paint
     paint()
     const observer = new ResizeObserver(paint)
     observer.observe(box)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      window.cancelAnimationFrame(drawFrame.current)
+      drawFrame.current = 0
+    }
   }, [
     brushRadius,
     destination,
-    isoTick,
     map,
     marker,
     drawnMarkers,
@@ -761,28 +797,29 @@ export function WorldmapView({
               center.x - dx / isoScaleRef.current,
               center.y - dy / isoScaleRef.current,
             )
-            setBoth(clamp({ x: next.x, y: next.y, scale: isoScaleRef.current }))
+            viewRef.current = clamp({ x: next.x, y: next.y, scale: isoScaleRef.current })
           } else if (map) {
-            setBoth(
-              clampView(
-                {
-                  ...current,
-                  x: current.x - dx / current.scale,
-                  y: current.y - dy / current.scale,
-                },
-                map,
-              ),
+            viewRef.current = clampView(
+              {
+                ...current,
+                x: current.x - dx / current.scale,
+                y: current.y - dy / current.scale,
+              },
+              map,
             )
           }
 
           held.lastX = event.clientX
           held.lastY = event.clientY
-          setHover(null)
+          drawRef.current()
         }}
         onPointerUp={(event) => {
           const held = gesture.current
           gesture.current = null
           event.currentTarget.releasePointerCapture(event.pointerId)
+          if (held?.dragged && viewRef.current) {
+            setView({ ...viewRef.current })
+          }
           if (rectMode && held?.button === 0) {
             const start = rectStart.current
             rectStart.current = null
@@ -871,7 +908,7 @@ export function WorldmapView({
           />
           <ModeButton
             active={mode === 'iso-sprite'}
-            disabled={!spriteMapReady()}
+            disabled={!spriteReady}
             label={t('map.mode_iso_sprite')}
             onClick={() => selectMode('iso-sprite')}
           />
