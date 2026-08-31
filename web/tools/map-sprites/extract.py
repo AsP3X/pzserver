@@ -51,6 +51,12 @@ def load_textures(texture_dir: Path):
     packs = sorted(texture_dir.glob("*.pack"))
     if not packs:
         print(f"FAIL: no texture packs at {texture_dir}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("The dedicated server install does not ship them. Copy a PZ", file=sys.stderr)
+        print("client's media/texturepacks (about 527 MB, *.pack files) onto", file=sys.stderr)
+        print("the host at data/server/media/texturepacks/, then retry", file=sys.stderr)
+        print("make map-sprites. Same packs as make map-tiles. See", file=sys.stderr)
+        print("docs/map-sprites.md.", file=sys.stderr)
         raise SystemExit(1)
     for pack in packs:
         print(f"==> pack {pack.name}", flush=True)
