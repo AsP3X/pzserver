@@ -20,6 +20,7 @@ import {
   drawIsoSprites,
   loadSpriteMap,
   onSpriteMapChange,
+  setSpriteMapMoving,
   spriteMapReady,
 } from '@/lib/iso-sprites'
 import type { TileMeta, UpdatingJob } from '@/lib/iso-tiles'
@@ -219,6 +220,8 @@ export function WorldmapView({
   const modeRef = useRef(mode)
   const drawRef = useRef<() => void>(() => {})
   const drawFrame = useRef(0)
+  const sizeRef = useRef({ width: 0, height: 0 })
+  const idleTimer = useRef(0)
   modeRef.current = mode
 
   const scheduleDraw = useCallback(() => {
@@ -424,26 +427,31 @@ export function WorldmapView({
       if (!latest) {
         return
       }
-      const rect = box.getBoundingClientRect()
-      const ratio = window.devicePixelRatio || 1
-      const pixelsW = Math.round(rect.width * ratio)
-      const pixelsH = Math.round(rect.height * ratio)
+      let { width, height } = sizeRef.current
+      if (width <= 0 || height <= 0) {
+        const rect = box.getBoundingClientRect()
+        width = rect.width
+        height = rect.height
+        sizeRef.current = { width, height }
+      }
+      const pixelsW = Math.max(1, Math.round(width))
+      const pixelsH = Math.max(1, Math.round(height))
       if (element.width !== pixelsW || element.height !== pixelsH) {
         element.width = pixelsW
         element.height = pixelsH
-        element.style.width = `${rect.width}px`
-        element.style.height = `${rect.height}px`
+        element.style.width = `${width}px`
+        element.style.height = `${height}px`
       }
 
       const ctx = element.getContext('2d', { alpha: false })
       if (!ctx) {
         return
       }
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
 
       const overlay = {
-        width: rect.width,
-        height: rect.height,
+        width,
+        height,
         marker,
         markerColor: '#ffb000',
         markers: drawnMarkers,
@@ -469,15 +477,15 @@ export function WorldmapView({
       }
 
       if (isoCamera(modeRef.current)) {
-        const floor = minIsoScaleForViewport(rect.width, rect.height)
+        const floor = minIsoScaleForViewport(width, height)
         if (isoScaleRef.current < floor) {
           isoScaleRef.current = floor
         }
-        const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, rect.width, rect.height)
+        const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, width, height)
         if (modeRef.current === 'iso-sprite') {
-          drawIsoSprites(ctx, mapping, rect.width, rect.height)
+          drawIsoSprites(ctx, mapping, width, height)
         } else {
-          drawIsoTiles(ctx, mapping, rect.width, rect.height)
+          drawIsoTiles(ctx, mapping, width, height)
         }
         drawMapOverlays(ctx, overlay, (x, y) => mapping.toScreen(x, y), 2)
         return
@@ -489,17 +497,25 @@ export function WorldmapView({
       }
 
       ctx.fillStyle = '#141611'
-      ctx.fillRect(0, 0, rect.width, rect.height)
+      ctx.fillRect(0, 0, width, height)
     }
 
     drawRef.current = paint
     paint()
-    const observer = new ResizeObserver(paint)
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect
+      if (!next) {
+        return
+      }
+      sizeRef.current = { width: next.width, height: next.height }
+      paint()
+    })
     observer.observe(box)
     return () => {
       observer.disconnect()
       window.cancelAnimationFrame(drawFrame.current)
       drawFrame.current = 0
+      window.clearTimeout(idleTimer.current)
     }
   }, [
     brushRadius,
@@ -549,7 +565,16 @@ export function WorldmapView({
           heldDzi.x - (anchorX - box.width / 2) / nextScale,
           heldDzi.y - (anchorY - box.height / 2) / nextScale,
         )
-        setBoth(clamp({ x: camera.x, y: camera.y, scale: nextScale }))
+        viewRef.current = clamp({ x: camera.x, y: camera.y, scale: nextScale })
+        setSpriteMapMoving(true)
+        drawRef.current()
+        window.clearTimeout(idleTimer.current)
+        idleTimer.current = window.setTimeout(() => {
+          setSpriteMapMoving(false)
+          if (viewRef.current) {
+            setView({ ...viewRef.current })
+          }
+        }, 120)
         return
       }
 
@@ -811,12 +836,14 @@ export function WorldmapView({
 
           held.lastX = event.clientX
           held.lastY = event.clientY
+          setSpriteMapMoving(true)
           drawRef.current()
         }}
         onPointerUp={(event) => {
           const held = gesture.current
           gesture.current = null
           event.currentTarget.releasePointerCapture(event.pointerId)
+          setSpriteMapMoving(false)
           if (held?.dragged && viewRef.current) {
             setView({ ...viewRef.current })
           }
@@ -845,6 +872,7 @@ export function WorldmapView({
         onPointerCancel={() => {
           gesture.current = null
           rectStart.current = null
+          setSpriteMapMoving(false)
           setDraftRect(null)
           setHover(null)
           setPaintHover(null)

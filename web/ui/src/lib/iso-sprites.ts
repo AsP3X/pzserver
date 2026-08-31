@@ -80,6 +80,34 @@ const waitQueue: Array<() => void> = []
 let overview: HTMLCanvasElement | null = null
 let overviewCtx: CanvasRenderingContext2D | null = null
 let overviewH = 0
+let cameraMoving = false
+let rasterFrame = 0
+let rasterJob: RasterJob | null = null
+let spriteLayer: SpriteLayer | null = null
+
+interface SpriteLayer {
+  canvas: HTMLCanvasElement
+  centerX: number
+  centerY: number
+  scale: number
+  width: number
+  height: number
+  ready: number
+}
+
+interface RasterJob {
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+  mapping: IsoMapping
+  width: number
+  height: number
+  rows: VisibleSprite[]
+  index: number
+  centerX: number
+  centerY: number
+  scale: number
+  ready: number
+}
 
 function notify() {
   if (notifyFrame) {
@@ -91,6 +119,41 @@ function notify() {
       listener()
     }
   })
+}
+
+export function setSpriteMapMoving(moving: boolean) {
+  if (cameraMoving === moving) {
+    return
+  }
+  cameraMoving = moving
+  if (moving) {
+    cancelRaster()
+    return
+  }
+  notify()
+}
+
+function cancelRaster() {
+  if (rasterFrame) {
+    cancelAnimationFrame(rasterFrame)
+    rasterFrame = 0
+  }
+  rasterJob = null
+}
+
+function cameraMatches(
+  layer: { centerX: number; centerY: number; scale: number; width: number; height: number },
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+) {
+  return (
+    layer.scale === mapping.isoScale &&
+    layer.width === width &&
+    layer.height === height &&
+    Math.abs(layer.centerX - mapping.center.x) < 0.5 &&
+    Math.abs(layer.centerY - mapping.center.y) < 0.5
+  )
 }
 
 export function onSpriteMapChange(listener: () => void): () => void {
@@ -185,7 +248,11 @@ function atlasPage(page: number): HTMLImageElement {
   const image = new Image()
   image.decoding = 'async'
   atlasImages.set(page, image)
-  image.onload = () => notify()
+  image.onload = () => {
+    spriteLayer = null
+    cancelRaster()
+    notify()
+  }
   image.src = `/api/v1/map-sprites/atlas/${page}?v=${revision()}`
   return image
 }
@@ -464,49 +531,78 @@ function drawOverview(
   return stampedOverview.size > 0
 }
 
-export function drawIsoSprites(
+function drawThumbsOrOverview(
   ctx: CanvasRenderingContext2D,
   mapping: IsoMapping,
   width: number,
   height: number,
-): void {
-  ctx.fillStyle = '#141611'
-  ctx.fillRect(0, 0, width, height)
-
-  if (!spriteMapReady()) {
-    void loadSpriteMap()
-    return
-  }
-
-  const near = mapping.isoScale >= NEAR_SCALE
-  const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
-
-  if (!near) {
-    ctx.imageSmoothingEnabled = true
-    if (cover.length >= OVERVIEW_CELLS) {
-      const focus = mapping.toWorld(width / 2, height / 2)
-      const fx = Math.floor(focus.x / CELL)
-      const fy = Math.floor(focus.y / CELL)
-      cover.sort((a, b) => Math.abs(a.cx - fx) + Math.abs(a.cy - fy) - (Math.abs(b.cx - fx) + Math.abs(b.cy - fy)))
-      for (const { cx, cy } of cover) {
-        requestThumb(cx, cy, false)
-      }
-      drawOverview(ctx, mapping, width, height)
-      return
-    }
+  cover: { cx: number; cy: number }[],
+) {
+  ctx.imageSmoothingEnabled = true
+  if (cover.length >= OVERVIEW_CELLS) {
+    const focus = mapping.toWorld(width / 2, height / 2)
+    const fx = Math.floor(focus.x / CELL)
+    const fy = Math.floor(focus.y / CELL)
+    cover.sort(
+      (a, b) =>
+        Math.abs(a.cx - fx) +
+        Math.abs(a.cy - fy) -
+        (Math.abs(b.cx - fx) + Math.abs(b.cy - fy)),
+    )
     for (const { cx, cy } of cover) {
-      drawThumb(ctx, mapping, cx, cy, width, height)
+      requestThumb(cx, cy, false)
     }
+    drawOverview(ctx, mapping, width, height)
     return
   }
+  for (const { cx, cy } of cover) {
+    drawThumb(ctx, mapping, cx, cy, width, height)
+  }
+}
 
+function blitSprite(
+  ctx: CanvasRenderingContext2D,
+  mapping: IsoMapping,
+  occupant: VisibleSprite,
+  width: number,
+  height: number,
+) {
+  const sprite = spriteById.get(occupant.sprite)
+  if (!sprite) {
+    return
+  }
+  const page = atlasPage(sprite.page)
+  if (!page.complete || page.naturalWidth === 0) {
+    return
+  }
   const scale = mapping.isoScale
+  const destW = sprite.w * scale
+  const destH = sprite.h * scale
+  if (destW < 0.75 || destH < 0.75) {
+    return
+  }
+  const top = mapping.toScreen(occupant.wx, occupant.wy)
+  const dx = top.x + sprite.ox * scale
+  const dy = top.y + HALF * scale + sprite.oy * scale
+  const margin = (meta?.max_reach ?? 512) * scale + 8
+  if (dx > width + margin || dy > height + margin || dx + destW < -margin || dy + destH < -margin) {
+    return
+  }
+  ctx.drawImage(page, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, destW, destH)
+}
+
+function collectVisible(
+  cover: { cx: number; cy: number }[],
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+): number {
   let visibleCount = 0
   for (const { cx, cy } of cover) {
     requestCell(cx, cy)
     const occupants = cells.get(`${cx}_${cy}`)
     if (!occupants || occupants === 'loading' || occupants === 'empty') {
-      drawThumb(ctx, mapping, cx, cy, width, height)
       continue
     }
     const originX = cx * CELL
@@ -530,33 +626,134 @@ export function drawIsoSprites(
       visibleCount += 1
     }
   }
+  return visibleCount
+}
 
-  const drawn = visiblePool.slice(0, visibleCount)
-  drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
-
-  ctx.imageSmoothingEnabled = scale < 0.85
-  const margin = (meta?.max_reach ?? 512) * scale + 8
-  for (let i = 0; i < drawn.length; i += 1) {
-    const occupant = drawn[i]
-    const sprite = spriteById.get(occupant.sprite)
-    if (!sprite) {
-      continue
-    }
-    const page = atlasPage(sprite.page)
-    if (!page.complete || page.naturalWidth === 0) {
-      continue
-    }
-    const destW = sprite.w * scale
-    const destH = sprite.h * scale
-    if (destW < 0.6 || destH < 0.6) {
-      continue
-    }
-    const top = mapping.toScreen(occupant.wx, occupant.wy)
-    const dx = top.x + sprite.ox * scale
-    const dy = top.y + HALF * scale + sprite.oy * scale
-    if (dx > width + margin || dy > height + margin || dx + destW < -margin || dy + destH < -margin) {
-      continue
-    }
-    ctx.drawImage(page, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, destW, destH)
+function pumpRaster() {
+  rasterFrame = 0
+  const job = rasterJob
+  if (!job || cameraMoving) {
+    return
   }
+  const started = performance.now()
+  if (job.index === 0) {
+    job.ctx.fillStyle = '#141611'
+    job.ctx.fillRect(0, 0, job.width, job.height)
+    job.ctx.imageSmoothingEnabled = job.scale < 0.85
+  }
+  while (job.index < job.rows.length && performance.now() - started < 6) {
+    blitSprite(job.ctx, job.mapping, job.rows[job.index], job.width, job.height)
+    job.index += 1
+  }
+  if (job.index < job.rows.length) {
+    rasterFrame = requestAnimationFrame(pumpRaster)
+    return
+  }
+  spriteLayer = {
+    canvas: job.canvas,
+    centerX: job.centerX,
+    centerY: job.centerY,
+    scale: job.scale,
+    width: job.width,
+    height: job.height,
+    ready: job.ready,
+  }
+  rasterJob = null
+  notify()
+}
+
+function readyCells(cover: { cx: number; cy: number }[]): number {
+  let ready = 0
+  for (const { cx, cy } of cover) {
+    const occupants = cells.get(`${cx}_${cy}`)
+    if (occupants && occupants !== 'loading') {
+      ready += 1
+    }
+  }
+  return ready
+}
+
+function startRaster(
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+  cover: { cx: number; cy: number }[],
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+) {
+  const ready = readyCells(cover)
+  if (rasterJob && cameraMatches(rasterJob, mapping, width, height) && rasterJob.ready === ready) {
+    return
+  }
+  cancelRaster()
+  const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
+  if (visibleCount === 0) {
+    return
+  }
+  const rows: VisibleSprite[] = []
+  for (let i = 0; i < visibleCount; i += 1) {
+    const src = visiblePool[i]
+    rows.push({ wx: src.wx, wy: src.wy, z: src.z, sprite: src.sprite })
+  }
+  rows.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width))
+  canvas.height = Math.max(1, Math.round(height))
+  const ctx = canvas.getContext('2d', { alpha: false })
+  if (!ctx) {
+    return
+  }
+  rasterJob = {
+    canvas,
+    ctx,
+    mapping,
+    width,
+    height,
+    rows,
+    index: 0,
+    centerX: mapping.center.x,
+    centerY: mapping.center.y,
+    scale: mapping.isoScale,
+    ready,
+  }
+  rasterFrame = requestAnimationFrame(pumpRaster)
+}
+
+export function drawIsoSprites(
+  ctx: CanvasRenderingContext2D,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+): void {
+  ctx.fillStyle = '#141611'
+  ctx.fillRect(0, 0, width, height)
+
+  if (!spriteMapReady()) {
+    void loadSpriteMap()
+    return
+  }
+
+  const near = mapping.isoScale >= NEAR_SCALE && !cameraMoving
+  const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
+
+  if (!near) {
+    cancelRaster()
+    drawThumbsOrOverview(ctx, mapping, width, height, cover)
+    return
+  }
+
+  const ready = readyCells(cover)
+  if (
+    spriteLayer &&
+    cameraMatches(spriteLayer, mapping, width, height) &&
+    spriteLayer.ready >= ready
+  ) {
+    ctx.drawImage(spriteLayer.canvas, 0, 0)
+    return
+  }
+
+  drawThumbsOrOverview(ctx, mapping, width, height, cover)
+  startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
 }
