@@ -5,8 +5,9 @@ import { useState, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { Field, FormError } from '@/components/ui/field'
+import { FormError } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
+import { PlayerPickerDialog } from '@/components/ui/player-picker'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusPill } from '@/components/ui/status-pill'
 import { api, ApiError, type FriendAction, type FriendCard } from '@/lib/api'
@@ -37,7 +38,7 @@ export function FriendsPage() {
   const queryClient = useQueryClient()
   const { data, isPending, isError, refetch } = useQuery(myFriendsQuery)
 
-  const [username, setUsername] = useState('')
+  const [picking, setPicking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pending, setPending] = useState<FriendCard | null>(null)
@@ -51,9 +52,9 @@ export function FriendsPage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['me', 'friends'] })
 
   const send = useMutation({
-    mutationFn: () => api.sendFriendRequest(username.trim()),
+    mutationFn: (name: string) => api.sendFriendRequest(name),
     onSuccess: async (card) => {
-      setUsername('')
+      setPicking(false)
       setNotice(
         card.status === 'accepted' ? t('me.friends_done_accept') : t('me.friends_sent'),
       )
@@ -119,35 +120,24 @@ export function FriendsPage() {
         <>
           <Panel bracketed>
             <PanelHeader label={t('me.friends_add')} />
-            <form
-              className="flex flex-col gap-3 p-5 sm:flex-row sm:items-end"
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (username.trim()) {
-                  send.mutate()
-                }
-              }}
-            >
-              <div className="min-w-0 flex-1">
-                <Field
-                  label={t('me.friends_add_label')}
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder={t('me.friends_add_placeholder')}
-                  autoComplete="off"
-                />
-              </div>
-              <Button type="submit" disabled={busy || username.trim().length === 0}>
+            <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
+              <Button disabled={busy} onClick={() => setPicking(true)}>
                 <UserPlus aria-hidden="true" className="size-3.5" />
-                {t('me.friends_send')}
+                {t('me.friends_find')}
               </Button>
-            </form>
+            </div>
             {error ? (
               <p className="px-5 pb-5 text-sm text-blood">{error}</p>
             ) : notice ? (
               <p className="px-5 pb-5 text-sm text-moss">{notice}</p>
             ) : null}
           </Panel>
+
+          <PlayerPickerDialog
+            open={picking}
+            onSelect={(name) => send.mutate(name)}
+            onClose={() => setPicking(false)}
+          />
 
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-2">
             <FriendColumn

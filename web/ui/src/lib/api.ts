@@ -401,6 +401,22 @@ export interface FriendsView {
   blocked: FriendCard[]
 }
 
+export type FriendRelation =
+  | 'none'
+  | 'friends'
+  | 'incoming'
+  | 'outgoing'
+  | 'blocked'
+  | 'unregistered'
+
+/** A survivor the add-friend picker can search. */
+export interface FriendDirectoryEntry {
+  username: string
+  profession: string | null
+  online: boolean
+  relation: FriendRelation | string
+}
+
 export type FriendAction =
   | 'accept'
   | 'decline'
@@ -1453,6 +1469,8 @@ export const api = {
   readMyReport: (id: number) => post<PlayerReport>(`/api/v1/me/reports/${id}/read`, {}),
 
   myFriends: () => request<FriendsView>('/api/v1/me/friends'),
+
+  friendDirectory: () => request<FriendDirectoryEntry[]>('/api/v1/me/friends/directory'),
 
   sendFriendRequest: (username: string) =>
     post<FriendCard>('/api/v1/me/friends', { username }),

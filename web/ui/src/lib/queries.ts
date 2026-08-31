@@ -100,6 +100,17 @@ export const myFriendsQuery = queryOptions({
   staleTime: 5_000,
 })
 
+/**
+ * Survivors the add-friend picker can search. Fetched when the dialog
+ * opens; the friends list query above does not include people you have
+ * never requested, so this is a separate key.
+ */
+export const friendDirectoryQuery = queryOptions({
+  queryKey: ['me', 'friends', 'directory'],
+  queryFn: api.friendDirectory,
+  staleTime: 15_000,
+})
+
 export const myCharacterQuery = queryOptions({
   queryKey: ['me', 'character'],
   queryFn: api.myCharacter,

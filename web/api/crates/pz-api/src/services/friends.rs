@@ -32,6 +32,17 @@ pub struct FriendsView {
     pub blocked: Vec<FriendCard>,
 }
 
+/// Someone the picker can search: a website account, or a character the
+/// server has seen who has not registered yet.
+#[derive(Debug, Clone, Serialize)]
+pub struct DirectoryEntry {
+    pub username: String,
+    pub profession: Option<String>,
+    pub online: bool,
+    /// `none`, `friends`, `incoming`, `outgoing`, `blocked`, `unregistered`.
+    pub relation: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FriendCard {
     pub id: Uuid,
@@ -117,6 +128,110 @@ pub async fn view(
         friends,
         blocked,
     })
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct DirectoryRow {
+    username: String,
+    profession: Option<String>,
+    registered: bool,
+}
+
+/// Survivors the signed-in player can search when sending a request.
+///
+/// Website accounts come first. Characters the game has seen but who have no
+/// account still appear, marked `unregistered`, so a search for the name they
+/// play under finds them instead of looking like a miss.
+pub async fn directory(
+    db: &PgPool,
+    user_id: Uuid,
+    online: &[String],
+) -> Result<Vec<DirectoryEntry>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, DirectoryRow>(
+        r#"
+        SELECT DISTINCT ON (lower(username)) username, profession, registered FROM (
+            SELECT
+                u.username,
+                p.profession,
+                true AS registered
+            FROM users u
+            LEFT JOIN player_stats p ON lower(p.username) = lower(u.username)
+            WHERE u.username IS NOT NULL
+              AND u.id <> $1
+
+            UNION ALL
+
+            SELECT
+                p.username,
+                p.profession,
+                false AS registered
+            FROM player_stats p
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM users u
+                WHERE u.username IS NOT NULL
+                  AND lower(u.username) = lower(p.username)
+            )
+        ) people
+        ORDER BY lower(username), registered DESC, username
+        LIMIT 500
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?;
+
+    let edges = load_edges(db, user_id).await?;
+    let mut relation_by_name: std::collections::HashMap<String, &'static str> =
+        std::collections::HashMap::new();
+    let mut hidden = std::collections::HashSet::new();
+
+    for row in &edges {
+        let key = row.other_username.to_lowercase();
+        match row.status.as_str() {
+            "pending" if row.requested_by == user_id => {
+                relation_by_name.insert(key, "outgoing");
+            }
+            "pending" => {
+                relation_by_name.insert(key, "incoming");
+            }
+            "accepted" => {
+                relation_by_name.insert(key, "friends");
+            }
+            "blocked" if row.blocked_by == Some(user_id) => {
+                relation_by_name.insert(key, "blocked");
+            }
+            "blocked" => {
+                hidden.insert(key);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let key = row.username.to_lowercase();
+            if hidden.contains(&key) {
+                return None;
+            }
+            let relation = relation_by_name
+                .get(&key)
+                .copied()
+                .unwrap_or(if row.registered {
+                    "none"
+                } else {
+                    "unregistered"
+                })
+                .to_owned();
+            Some(DirectoryEntry {
+                online: character::is_online(online, &row.username),
+                username: row.username,
+                profession: row.profession,
+                relation,
+            })
+        })
+        .collect())
 }
 
 /// Snapshot one player's roster for the Desk.

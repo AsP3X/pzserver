@@ -34,6 +34,7 @@ pub fn routes() -> Router<AppState> {
         .route("/me/reports/{id}/messages", post(reply_report))
         .route("/me/reports/{id}/read", post(read_report))
         .route("/me/friends", get(my_friends).post(send_friend_request))
+        .route("/me/friends/directory", get(friend_directory))
         .route("/me/friends/{id}", axum::routing::patch(patch_friend))
         .route("/me/friends/{id}/{action}", post(friend_action))
 }
@@ -426,6 +427,14 @@ async fn my_friends(
     Ok(Json(
         friends::view(&state.db, user.id, &online, &live).await?,
     ))
+}
+
+async fn friend_directory(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<Vec<friends::DirectoryEntry>>> {
+    let online = state.status.current().await.players;
+    Ok(Json(friends::directory(&state.db, user.id, &online).await?))
 }
 
 #[derive(Deserialize)]
