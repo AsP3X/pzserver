@@ -84,12 +84,13 @@ def write_cell(
     con: sqlite3.Connection,
     cx: int,
     cy: int,
-    records: list[tuple[int, int, int, int]],
+    records: list[tuple[int, int, int, int]] | bytes,
     thumb: bytes | None,
 ) -> None:
+    blob = records if isinstance(records, (bytes, bytearray)) else encode(records)
     con.execute(
         "INSERT INTO cells(cx, cy, occupancy) VALUES (?, ?, ?)",
-        (cx, cy, encode(records)),
+        (cx, cy, blob),
     )
     if thumb is not None:
         con.execute("INSERT INTO thumbs(cx, cy, data) VALUES (?, ?, ?)", (cx, cy, thumb))

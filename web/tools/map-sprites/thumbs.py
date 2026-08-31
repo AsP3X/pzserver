@@ -31,15 +31,43 @@ def cell_dzi_box(cx: int, cy: int) -> tuple[int, int, int, int]:
     )
 
 
+def thumb_scale() -> float:
+    """Cell diamonds are the same size everywhere, so one scale fits all thumbs."""
+    left, _top, right, _bottom = cell_dzi_box(0, 0)
+    return THUMB_W / max(1, right - left)
+
+
+def scale_stamp(image: Image.Image, scale: float) -> Image.Image:
+    w, h = image.size
+    dw = max(1, round(w * scale))
+    dh = max(1, round(h * scale))
+    if (dw, dh) == (w, h):
+        return image
+    return image.resize((dw, dh), Image.Resampling.BILINEAR)
+
+
+def png_bytes(image: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    # optimize=True is a second, slower pass. County thumbs and atlas pages
+    # do not need it; the extra minutes add up across thousands of cells.
+    image.save(buf, format="PNG", compress_level=4, optimize=False)
+    return buf.getvalue()
+
+
 def render_thumb(
     records: list[tuple[int, int, int, Image.Image, int, int]],
     cx: int,
     cy: int,
+    *,
+    pre_scaled: bool = False,
 ) -> bytes | None:
     """records: (lx, ly, z, image, ox, oy) already sorted back-to-front.
 
     Blits in thumb space. A native-resolution canvas for a 256-square cell
     is tens of thousands of pixels on a side and would rival the JPEG pack.
+
+    Pass `pre_scaled=True` when `image` is already `scale_stamp`'d; otherwise
+    every blit resizes the native sprite (hours on a full county).
     """
     if not records:
         return None
@@ -54,13 +82,27 @@ def render_thumb(
     origin_y = cy * CELL
     for lx, ly, _z, image, ox, oy in records:
         ax, ay = square_anchor(origin_x + lx, origin_y + ly)
-        w, h = image.size
-        dw = max(1, round(w * scale))
-        dh = max(1, round(h * scale))
-        stamp = image.resize((dw, dh), Image.Resampling.BILINEAR)
+        stamp = image if pre_scaled else scale_stamp(image, scale)
         dx = round((ax + ox - left) * scale)
         dy = round((ay + oy - top) * scale)
+        _composite(canvas, stamp, dx, dy)
+    return png_bytes(canvas)
+
+
+def _composite(canvas: Image.Image, stamp: Image.Image, dx: int, dy: int) -> None:
+    cw, ch = canvas.size
+    sw, sh = stamp.size
+    if dx >= cw or dy >= ch or dx + sw <= 0 or dy + sh <= 0:
+        return
+    if dx >= 0 and dy >= 0 and dx + sw <= cw and dy + sh <= ch:
         canvas.alpha_composite(stamp, (dx, dy))
-    buf = io.BytesIO()
-    canvas.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
+        return
+    sx0 = 0 if dx >= 0 else -dx
+    sy0 = 0 if dy >= 0 else -dy
+    dx0 = max(dx, 0)
+    dy0 = max(dy, 0)
+    sx1 = min(sw, sx0 + cw - dx0)
+    sy1 = min(sh, sy0 + ch - dy0)
+    if sx1 <= sx0 or sy1 <= sy0:
+        return
+    canvas.alpha_composite(stamp.crop((sx0, sy0, sx1, sy1)), (dx0, dy0))

@@ -10,23 +10,31 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import multiprocessing
 import os
 import re
+import struct
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-
-from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atlas import pack as pack_atlas
 from iso import CELL
+from occupancy import encode as encode_occupancy
 from progress import Bar
 from store import open_write, write_atlas, write_cell, write_meta
-from thumbs import render_thumb
+from thumbs import png_bytes, render_thumb, scale_stamp, thumb_scale
 
 LOTPACK = re.compile(r"^world_(-?\d+)_(-?\d+)\.lotpack$")
+# Compact per-cell occupancy while names are still strings (before atlas ids).
+_NAMED = struct.Struct("<BBbH")
+
+_load_cell = None
+_THUMB_STAMPS: dict = {}
+_THUMB_IDS: dict = {}
+_THUMB_OXOY: dict = {}
 
 
 def map_roots(maps: Path) -> list[Path]:
@@ -37,6 +45,19 @@ def map_roots(maps: Path) -> list[Path]:
         if child.is_dir() and any(child.glob("world_*.lotpack")):
             roots.append(child)
     return roots
+
+
+def worker_count() -> int:
+    raw = os.environ.get("MAP_SPRITES_WORKERS", "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return max(1, os.cpu_count() or 2)
+
+
+def _mp_ctx():
+    # The bake image is Linux; fork shares the pre-scaled stamp dict via COW.
+    method = "fork" if sys.platform.startswith("linux") else "spawn"
+    return multiprocessing.get_context(method)
 
 
 def load_textures(texture_dir: Path):
@@ -85,23 +106,34 @@ def load_textures(texture_dir: Path):
     return lib
 
 
-def lookup_texture(lib, name):
-    """Resolve a lotpack tile name. Older pzmap2dzi has no ignore-filter helper."""
-    getter = getattr(lib, "get_by_name_ignore_filter", None) or lib.get_by_name
-    with contextlib.redirect_stdout(io.StringIO()):
-        return getter(name)
-
-
-def load_cell(maps: Path, cx: int, cy: int):
+def _ensure_load_cell():
+    global _load_cell
+    if _load_cell is not None:
+        return _load_cell
     try:
+        pzmap = Path("/opt/pzmap2dzi")
+        if pzmap.is_dir() and str(pzmap) not in sys.path:
+            sys.path.insert(0, str(pzmap))
         from pzmap2dzi.cell import load_cell as load
     except Exception as error:
         print(f"FAIL: lotpack reader unavailable: {error}", file=sys.stderr)
         raise SystemExit(1)
-    return load(str(maps), cx, cy)
+    _load_cell = load
+    return load
+
+
+def load_cell(maps: Path, cx: int, cy: int):
+    return _ensure_load_cell()(str(maps), cx, cy)
 
 
 def cell_records(cell) -> list[tuple[int, int, int, str]]:
+    """Occupied squares only. get_square over 256×256×z is the slow path."""
+    if getattr(cell, "blocks", None) is not None and getattr(cell, "header", None):
+        return _records_from_blocks(cell)
+    return _records_from_squares(cell)
+
+
+def _records_from_squares(cell) -> list[tuple[int, int, int, str]]:
     rows: list[tuple[int, int, int, str]] = []
     size = getattr(cell, "cell_size", CELL)
     z0 = getattr(cell, "minlayer", 0)
@@ -118,10 +150,111 @@ def cell_records(cell) -> list[tuple[int, int, int, str]]:
     return rows
 
 
-def png_bytes(image: Image.Image) -> bytes:
-    buf = io.BytesIO()
-    image.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
+def _records_from_blocks(cell) -> list[tuple[int, int, int, str]]:
+    """Same occupancy as get_square, without visiting empty z/rows."""
+    rows: list[tuple[int, int, int, str]] = []
+    tiles_index = cell.header["tiles"]
+    block_size = cell.block_size
+    bpc = cell.block_per_cell
+    z0 = cell.minlayer
+    z1 = cell.maxlayer
+    for bi, block in enumerate(cell.blocks):
+        if not block:
+            continue
+        bx = bi // bpc
+        by = bi % bpc
+        ox = bx * block_size
+        oy = by * block_size
+        n = len(block)
+        for z in range(z0, z1):
+            layer = block[z] if 0 <= z < n else None
+            if not layer:
+                continue
+            for x, row in enumerate(layer):
+                if not row:
+                    continue
+                sx = ox + x
+                for y, tile_ids in enumerate(row):
+                    if not tile_ids:
+                        continue
+                    sy = oy + y
+                    for tid in tile_ids:
+                        name = tiles_index[tid]
+                        if name:
+                            rows.append((sx, sy, z, name))
+    return rows
+
+
+def pack_named_rows(rows: list[tuple[int, int, int, str]]) -> tuple[list[str], bytes]:
+    names: list[str] = []
+    index: dict[str, int] = {}
+    buf = bytearray(_NAMED.size * len(rows))
+    offset = 0
+    for lx, ly, z, name in rows:
+        nid = index.get(name)
+        if nid is None:
+            nid = len(names)
+            if nid > 65535:
+                continue
+            index[name] = nid
+            names.append(name)
+        _NAMED.pack_into(buf, offset, lx, ly, z, nid)
+        offset += _NAMED.size
+    return names, bytes(buf[:offset])
+
+
+def iter_named_rows(names: list[str], blob: bytes):
+    for offset in range(0, len(blob), _NAMED.size):
+        lx, ly, z, nid = _NAMED.unpack_from(blob, offset)
+        yield lx, ly, z, names[nid]
+
+
+def merge_named(
+    left: tuple[list[str], bytes], right: tuple[list[str], bytes]
+) -> tuple[list[str], bytes]:
+    rows = list(iter_named_rows(*left)) + list(iter_named_rows(*right))
+    return pack_named_rows(rows)
+
+
+def _init_scan() -> None:
+    _ensure_load_cell()
+
+
+def _scan_one(job: tuple[str, str, str]):
+    root, map_name, filename = job
+    match = LOTPACK.match(filename)
+    if not match:
+        return None
+    cx, cy = int(match.group(1)), int(match.group(2))
+    try:
+        cell = load_cell(Path(root), cx, cy)
+    except Exception as error:
+        return ("err", map_name, cx, cy, str(error))
+    if cell is None:
+        return None
+    rows = cell_records(cell)
+    if not rows:
+        return None
+    names, blob = pack_named_rows(rows)
+    z_min = min(z for _lx, _ly, z, _name in rows)
+    z_max = max(z for _lx, _ly, z, _name in rows) + 1
+    return ("ok", map_name, cx, cy, names, blob, z_min, z_max)
+
+
+def _thumb_one(item):
+    cx, cy, names, blob = item
+    numbered = []
+    blit = []
+    for lx, ly, z, name in iter_named_rows(names, blob):
+        sprite_id = _THUMB_IDS.get(name)
+        if sprite_id is None:
+            continue
+        numbered.append((lx, ly, z, sprite_id))
+        ox, oy = _THUMB_OXOY[name]
+        blit.append((lx, ly, z, _THUMB_STAMPS[name], ox, oy))
+    blit.sort(key=lambda row: (row[0] + row[1], row[2]))
+    thumb = render_thumb(blit, cx, cy, pre_scaled=True)
+    return cx, cy, encode_occupancy(numbered), thumb
 
 
 def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
@@ -130,44 +263,63 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
         print(f"FAIL: no lotpacks under {maps}", file=sys.stderr)
         raise SystemExit(1)
 
-    lib = load_textures(textures)
-    used: dict[str, object] = {}
-    missing: set[str] = set()
-    cells: dict[tuple[int, int], list[tuple[int, int, int, str]]] = {}
-    z_min, z_max = 0, 0
-
-    lotpacks: list[tuple[Path, Path]] = []
+    lotpacks: list[tuple[str, str, str]] = []
     for root in roots:
         for lotpack in sorted(root.glob("world_*.lotpack")):
             if LOTPACK.match(lotpack.name):
-                lotpacks.append((root, lotpack))
-    print(f"==> maps: {len(roots)}  lotpacks: {len(lotpacks)}", flush=True)
+                lotpacks.append((str(root), root.name, lotpack.name))
+    workers = worker_count()
+    print(f"==> maps: {len(roots)}  lotpacks: {len(lotpacks)}  workers: {workers}", flush=True)
 
-    with Bar("scan", len(lotpacks) or 1) as bar:
-        for root, lotpack in lotpacks:
-            match = LOTPACK.match(lotpack.name)
-            if not match:
-                bar.tick()
-                continue
-            cx, cy = int(match.group(1)), int(match.group(2))
-            cell = load_cell(root, cx, cy)
-            if cell is None:
-                bar.tick(extra=f"{cx},{cy}")
-                continue
-            rows = cell_records(cell)
-            if rows:
+    cells: dict[tuple[int, int], tuple[list[str], bytes]] = {}
+    unique: set[str] = set()
+    z_min, z_max = 0, 0
+    errors = 0
+    chunksize = 8 if len(lotpacks) > 32 else 1
+    with _mp_ctx().Pool(workers, initializer=_init_scan) as pool:
+        with Bar("scan", len(lotpacks) or 1) as bar:
+            iterator = (
+                pool.imap_unordered(_scan_one, lotpacks, chunksize=chunksize)
+                if lotpacks
+                else []
+            )
+            for result in iterator:
+                if result is None:
+                    bar.tick()
+                    continue
+                if result[0] == "err":
+                    _kind, map_name, cx, cy, message = result
+                    errors += 1
+                    print(f"FAIL: {map_name} {cx},{cy}: {message}", file=sys.stderr, flush=True)
+                    bar.tick(extra=f"{map_name} {cx},{cy}")
+                    continue
+                _kind, map_name, cx, cy, names, blob, cell_z0, cell_z1 = result
                 key = (cx, cy)
-                cells[key] = cells.get(key, []) + rows
-                for _lx, _ly, z, name in rows:
-                    z_min = min(z_min, z)
-                    z_max = max(z_max, z + 1)
-                    if name not in used and name not in missing:
-                        texture = lookup_texture(lib, name)
-                        if texture is not None and texture.im.size[0] > 0:
-                            used[name] = texture
-                        else:
-                            missing.add(name)
-            bar.tick(extra=f"{root.name} {cx},{cy}")
+                packed = (names, blob)
+                cells[key] = merge_named(cells[key], packed) if key in cells else packed
+                unique.update(names)
+                z_min = min(z_min, cell_z0)
+                z_max = max(z_max, cell_z1)
+                bar.tick(extra=f"{map_name} {cx},{cy}")
+            bar.finish()
+    if errors:
+        print(f"==> scan errors: {errors} (those cells skipped)", flush=True)
+
+    lib = load_textures(textures)
+    used: dict[str, object] = {}
+    missing: set[str] = set()
+    names_sorted = sorted(unique)
+    print(f"==> lookup {len(names_sorted)} tile names", flush=True)
+    getter = getattr(lib, "get_by_name_ignore_filter", None) or lib.get_by_name
+    with Bar("lookup", len(names_sorted) or 1) as bar:
+        with contextlib.redirect_stdout(io.StringIO()):
+            for name in names_sorted:
+                texture = getter(name)
+                if texture is not None and texture.im.size[0] > 0:
+                    used[name] = texture
+                else:
+                    missing.add(name)
+                bar.tick()
         bar.finish()
 
     if missing:
@@ -181,31 +333,30 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
     pages, packed = pack_atlas(sprite_list)
     con = open_write(out)
     ids = write_atlas(con, [png_bytes(page) for page in pages], packed)
-    page_map = {sprite.name: sprite for sprite in packed}
 
     reach = 0
+    oxoy: dict[str, tuple[int, int]] = {}
     for sprite in packed:
         reach = max(reach, abs(sprite.ox) + sprite.w, abs(sprite.oy) + sprite.h)
+        oxoy[sprite.name] = (sprite.ox, sprite.oy)
 
-    items = sorted(cells.items())
+    scale = thumb_scale()
+    stamps = {name: scale_stamp(texture.im, scale) for name, texture in used.items()}
+    global _THUMB_STAMPS, _THUMB_IDS, _THUMB_OXOY
+    _THUMB_STAMPS = stamps
+    _THUMB_IDS = ids
+    _THUMB_OXOY = oxoy
+
+    items = sorted((cx, cy, names, blob) for (cx, cy), (names, blob) in cells.items())
     print(f"==> thumbs: {len(items)} cells", flush=True)
-    with Bar("cells", len(items) or 1) as bar:
-        for (cx, cy), rows in items:
-            numbered = []
-            blit = []
-            for lx, ly, z, name in rows:
-                sprite_id = ids.get(name)
-                if sprite_id is None:
-                    continue
-                numbered.append((lx, ly, z, sprite_id))
-                sprite = page_map[name]
-                texture = used[name]
-                blit.append((lx, ly, z, texture.im, sprite.ox, sprite.oy))
-            blit.sort(key=lambda row: (row[0] + row[1], row[2]))
-            thumb = render_thumb(blit, cx, cy)
-            write_cell(con, cx, cy, numbered, thumb)
-            bar.tick(extra=f"{cx},{cy}")
-        bar.finish()
+    thumb_chunk = 4 if len(items) > 16 else 1
+    with _mp_ctx().Pool(workers) as pool:
+        with Bar("cells", len(items) or 1) as bar:
+            iterator = pool.imap_unordered(_thumb_one, items, chunksize=thumb_chunk) if items else []
+            for cx, cy, occupancy, thumb in iterator:
+                write_cell(con, cx, cy, occupancy, thumb)
+                bar.tick(extra=f"{cx},{cy}")
+            bar.finish()
 
     write_meta(
         con,
