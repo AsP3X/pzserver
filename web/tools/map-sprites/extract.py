@@ -85,6 +85,13 @@ def load_textures(texture_dir: Path):
     return lib
 
 
+def lookup_texture(lib, name):
+    """Resolve a lotpack tile name. Older pzmap2dzi has no ignore-filter helper."""
+    getter = getattr(lib, "get_by_name_ignore_filter", None) or lib.get_by_name
+    with contextlib.redirect_stdout(io.StringIO()):
+        return getter(name)
+
+
 def load_cell(maps: Path, cx: int, cy: int):
     try:
         from pzmap2dzi.cell import load_cell as load
@@ -155,7 +162,7 @@ def extract(maps: Path, textures: Path, out: Path, game_version: str) -> None:
                     z_min = min(z_min, z)
                     z_max = max(z_max, z + 1)
                     if name not in used and name not in missing:
-                        texture = lib.get_by_name_ignore_filter(name)
+                        texture = lookup_texture(lib, name)
                         if texture is not None and texture.im.size[0] > 0:
                             used[name] = texture
                         else:
