@@ -241,12 +241,26 @@ function bucketPage(page: number): number[] {
   return bucket
 }
 
-function clipDepth(occupant: GlOccupant, index: number, count: number, ordered: boolean): number {
-  if (ordered) {
+/** Slots per iso square so adjacent floors (and the 1px dest overlap) never share a depth. */
+const SQUARE_SLOTS = 2048
+
+function clipDepth(
+  occupant: GlOccupant,
+  sprite: GlSprite | undefined,
+  index: number,
+  count: number,
+  ordered: boolean,
+  minDiag: number,
+  span: number,
+): number {
+  if (ordered && count > 0) {
     return 1 - (2 * (index + 1)) / (count + 1)
   }
-  const key = occupant.wx + occupant.wy + occupant.z * 0.5
-  const ndc = 1 - (2 * key) / 50_000
+  const diag = occupant.wx + occupant.wy - minDiag
+  const storey = Math.min(31, Math.max(0, occupant.z + 8))
+  const tall = sprite ? Math.min(63, sprite.h >> 2) : 0
+  const key = diag * SQUARE_SLOTS + storey * 64 + tall
+  const ndc = 1 - (2 * key) / Math.max(1, (span + 1) * SQUARE_SLOTS)
   if (ndc < -1) {
     return -1
   }
@@ -268,6 +282,8 @@ function drawPage(
   dpr: number,
   count: number,
   ordered: boolean,
+  minDiag: number,
+  span: number,
 ): number {
   const tex = gls.textures.get(page)
   if (!tex || !gls.uploaded[page] || indices.length === 0) {
@@ -320,7 +336,15 @@ function drawPage(
       instanceData[base + 5] = sprite.y * invPage
       instanceData[base + 6] = sprite.w * invPage
       instanceData[base + 7] = sprite.h * invPage
-      instanceData[base + 8] = clipDepth(occupant, index, count, ordered)
+      instanceData[base + 8] = clipDepth(
+        occupant,
+        sprite,
+        index,
+        count,
+        ordered,
+        minDiag,
+        span,
+      )
       written += 1
     }
     if (written === 0) {
@@ -366,8 +390,18 @@ export function drawSpritesGl(
     pageBuckets[p].length = 0
   }
   usedPages.length = 0
+  let minDiag = rows[0].wx + rows[0].wy
+  let maxDiag = minDiag
   for (let i = 0; i < count; i += 1) {
-    const sprite = sprites[rows[i].sprite]
+    const occupant = rows[i]
+    const diag = occupant.wx + occupant.wy
+    if (diag < minDiag) {
+      minDiag = diag
+    }
+    if (diag > maxDiag) {
+      maxDiag = diag
+    }
+    const sprite = sprites[occupant.sprite]
     if (!sprite || !gls.uploaded[sprite.page]) {
       continue
     }
@@ -380,6 +414,7 @@ export function drawSpritesGl(
     }
     bucket.push(i)
   }
+  const span = Math.max(0, maxDiag - minDiag)
 
   gl.useProgram(program)
   gl.uniform2f(uRes, w, h)
@@ -402,6 +437,8 @@ export function drawSpritesGl(
       dpr,
       count,
       ordered,
+      minDiag,
+      span,
     )
     pageBuckets[page].length = 0
   }
