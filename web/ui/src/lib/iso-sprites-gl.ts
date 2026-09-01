@@ -232,6 +232,21 @@ function bucketPage(page: number): number[] {
   return bucket
 }
 
+function clipDepth(occupant: GlOccupant, index: number, count: number, ordered: boolean): number {
+  if (ordered) {
+    return 1 - (2 * (index + 1)) / (count + 1)
+  }
+  const key = occupant.wx + occupant.wy + occupant.z * 0.5
+  const ndc = 1 - (2 * key) / 50_000
+  if (ndc < -1) {
+    return -1
+  }
+  if (ndc > 1) {
+    return 1
+  }
+  return ndc
+}
+
 function drawPage(
   gls: GlState,
   page: number,
@@ -243,6 +258,7 @@ function drawPage(
   height: number,
   dpr: number,
   count: number,
+  ordered: boolean,
 ): number {
   const tex = gls.textures.get(page)
   if (!tex || !gls.uploaded[page] || indices.length === 0) {
@@ -253,7 +269,6 @@ function drawPage(
   const cx = mapping.center.x
   const cy = mapping.center.y
   const invPage = 1 / PAGE
-  const denom = count + 1
   let drawn = 0
 
   gl.activeTexture(gl.TEXTURE0)
@@ -292,8 +307,7 @@ function drawPage(
       instanceData[base + 5] = sprite.y * invPage
       instanceData[base + 6] = sprite.w * invPage
       instanceData[base + 7] = sprite.h * invPage
-      // Back of the painter list is far (clip z → +1). Front is near (−1).
-      instanceData[base + 8] = 1 - (2 * (index + 1)) / denom
+      instanceData[base + 8] = clipDepth(occupant, index, count, ordered)
       written += 1
     }
     if (written === 0) {
@@ -316,6 +330,7 @@ export function drawSpritesGl(
   count: number,
   sprites: Array<GlSprite | undefined>,
   _pageCount: number,
+  ordered = true,
 ): boolean {
   const gls = ensureSpriteGl()
   if (!gls || count === 0) {
@@ -362,7 +377,19 @@ export function drawSpritesGl(
 
   let drawn = 0
   for (const page of usedPages) {
-    drawn += drawPage(gls, page, pageBuckets[page], rows, sprites, mapping, width, height, dpr, count)
+    drawn += drawPage(
+      gls,
+      page,
+      pageBuckets[page],
+      rows,
+      sprites,
+      mapping,
+      width,
+      height,
+      dpr,
+      count,
+      ordered,
+    )
     pageBuckets[page].length = 0
   }
   if (drawn === 0) {

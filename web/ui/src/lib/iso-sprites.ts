@@ -5,7 +5,14 @@
  * /api/v1/map-sprites. JPEG URLs are never used here.
  */
 
-import { ISO_DZI, ISO_LAYER_HEIGHT, dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
+import {
+  ISO_DZI,
+  ISO_LAYER_HEIGHT,
+  dziToWorld,
+  levelForScale,
+  worldToDzi,
+  type IsoMapping,
+} from '@/lib/iso-tiles'
 import { drawSpritesGl, ensureSpriteGl, uploadAtlasPage } from '@/lib/iso-sprites-gl'
 
 const CELL = 256
@@ -15,16 +22,17 @@ const THUMB_PAD = HALF * 16 + ISO_LAYER_HEIGHT * 8
 const BUCKET = 16
 const BUCKETS = CELL / BUCKET
 /**
- * Live WebGL while this many lotpack cells cover the view. 512px thumbs are
- * native around zoom 16; stretching them at 19 is an 8× blit with diamond seams.
+ * Live WebGL at HUD zoom 17 and closer. Below that, 512px cell thumbs — not
+ * the 2048 county overview, which is mush through z16–z17.
  */
-const LIVE_CELL_CAP = 48
-/** More cells than this → one county overview blit instead of thousands of thumbs. */
-const OVERVIEW_CELLS = 28
+const LIVE_CELL_CAP = 96
+/** County overview only when a 512px thumb would be a stamp, not a neighbourhood. */
+const THUMB_CELLS = 280
 const OVERVIEW_W = 2048
-const MAX_INFLIGHT = 12
-const CELL_LIMIT = 96
-const THUMB_LIMIT = 96
+const MAX_INFLIGHT = 16
+const CELL_LIMIT = 160
+const THUMB_LIMIT = 256
+const SORT_CAP = 80_000
 /** Grass-ish, so holes do not flash the old near-black fill. */
 const GROUND = '#4e5c36'
 
@@ -142,9 +150,6 @@ function notify() {
 }
 
 function notifyThumbs() {
-  if (bakedOverview) {
-    return
-  }
   if (thumbNotifyWait) {
     return
   }
@@ -569,7 +574,7 @@ function prefetchView(cover: { cx: number; cy: number }[], live: boolean) {
     }
     return
   }
-  if (cover.length > OVERVIEW_CELLS) {
+  if (cover.length > THUMB_CELLS) {
     return
   }
   const wanted = new Set(cover.map(({ cx, cy }) => `${cx}_${cy}`))
@@ -815,7 +820,7 @@ function drawThumbsOrOverview(
   height: number,
   cover: { cx: number; cy: number }[],
 ) {
-  if (cover.length >= OVERVIEW_CELLS) {
+  if (cover.length >= THUMB_CELLS) {
     if (!bakedOverview) {
       for (const { cx, cy } of cover) {
         requestThumb(cx, cy, false)
@@ -1081,10 +1086,9 @@ function drawLiveUnderlay(
   mapping: IsoMapping,
   width: number,
   height: number,
+  cover: { cx: number; cy: number }[],
 ) {
-  ctx.imageSmoothingEnabled = true
-  drawOverview(ctx, mapping, width, height)
-  ctx.imageSmoothingEnabled = false
+  drawThumbsOrOverview(ctx, mapping, width, height, cover)
 }
 
 export function drawIsoSprites(
@@ -1102,7 +1106,7 @@ export function drawIsoSprites(
   }
 
   const tight = visibleCells(mapping, width, height, false)
-  const live = tight.cover.length <= LIVE_CELL_CAP
+  const live = levelForScale(mapping.isoScale) >= 17 && tight.cover.length <= LIVE_CELL_CAP
   const { cover, minX, maxX, minY, maxY } = live
     ? visibleCells(mapping, width, height, true)
     : tight
@@ -1117,17 +1121,21 @@ export function drawIsoSprites(
     })
     const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
     if (visibleCount > 0) {
-      const drawn = visiblePool.slice(0, visibleCount)
-      drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
+      const ordered = visibleCount <= SORT_CAP
+      const drawn = ordered ? visiblePool.slice(0, visibleCount) : visiblePool
+      if (ordered) {
+        drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
+      }
       const painted = drawSpritesGl(
         ctx,
         mapping,
         width,
         height,
         drawn,
-        drawn.length,
+        visibleCount,
         spriteTable,
         spritePageCount(),
+        ordered,
       )
       if (painted) {
         return
@@ -1144,7 +1152,7 @@ export function drawIsoSprites(
       return
     }
 
-    drawLiveUnderlay(ctx, mapping, width, height)
+    drawLiveUnderlay(ctx, mapping, width, height, cover)
     if (!cameraMoving && sprites.length > 0 && !ensureSpriteGl()) {
       startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
     }
