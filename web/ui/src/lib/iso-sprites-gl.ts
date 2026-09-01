@@ -230,10 +230,10 @@ export function attachSpriteGl(host: HTMLElement, behind: HTMLElement): void {
     return
   }
   const el = gls.canvas
+  el.className = 'pointer-events-none absolute left-0 top-0 z-0 block'
+  el.style.imageRendering = 'pixelated'
+  el.style.background = '#4e5c36'
   if (el.parentNode !== host) {
-    el.className = 'pointer-events-none absolute left-0 top-0 block'
-    el.style.imageRendering = 'pixelated'
-    el.style.background = '#4e5c36'
     el.style.visibility = 'hidden'
     host.insertBefore(el, behind)
   }

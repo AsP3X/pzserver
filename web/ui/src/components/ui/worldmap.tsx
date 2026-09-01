@@ -983,7 +983,7 @@ export function WorldmapView({
         <canvas
           ref={canvas}
           className={cn(
-            'block',
+            'absolute left-0 top-0 z-10 block',
             pickMode || paintMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing',
           )}
         />
