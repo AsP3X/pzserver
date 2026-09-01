@@ -231,7 +231,7 @@ export function attachSpriteGl(host: HTMLElement, behind: HTMLElement): void {
   }
   const el = gls.canvas
   if (el.parentNode !== host) {
-    el.className = 'pointer-events-none absolute inset-0 block'
+    el.className = 'pointer-events-none absolute left-0 top-0 block'
     el.style.imageRendering = 'pixelated'
     el.style.background = '#4e5c36'
     el.style.visibility = 'hidden'
@@ -253,10 +253,13 @@ export function spriteGlEpoch(): number {
 function sizeGl(gls: GlState, width: number, height: number, dpr: number): { w: number; h: number } {
   const w = Math.max(1, Math.round(width * dpr))
   const h = Math.max(1, Math.round(height * dpr))
-  if (gls.canvas.width !== w || gls.canvas.height !== h) {
-    gls.canvas.width = w
-    gls.canvas.height = h
+  const el = gls.canvas
+  if (el.width !== w || el.height !== h) {
+    el.width = w
+    el.height = h
   }
+  el.style.width = `${width}px`
+  el.style.height = `${height}px`
   return { w, h }
 }
 

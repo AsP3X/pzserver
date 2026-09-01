@@ -475,22 +475,18 @@ export function WorldmapView({
       if (!latest) {
         return
       }
-      let { width, height } = sizeRef.current
-      if (width <= 0 || height <= 0) {
-        const rect = box.getBoundingClientRect()
-        width = rect.width
-        height = rect.height
-        sizeRef.current = { width, height }
-      }
+      const width = Math.max(1, box.clientWidth)
+      const height = Math.max(1, box.clientHeight)
+      sizeRef.current = { width, height }
       const ratio = Math.min(window.devicePixelRatio || 1, 2)
       const pixelsW = Math.max(1, Math.round(width * ratio))
       const pixelsH = Math.max(1, Math.round(height * ratio))
       if (element.width !== pixelsW || element.height !== pixelsH) {
         element.width = pixelsW
         element.height = pixelsH
-        element.style.width = `${width}px`
-        element.style.height = `${height}px`
       }
+      element.style.width = `${width}px`
+      element.style.height = `${height}px`
 
       let ctx = ctxRef.current
       if (!ctx || ctx.canvas !== element) {
@@ -535,6 +531,10 @@ export function WorldmapView({
         const floor = minIsoScaleForViewport(width, height)
         if (isoScaleRef.current < floor) {
           isoScaleRef.current = floor
+          if (latest.scale !== floor) {
+            latest.scale = floor
+            viewRef.current = { ...latest, scale: floor }
+          }
         }
         const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, width, height)
         if (modeRef.current === 'iso-sprite') {
@@ -628,23 +628,26 @@ export function WorldmapView({
   const zoomAt = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {
       const current = viewRef.current
-      const box = frame.current?.getBoundingClientRect()
-      if (!current || !box) {
+      const host = frame.current
+      const box = host?.getBoundingClientRect()
+      if (!current || !host || !box) {
         return
       }
 
-      const anchorX = clientX === undefined ? box.width / 2 : clientX - box.left
-      const anchorY = clientY === undefined ? box.height / 2 : clientY - box.top
+      const viewW = Math.max(1, host.clientWidth)
+      const viewH = Math.max(1, host.clientHeight)
+      const anchorX = clientX === undefined ? viewW / 2 : clientX - box.left
+      const anchorY = clientY === undefined ? viewH / 2 : clientY - box.top
 
       if (isoCamera(modeRef.current)) {
         const held = isoMapping(
           current.x,
           current.y,
           isoScaleRef.current,
-          box.width,
-          box.height,
+          viewW,
+          viewH,
         ).toWorld(anchorX, anchorY)
-        const floor = minIsoScaleForViewport(box.width, box.height)
+        const floor = minIsoScaleForViewport(viewW, viewH)
         const nextScale = Math.min(MAX_ISO_SCALE, Math.max(floor, isoScaleRef.current * factor))
         if (nextScale === isoScaleRef.current) {
           return
@@ -652,8 +655,8 @@ export function WorldmapView({
         isoScaleRef.current = nextScale
         const heldDzi = worldToDzi(held.x, held.y)
         const camera = dziToWorld(
-          heldDzi.x - (anchorX - box.width / 2) / nextScale,
-          heldDzi.y - (anchorY - box.height / 2) / nextScale,
+          heldDzi.x - (anchorX - viewW / 2) / nextScale,
+          heldDzi.y - (anchorY - viewH / 2) / nextScale,
         )
         viewRef.current = clamp({ x: camera.x, y: camera.y, scale: nextScale })
         setSpriteMapMoving(true)
@@ -716,11 +719,17 @@ export function WorldmapView({
   } | null>(null)
 
   const localPoint = (clientX: number, clientY: number) => {
-    const box = frame.current?.getBoundingClientRect()
-    if (!box) {
+    const host = frame.current
+    const box = host?.getBoundingClientRect()
+    if (!host || !box) {
       return null
     }
-    return { x: clientX - box.left, y: clientY - box.top, width: box.width, height: box.height }
+    return {
+      x: clientX - box.left,
+      y: clientY - box.top,
+      width: host.clientWidth,
+      height: host.clientHeight,
+    }
   }
 
   const mappingNow = (point: { width: number; height: number }): WorldMapping | null => {
