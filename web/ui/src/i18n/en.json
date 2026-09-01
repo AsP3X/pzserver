@@ -1103,6 +1103,7 @@
   "map.floor_up": "Floor up",
   "map.ground_floor": "Ground",
   "map.inside": "Inside",
+  "map.inside_zoom_in": "Zoom in to look inside buildings.",
   "map.in_game": "in game",
   "map.iso_not_generated": "Isometric tiles have not been generated on this server yet — showing the schematic basemap.",
   "map.iso_unavailable": "Isometric tiles are not answering — showing the schematic basemap instead.",

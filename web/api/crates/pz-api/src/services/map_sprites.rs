@@ -194,6 +194,34 @@ impl MapSprites {
         .await
     }
 
+    /// Sprite ids whose names are roof tiles (`roofs_*`). Packed as little-endian
+    /// `u32` count then that many `u32` ids. Empty catalogue → `None`.
+    pub async fn roofs_bin(&self) -> ApiResult<Option<Vec<u8>>> {
+        let Some(inner) = self.inner.clone() else {
+            return Ok(None);
+        };
+        let blob = tokio::task::spawn_blocking(move || -> rusqlite::Result<Vec<u8>> {
+            let con = inner.checkout().lock().expect("sprite map mutex poisoned");
+            let mut stmt = con.prepare(
+                "SELECT id FROM sprites WHERE name LIKE 'roofs_%' OR name LIKE '%_roofs_%' ORDER BY id",
+            )?;
+            let ids: Vec<i64> = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let mut out = vec![0u8; 4 + ids.len() * 4];
+            out[0..4].copy_from_slice(&(ids.len() as u32).to_le_bytes());
+            for (index, id) in ids.iter().enumerate() {
+                let raw = (*id).clamp(0, i64::from(u32::MAX)) as u32;
+                out[4 + index * 4..8 + index * 4].copy_from_slice(&raw.to_le_bytes());
+            }
+            Ok(out)
+        })
+        .await
+        .map_err(|error| ApiError::Internal(format!("roof bin did not finish: {error}")))?
+        .map_err(|error| ApiError::Internal(format!("roof bin failed: {error}")))?;
+        Ok(Some(blob))
+    }
+
     pub async fn atlas(&self, page: i64) -> ApiResult<Option<Vec<u8>>> {
         self.blob("SELECT data FROM atlas WHERE page = ?1", page)
             .await

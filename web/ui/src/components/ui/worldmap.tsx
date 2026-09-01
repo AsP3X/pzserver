@@ -21,8 +21,10 @@ import {
   loadSpriteMap,
   onSpriteMapChange,
   setSpriteCutawayFloor,
+  spriteCutawayFloor,
   setSpriteMapMoving,
   spriteMapMoving,
+  spriteMapDrawingLive,
   spriteMapReady,
   spriteStoreyRange,
 } from '@/lib/iso-sprites'
@@ -234,6 +236,7 @@ export function WorldmapView({
   const [spriteReady, setSpriteReady] = useState(spriteMapReady)
   const [inside, setInside] = useState(() => readInside().on)
   const [floor, setFloor] = useState(() => readInside().floor)
+  const [insideNeedsZoom, setInsideNeedsZoom] = useState(false)
   const [tileMeta, setTileMeta] = useState<TileMeta | null>(null)
   const [tapeTick, setTapeTick] = useState(0)
   const updating = tileMeta?.updating ?? NO_UPDATING
@@ -299,6 +302,7 @@ export function WorldmapView({
       onSpriteMapChange(() => {
         scheduleDraw()
         setSpriteReady(spriteMapReady())
+        setInsideNeedsZoom(spriteCutawayFloor() !== null && !spriteMapDrawingLive())
       }),
     [scheduleDraw],
   )
@@ -315,6 +319,7 @@ export function WorldmapView({
     }
     writeInside(inside, clamped)
     setSpriteCutawayFloor(mode === 'iso-sprite' && inside ? clamped : null)
+    setInsideNeedsZoom(mode === 'iso-sprite' && inside && !spriteMapDrawingLive())
   }, [floor, inside, mode, spriteReady])
 
   /**
@@ -525,6 +530,7 @@ export function WorldmapView({
         const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, width, height)
         if (modeRef.current === 'iso-sprite') {
           drawIsoSprites(ctx, mapping, width, height)
+          setInsideNeedsZoom(spriteCutawayFloor() !== null && !spriteMapDrawingLive())
         } else {
           drawIsoTiles(ctx, mapping, width, height)
         }
@@ -1078,6 +1084,9 @@ export function WorldmapView({
         ) : null}
         {updating.length > 0 ? (
           <p className="text-hazard">{t('map.updating')}</p>
+        ) : null}
+        {mode === 'iso-sprite' && insideNeedsZoom ? (
+          <p className="text-hazard">{t('map.inside_zoom_in')}</p>
         ) : null}
         <p className="text-dust">
           {mode === 'iso'

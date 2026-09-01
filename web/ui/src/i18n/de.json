@@ -1103,6 +1103,7 @@
   "map.floor_up": "Etage höher",
   "map.ground_floor": "Erdgeschoss",
   "map.inside": "Innen",
+  "map.inside_zoom_in": "Zoome näher, um ins Gebäudeinnere zu sehen.",
   "map.in_game": "im Spiel",
   "map.iso_not_generated": "Für diesen Server wurden noch keine isometrischen Kacheln erzeugt — es wird die schematische Grundkarte angezeigt.",
   "map.iso_unavailable": "Isometrische Kacheln antworten nicht — es wird die schematische Grundkarte angezeigt.",

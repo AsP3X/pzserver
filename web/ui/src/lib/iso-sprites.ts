@@ -1,14 +1,15 @@
 /**
- * Sprite isometric basemap. Parallel to the JPEG DZI pack.
- *
- * Same CRS as iso-tiles.ts. Atlas + occupancy + cell thumbs from
- * /api/v1/map-sprites. JPEG URLs are never used here.
+ * Sprite isometric basemap. Live sprites up close; the JPEG DZI pack when
+ * zoomed out past live range (and the pack exists). Cell thumbs remain the
+ * fallback if JPEG is missing.
  */
 
 import {
   ISO_DZI,
   ISO_LAYER_HEIGHT,
+  drawIsoTiles,
   dziToWorld,
+  jpegPackReady,
   levelForScale,
   worldToDzi,
   type IsoMapping,
@@ -26,13 +27,13 @@ const BUCKETS = CELL / BUCKET
  * top of a county underlay. The 2048 overview is never the only picture
  * while a cell is still tens of pixels on screen (that was the z15 mush).
  */
-const LIVE_CELL_CAP = 96
+const LIVE_CELL_CAP = 128
 const THUMB_DRAW_PX = 96
 const THUMB_ALWAYS_PX = 200
 const THUMB_DRAW_CELLS = 900
 const MIN_THUMB_CSS = 40
 const MAX_INFLIGHT = 20
-const CELL_LIMIT = 160
+const CELL_LIMIT = 192
 const THUMB_LIMIT = 768
 const SORT_CAP = 80_000
 const STAMP_PREFETCH = 192
@@ -73,6 +74,7 @@ interface PackedCell {
   sprite: Uint32Array
   bucketStart: Uint32Array
   bucketCount: Uint16Array
+  pages: number[]
 }
 
 interface VisibleSprite {
@@ -108,6 +110,9 @@ let overviewW = 0
 let bakedOverview: HTMLImageElement | null = null
 let heldLive = false
 let cutawayFloor: number | null = null
+let roofById = new Uint8Array(0)
+let lastDrawLive = false
+let atlasWarm = 0
 let cameraMoving = false
 let atlasGeneration = 0
 let rasterFrame = 0
@@ -230,6 +235,11 @@ export function spriteCutawayFloor(): number | null {
   return cutawayFloor
 }
 
+/** True when the last paint used live sprites (Inside can hide storeys). */
+export function spriteMapDrawingLive(): boolean {
+  return lastDrawLive
+}
+
 export function setSpriteCutawayFloor(floor: number | null): void {
   let next = floor
   if (next !== null) {
@@ -275,7 +285,10 @@ export async function loadSpriteMap(): Promise<void> {
     }
     overviewImage.onerror = () => notify()
     overviewImage.src = `/api/v1/map-sprites/overview?v=${version}`
-    const packed = await fetch(`/api/v1/map-sprites/sprites.bin?v=${version}`)
+    const [packed, roofs] = await Promise.all([
+      fetch(`/api/v1/map-sprites/sprites.bin?v=${version}`),
+      fetch(`/api/v1/map-sprites/roofs.bin?v=${version}`),
+    ])
     if (packed.ok) {
       applySpriteTable(decodeSpriteBin(await packed.arrayBuffer()))
     } else {
@@ -284,6 +297,10 @@ export async function loadSpriteMap(): Promise<void> {
       )
       applySpriteTable(rows)
     }
+    if (roofs.ok) {
+      applyRoofIds(decodeRoofBin(await roofs.arrayBuffer()))
+    }
+    warmAtlas()
     notify()
   } catch {
     meta = { ready: false } as SpriteMeta
@@ -363,9 +380,74 @@ function applySpriteTable(rows: SpriteRecord[]) {
   spriteById = new Map(rows.map((row) => [row.id, row]))
   const maxId = rows.reduce((max, row) => (row.id > max ? row.id : max), 0)
   spriteTable = new Array(maxId + 1)
+  const namedRoofs: number[] = []
   for (const row of rows) {
     spriteTable[row.id] = row
+    if (isRoofName(row.name)) {
+      namedRoofs.push(row.id)
+    }
   }
+  if (namedRoofs.length > 0) {
+    applyRoofIds(namedRoofs)
+  }
+}
+
+function isRoofName(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.startsWith('roofs_') || lower.includes('_roofs_')
+}
+
+function applyRoofIds(ids: number[]) {
+  let max = roofById.length
+  for (const id of ids) {
+    if (id + 1 > max) {
+      max = id + 1
+    }
+  }
+  if (max > roofById.length) {
+    const next = new Uint8Array(max)
+    next.set(roofById)
+    roofById = next
+  }
+  for (const id of ids) {
+    if (id >= 0 && id < roofById.length) {
+      roofById[id] = 1
+    }
+  }
+}
+
+function decodeRoofBin(buffer: ArrayBuffer): number[] {
+  if (buffer.byteLength < 4) {
+    return []
+  }
+  const view = new DataView(buffer)
+  const count = view.getUint32(0, true)
+  const ids: number[] = []
+  for (let i = 0; i < count; i += 1) {
+    const offset = 4 + i * 4
+    if (offset + 4 > view.byteLength) {
+      break
+    }
+    ids.push(view.getUint32(offset, true))
+  }
+  return ids
+}
+
+function warmAtlas() {
+  atlasWarm = 0
+  const n = spritePageCount()
+  const step = () => {
+    let batch = 0
+    while (atlasWarm < n && batch < 4) {
+      atlasPage(atlasWarm)
+      atlasWarm += 1
+      batch += 1
+    }
+    if (atlasWarm < n) {
+      window.setTimeout(step, 40)
+    }
+  }
+  step()
 }
 
 function spritePageCount(): number {
@@ -611,6 +693,7 @@ function decodeOccupancy(buffer: ArrayBuffer): PackedCell | 'empty' {
   const oly = new Uint8Array(filled)
   const oz = new Int8Array(filled)
   const osprite = new Uint32Array(filled)
+  const pageSeen = new Set<number>()
   for (let i = 0; i < filled; i += 1) {
     const b = (lx[i] >> 4) * BUCKETS + (ly[i] >> 4)
     const at = heads[b]
@@ -619,18 +702,37 @@ function decodeOccupancy(buffer: ArrayBuffer): PackedCell | 'empty' {
     oly[at] = ly[i]
     oz[at] = z[i]
     osprite[at] = sprite[i]
+    const rec = spriteTable[sprite[i]]
+    if (rec) {
+      pageSeen.add(rec.page)
+    }
   }
-  return { count: filled, lx: olx, ly: oly, z: oz, sprite: osprite, bucketStart, bucketCount }
+  return {
+    count: filled,
+    lx: olx,
+    ly: oly,
+    z: oz,
+    sprite: osprite,
+    bucketStart,
+    bucketCount,
+    pages: [...pageSeen],
+  }
 }
 
 function prefetchAtlas(cell: PackedCell) {
+  if (cell.pages.length > 0) {
+    for (const page of cell.pages) {
+      atlasPage(page)
+    }
+    return
+  }
   if (sprites.length === 0) {
     return
   }
   const seen = new Set<number>()
   const { count, sprite } = cell
   for (let i = 0; i < count; i += 1) {
-    const rec = spriteById.get(sprite[i])
+    const rec = spriteTable[sprite[i]]
     if (!rec || seen.has(rec.page)) {
       continue
     }
@@ -1050,7 +1152,7 @@ function collectVisible(
           if (wx < minX || wx > maxX || wy < minY || wy > maxY) {
             continue
           }
-          if (cutawayFloor !== null && z[i] > cutawayFloor) {
+          if (cutawayFloor !== null && (z[i] > cutawayFloor || roofById[sprite[i]])) {
             continue
           }
           const row = visiblePool[visibleCount]
@@ -1234,6 +1336,7 @@ export function drawIsoSprites(
   width: number,
   height: number,
 ): void {
+  lastDrawLive = false
   ctx.fillStyle = GROUND
   ctx.fillRect(0, 0, width, height)
 
@@ -1258,7 +1361,7 @@ export function drawIsoSprites(
     })
     const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
     if (visibleCount > 0) {
-      const ordered = visibleCount <= SORT_CAP
+      const ordered = visibleCount <= SORT_CAP && mapping.isoScale >= 0.22
       const drawn = ordered ? visiblePool.slice(0, visibleCount) : visiblePool
       if (ordered) {
         drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
@@ -1275,6 +1378,7 @@ export function drawIsoSprites(
         ordered,
       )
       if (painted) {
+        lastDrawLive = true
         return
       }
     }
@@ -1294,12 +1398,19 @@ export function drawIsoSprites(
       return
     }
 
-    if (cutawayFloor === null) {
+    if (cutawayFloor === null && jpegPackReady()) {
+      drawIsoTiles(ctx, mapping, width, height)
+    } else if (cutawayFloor === null) {
       drawLiveUnderlay(ctx, mapping, width, height, cover)
     }
     if (!cameraMoving && sprites.length > 0 && !ensureSpriteGl()) {
       startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
     }
+    return
+  }
+
+  if (jpegPackReady()) {
+    drawIsoTiles(ctx, mapping, width, height)
     return
   }
 

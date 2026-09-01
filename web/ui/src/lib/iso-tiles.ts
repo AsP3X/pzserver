@@ -114,6 +114,12 @@ export function setRenderedMaxLevel(level: number): void {
 
 /** Query string for tile URLs; `undefined` until meta has been read. */
 let packRevision: string | undefined
+let jpegGenerated = false
+
+/** Sprite far-zoom can use the photographed pack when this is true. */
+export function jpegPackReady(): boolean {
+  return jpegGenerated
+}
 
 export interface TileMeta {
   generated: boolean
@@ -155,11 +161,13 @@ export function loadTileMeta(): Promise<TileMeta> {
         setPackSize(meta.width, meta.height)
       }
       setPackRevision(meta.generated_at ?? meta.game_version ?? '')
+      jpegGenerated = meta.generated === true
       return meta
     })
     .catch(() => {
       metaRequest = null
       setPackRevision('')
+      jpegGenerated = false
       return {
         generated: false,
         min_level: null,

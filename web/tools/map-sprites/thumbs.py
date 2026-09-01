@@ -49,7 +49,7 @@ def scale_stamp(image: Image.Image, scale: float) -> Image.Image:
 def compose_overview(thumbs: list[tuple[int, int, bytes]]) -> bytes:
     """One county stamp from cell thumbs. Client loads this instead of 4000 images."""
     height = max(1, round(OVERVIEW_W * DZI_HEIGHT / DZI_WIDTH))
-    canvas = Image.new("RGBA", (OVERVIEW_W, height), (20, 22, 17, 255))
+    canvas = Image.new("RGBA", (OVERVIEW_W, height), (78, 92, 54, 255))
     for cx, cy, blob in thumbs:
         if not blob:
             continue
@@ -95,7 +95,8 @@ def render_thumb(
     scale = THUMB_W / width
     out_w = THUMB_W
     out_h = max(1, int(height * scale))
-    canvas = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+    # Opaque grass so cell diamonds do not flash a dark pad when composited.
+    canvas = Image.new("RGBA", (out_w, out_h), (78, 92, 54, 255))
     origin_x = cx * CELL
     origin_y = cy * CELL
     for lx, ly, z, image, ox, oy in records:

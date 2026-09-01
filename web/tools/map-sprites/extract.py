@@ -105,7 +105,7 @@ def _ignore_signals() -> None:
 
 
 # Bump when occupancy/thumb geometry changes so an old work file is not resumed.
-BAKE_VERSION = "z192-ov1"
+BAKE_VERSION = "z192-ov1-grass"
 
 
 def fingerprint(lotpacks: list[tuple[str, str, str]], textures: Path, game_version: str) -> str:

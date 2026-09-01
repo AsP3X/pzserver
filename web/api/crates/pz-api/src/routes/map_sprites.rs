@@ -15,6 +15,7 @@ pub fn routes() -> Router<AppState> {
         .route("/map-sprites/meta", get(meta))
         .route("/map-sprites/sprites", get(sprites))
         .route("/map-sprites/sprites.bin", get(sprites_bin))
+        .route("/map-sprites/roofs.bin", get(roofs_bin))
         .route("/map-sprites/atlas/{page}", get(atlas))
         .route("/map-sprites/cells/{cell}", get(cell))
         .route("/map-sprites/thumbs/{cell}", get(thumb))
@@ -30,6 +31,10 @@ async fn meta(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn sprites_bin(State(state): State<AppState>) -> Response {
     blob(state.map_sprites.sprites_bin().await, "application/octet-stream")
+}
+
+async fn roofs_bin(State(state): State<AppState>) -> Response {
+    blob(state.map_sprites.roofs_bin().await, "application/octet-stream")
 }
 
 async fn sprites(State(state): State<AppState>) -> impl IntoResponse {
