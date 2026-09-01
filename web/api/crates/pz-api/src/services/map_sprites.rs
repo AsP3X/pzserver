@@ -3,7 +3,7 @@
 //! Separate from `map_tiles`: that store is the JPEG DZI pack. This one is
 //! atlas pages, occupancy blobs and cell thumbnails from `make map-sprites`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -63,6 +63,7 @@ const POOL_SIZE: usize = 4;
 #[derive(Clone)]
 pub struct MapSprites {
     inner: Option<Arc<Inner>>,
+    live_path: PathBuf,
 }
 
 struct Inner {
@@ -79,12 +80,16 @@ impl Inner {
 
 impl MapSprites {
     pub fn open(path: &Path) -> Self {
+        let live_path = path.with_file_name("live.bin");
         let Ok(con) = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         ) else {
             tracing::info!(path = %path.display(), "no sprite map store; iso-sprite mode unavailable");
-            return Self { inner: None };
+            return Self {
+                inner: None,
+                live_path,
+            };
         };
         tune(&con);
         let mut connections = vec![Mutex::new(con)];
@@ -113,7 +118,24 @@ impl MapSprites {
                 connections,
                 next: AtomicUsize::new(0),
             })),
+            live_path,
         }
+    }
+
+    pub fn live_path(&self) -> &Path {
+        &self.live_path
+    }
+
+    /// Compact live save overlay. Missing file is a cold start, not an error.
+    pub fn live_bin(&self) -> Option<Vec<u8>> {
+        std::fs::read(&self.live_path).ok().filter(|bytes| {
+            bytes.len() >= 12 && bytes.starts_with(b"LIVE")
+        })
+    }
+
+    pub fn live_revision(&self) -> Option<u32> {
+        let bytes = self.live_bin()?;
+        Some(u32::from_le_bytes(bytes[4..8].try_into().ok()?))
     }
 
     pub fn meta(&self) -> SpriteMeta {
@@ -338,4 +360,18 @@ fn read_meta(con: &Connection) -> rusqlite::Result<SpriteMeta> {
         max_reach: parse("max_reach")?,
         cell_size: parse("cell_size")?,
     })
+}
+
+#[cfg(test)]
+mod live_tests {
+    #[test]
+    fn live_header_revision_is_little_endian_u32() {
+        let mut bytes = b"LIVE".to_vec();
+        bytes.extend_from_slice(&1_700_000_000u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            1_700_000_000
+        );
+    }
 }

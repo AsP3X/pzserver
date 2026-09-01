@@ -1,6 +1,7 @@
 from lotpack_leaves import (
     is_curtain,
     is_door_leaf,
+    is_floor_leaf,
     is_stump,
     is_thumpable_leaf,
     is_tree_leaf,
@@ -27,6 +28,12 @@ def test_window_leaf_drops_detailing():
 def test_curtain_is_the_curtain_tile():
     assert is_curtain("fixtures_windows_curtains_01_52")
     assert not is_curtain("fixtures_windows_01_24")
+
+
+def test_floor_leaf_is_the_walking_surface():
+    assert is_floor_leaf("floors_burnt_01_0")
+    assert is_floor_leaf("floors_interior_tilesandwood_01_23")
+    assert not is_floor_leaf("walls_exterior_wooden_01_0")
 
 
 def test_leaves_for_picks_the_door_not_the_frame():

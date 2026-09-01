@@ -113,6 +113,10 @@ let cutawayFloor: number | null = null
 let roofById = new Uint8Array(0)
 let lastDrawLive = false
 let atlasWarm = 0
+const liveRemove = new Map<string, Set<number>>()
+const liveAdd: Array<{ wx: number; wy: number; z: number; sprite: number }> = []
+let liveRevision = -1
+let livePoll = 0
 let cameraMoving = false
 let atlasGeneration = 0
 let rasterFrame = 0
@@ -301,6 +305,7 @@ export async function loadSpriteMap(): Promise<void> {
       applyRoofIds(decodeRoofBin(await roofs.arrayBuffer()))
     }
     warmAtlas()
+    startLivePoll()
     notify()
   } catch {
     meta = { ready: false } as SpriteMeta
@@ -431,6 +436,90 @@ function decodeRoofBin(buffer: ArrayBuffer): number[] {
     ids.push(view.getUint32(offset, true))
   }
   return ids
+}
+
+function liveKey(wx: number, wy: number, z: number): string {
+  return `${wx}_${wy}_${z}`
+}
+
+function decodeLiveBin(buffer: ArrayBuffer): { revision: number; rows: Array<{ wx: number; wy: number; z: number; remove: number; add: number }> } {
+  const view = new DataView(buffer)
+  if (
+    view.byteLength < 12 ||
+    view.getUint8(0) !== 0x4c ||
+    view.getUint8(1) !== 0x49 ||
+    view.getUint8(2) !== 0x56 ||
+    view.getUint8(3) !== 0x45
+  ) {
+    return { revision: 0, rows: [] }
+  }
+  const revision = view.getUint32(4, true)
+  const count = view.getUint32(8, true)
+  const rows: Array<{ wx: number; wy: number; z: number; remove: number; add: number }> = []
+  for (let i = 0; i < count; i += 1) {
+    const offset = 12 + i * 14
+    if (offset + 14 > view.byteLength) {
+      break
+    }
+    rows.push({
+      wx: view.getUint16(offset, true),
+      wy: view.getUint16(offset + 2, true),
+      z: view.getInt8(offset + 4),
+      remove: view.getUint32(offset + 6, true),
+      add: view.getUint32(offset + 10, true),
+    })
+  }
+  return { revision, rows }
+}
+
+function applyLiveRows(rows: Array<{ wx: number; wy: number; z: number; remove: number; add: number }>) {
+  liveRemove.clear()
+  liveAdd.length = 0
+  for (const row of rows) {
+    const key = liveKey(row.wx, row.wy, row.z)
+    if (row.remove) {
+      let set = liveRemove.get(key)
+      if (!set) {
+        set = new Set()
+        liveRemove.set(key, set)
+      }
+      set.add(row.remove)
+    }
+    if (row.add) {
+      liveAdd.push({ wx: row.wx, wy: row.wy, z: row.z, sprite: row.add })
+    }
+  }
+}
+
+function startLivePoll() {
+  if (livePoll) {
+    return
+  }
+  const tick = () => {
+    void fetch('/api/v1/map-sprites/live/meta', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((body: { revision?: number }) => {
+        const revision = Number(body.revision) || 0
+        if (revision === liveRevision) {
+          return
+        }
+        return fetch('/api/v1/map-sprites/live', { cache: 'no-store' }).then(async (response) => {
+          if (!response.ok || response.status === 204) {
+            liveRevision = revision
+            applyLiveRows([])
+            notify()
+            return
+          }
+          const decoded = decodeLiveBin(await response.arrayBuffer())
+          liveRevision = decoded.revision
+          applyLiveRows(decoded.rows)
+          notify()
+        })
+      })
+      .catch(() => undefined)
+  }
+  tick()
+  livePoll = window.setInterval(tick, 4000)
 }
 
 function warmAtlas() {
@@ -1155,6 +1244,10 @@ function collectVisible(
           if (cutawayFloor !== null && (z[i] > cutawayFloor || roofById[sprite[i]])) {
             continue
           }
+          const gone = liveRemove.get(liveKey(wx, wy, z[i]))
+          if (gone && gone.has(sprite[i])) {
+            continue
+          }
           const row = visiblePool[visibleCount]
           if (row) {
             row.wx = wx
@@ -1168,6 +1261,24 @@ function collectVisible(
         }
       }
     }
+  }
+  for (const patch of liveAdd) {
+    if (patch.wx < minX || patch.wx > maxX || patch.wy < minY || patch.wy > maxY) {
+      continue
+    }
+    if (cutawayFloor !== null && (patch.z > cutawayFloor || roofById[patch.sprite])) {
+      continue
+    }
+    const row = visiblePool[visibleCount]
+    if (row) {
+      row.wx = patch.wx
+      row.wy = patch.wy
+      row.z = patch.z
+      row.sprite = patch.sprite
+    } else {
+      visiblePool.push({ wx: patch.wx, wy: patch.wy, z: patch.z, sprite: patch.sprite })
+    }
+    visibleCount += 1
   }
   return visibleCount
 }

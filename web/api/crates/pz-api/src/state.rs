@@ -43,6 +43,8 @@ pub struct AppState {
     pub lua_bridge_error: Option<Arc<str>>,
     /// SteamCMD is not re-entrant. One Workshop download at a time.
     pub workshop_update: Arc<tokio::sync::Mutex<()>>,
+    /// One live-overlay docker job at a time.
+    pub sprite_live: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -103,6 +105,7 @@ impl AppState {
             backups_error,
             lua_bridge_error,
             workshop_update: Arc::new(tokio::sync::Mutex::new(())),
+            sprite_live: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }

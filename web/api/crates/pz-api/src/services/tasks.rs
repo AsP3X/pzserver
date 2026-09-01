@@ -43,8 +43,19 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(automation_loop(state.clone())),
         tokio::spawn(economy_loop(state.clone())),
         tokio::spawn(respawn_loop(state.clone())),
-        tokio::spawn(safezone_loop(state)),
+        tokio::spawn(safezone_loop(state.clone())),
+        tokio::spawn(sprite_live_loop(state)),
     ]
+}
+
+const SPRITE_LIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+async fn sprite_live_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(SPRITE_LIVE_INTERVAL);
+    loop {
+        ticker.tick().await;
+        crate::services::sprite_live::refresh_if_stale(&state).await;
+    }
 }
 
 async fn map_tile_progress_loop(state: AppState) {

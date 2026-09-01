@@ -59,6 +59,8 @@ pub struct Config {
     /// Docker volume that holds `tiles.sqlite`. API and renderer share it so a
     /// region job updates the same pack the site is serving.
     pub map_tiles_volume: String,
+    /// Docker volume that holds `sprites.sqlite` and `live.bin`.
+    pub map_sprites_volume: String,
     pub pz_game_version: String,
     pub steam_branch: Option<String>,
     /// Path to the live `server.ini`.
@@ -169,6 +171,7 @@ impl Config {
             pz_data_host: string("PZ_DATA_HOST", "./data/zomboid"),
             pz_save_game: string("PZ_SAVE_GAME", &save_game_default),
             map_tiles_volume: string("MAP_TILES_VOLUME", "pz-map-tiles-sqlite"),
+            map_sprites_volume: string("MAP_SPRITES_VOLUME", "pz-map-sprites"),
             pz_game_version: string("PZ_GAME_VERSION", "42.20.0"),
             steam_branch: optional("PZ_STEAM_BRANCH"),
             server_ini_path,

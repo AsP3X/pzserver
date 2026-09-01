@@ -58,6 +58,11 @@ def is_thumpable_leaf(name: str) -> bool:
     )
 
 
+def is_floor_leaf(name: str) -> bool:
+    """Walking surface, including burnt replacements."""
+    return name.lower().startswith("floors_")
+
+
 def is_stump(name: str) -> bool:
     return "stump" in name.lower()
 
@@ -70,5 +75,6 @@ def leaves_for(kind: str, tiles: list[str]) -> list[str]:
         "tree": is_tree_leaf,
         "wall": is_wall_leaf,
         "thumpable": is_thumpable_leaf,
+        "floor": is_floor_leaf,
     }.get(kind, is_door_leaf)
     return [name for name in tiles if match(name)]

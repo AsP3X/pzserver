@@ -20,6 +20,8 @@ pub fn routes() -> Router<AppState> {
         .route("/map-sprites/cells/{cell}", get(cell))
         .route("/map-sprites/thumbs/{cell}", get(thumb))
         .route("/map-sprites/overview", get(overview))
+        .route("/map-sprites/live", get(live))
+        .route("/map-sprites/live/meta", get(live_meta))
 }
 
 async fn meta(State(state): State<AppState>) -> impl IntoResponse {
@@ -70,6 +72,36 @@ async fn thumb(State(state): State<AppState>, Path(cell): Path<String>) -> Respo
 
 async fn overview(State(state): State<AppState>) -> Response {
     blob(state.map_sprites.overview().await, "image/png")
+}
+
+async fn live(State(state): State<AppState>) -> Response {
+    let clone = state.clone();
+    tokio::spawn(async move {
+        crate::services::sprite_live::refresh_if_stale(&clone).await;
+    });
+    match state.map_sprites.live_bin() {
+        Some(bytes) => (
+            [
+                (header::CONTENT_TYPE, "application/octet-stream"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+async fn live_meta(State(state): State<AppState>) -> impl IntoResponse {
+    let clone = state.clone();
+    tokio::spawn(async move {
+        crate::services::sprite_live::refresh_if_stale(&clone).await;
+    });
+    let revision = state.map_sprites.live_revision().unwrap_or(0);
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({ "revision": revision })),
+    )
 }
 
 fn blob(result: crate::error::ApiResult<Option<Vec<u8>>>, content_type: &'static str) -> Response {
