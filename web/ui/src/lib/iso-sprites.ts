@@ -6,21 +6,27 @@
  */
 
 import { ISO_DZI, ISO_LAYER_HEIGHT, dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
-import { drawSpritesGl, uploadAtlasPage } from '@/lib/iso-sprites-gl'
+import { drawSpritesGl, ensureSpriteGl, uploadAtlasPage } from '@/lib/iso-sprites-gl'
 
 const CELL = 256
 const HALF = 64
-const THUMB_PAD = HALF * 24
-/** Live sprites from zoom ~19 up. Below that, overview + cell thumbs. */
-const NEAR_SCALE = 0.1
+/** Must match `thumbs.py` `cell_dzi_box` pad: HALF*16 + LAYER_HEIGHT*8. */
+const THUMB_PAD = HALF * 16 + ISO_LAYER_HEIGHT * 8
 const BUCKET = 16
 const BUCKETS = CELL / BUCKET
+/**
+ * Live WebGL while this many lotpack cells cover the view. 512px thumbs are
+ * native around zoom 16; stretching them at 19 is an 8× blit with diamond seams.
+ */
+const LIVE_CELL_CAP = 48
 /** More cells than this → one county overview blit instead of thousands of thumbs. */
 const OVERVIEW_CELLS = 28
 const OVERVIEW_W = 2048
-const MAX_INFLIGHT = 10
-const CELL_LIMIT = 48
+const MAX_INFLIGHT = 12
+const CELL_LIMIT = 96
 const THUMB_LIMIT = 96
+/** Grass-ish, so holes do not flash the old near-black fill. */
+const GROUND = '#4e5c36'
 
 export interface SpriteMeta {
   ready: boolean
@@ -317,6 +323,16 @@ function applySpriteTable(rows: SpriteRecord[]) {
   }
 }
 
+function spritePageCount(): number {
+  let pages = meta?.pages ?? 0
+  for (const row of sprites) {
+    if (row.page + 1 > pages) {
+      pages = row.page + 1
+    }
+  }
+  return Math.max(1, pages)
+}
+
 function decodeSpriteBin(buffer: ArrayBuffer): SpriteRecord[] {
   const view = new DataView(buffer)
   if (
@@ -544,7 +560,15 @@ function prefetchAtlas(cell: PackedCell) {
   }
 }
 
-function prefetchView(cover: { cx: number; cy: number }[], near: boolean) {
+function prefetchView(cover: { cx: number; cy: number }[], live: boolean) {
+  if (live) {
+    thumbWanted.clear()
+    dropQueuedThumbsExcept(thumbWanted)
+    for (const { cx, cy } of cover) {
+      requestCell(cx, cy)
+    }
+    return
+  }
   if (cover.length > OVERVIEW_CELLS) {
     return
   }
@@ -555,9 +579,6 @@ function prefetchView(cover: { cx: number; cy: number }[], near: boolean) {
   }
   dropQueuedThumbsExcept(wanted)
   for (const { cx, cy } of cover) {
-    if (near) {
-      requestCell(cx, cy)
-    }
     requestThumb(cx, cy, true)
   }
 }
@@ -679,14 +700,14 @@ function drawClipped(
   ctx.drawImage(image, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0)
 }
 
-function visibleCells(mapping: IsoMapping, width: number, height: number, near: boolean) {
+function visibleCells(mapping: IsoMapping, width: number, height: number, live: boolean) {
   const corners = [
     mapping.toWorld(0, 0),
     mapping.toWorld(width, 0),
     mapping.toWorld(0, height),
     mapping.toWorld(width, height),
   ]
-  const reach = near ? Math.ceil((meta?.max_reach ?? 512) / HALF) + 8 : 4
+  const reach = live ? Math.min(40, Math.ceil((meta?.max_reach ?? 512) / HALF) + 4) : 4
   let minX = corners[0].x
   let maxX = corners[0].x
   let minY = corners[0].y
@@ -764,7 +785,6 @@ function drawOverview(
   const destY = (0 - mapping.center.y) * mapping.isoScale + height / 2
   const destW = ISO_DZI.width * mapping.isoScale
   const destH = ISO_DZI.height * mapping.isoScale
-  ctx.imageSmoothingEnabled = false
   if (bakedOverview && bakedOverview.naturalWidth > 0) {
     drawClipped(
       ctx,
@@ -795,16 +815,18 @@ function drawThumbsOrOverview(
   height: number,
   cover: { cx: number; cy: number }[],
 ) {
-  ctx.imageSmoothingEnabled = false
   if (cover.length >= OVERVIEW_CELLS) {
     if (!bakedOverview) {
       for (const { cx, cy } of cover) {
         requestThumb(cx, cy, false)
       }
     }
+    ctx.imageSmoothingEnabled = true
     drawOverview(ctx, mapping, width, height)
+    ctx.imageSmoothingEnabled = false
     return
   }
+  ctx.imageSmoothingEnabled = false
   for (const { cx, cy } of cover) {
     drawThumb(ctx, mapping, cx, cy, width, height)
   }
@@ -921,10 +943,11 @@ function pumpRaster() {
   }
   const started = performance.now()
   if (job.index === 0) {
-    job.ctx.fillStyle = '#141611'
+    job.ctx.fillStyle = GROUND
     job.ctx.fillRect(0, 0, job.width, job.height)
-    drawThumbsOrOverview(job.ctx, job.mapping, job.width, job.height, job.cover)
-    job.ctx.imageSmoothingEnabled = job.scale < 0.85
+    job.ctx.imageSmoothingEnabled = true
+    drawOverview(job.ctx, job.mapping, job.width, job.height)
+    job.ctx.imageSmoothingEnabled = false
   }
   while (job.index < job.rows.length && performance.now() - started < 6) {
     blitSprite(job.ctx, job.mapping, job.rows[job.index], job.width, job.height)
@@ -1053,13 +1076,24 @@ function layerNeedsRefresh(
   return Math.abs(dx) > 28 || Math.abs(dy) > 28
 }
 
+function drawLiveUnderlay(
+  ctx: CanvasRenderingContext2D,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+) {
+  ctx.imageSmoothingEnabled = true
+  drawOverview(ctx, mapping, width, height)
+  ctx.imageSmoothingEnabled = false
+}
+
 export function drawIsoSprites(
   ctx: CanvasRenderingContext2D,
   mapping: IsoMapping,
   width: number,
   height: number,
 ): void {
-  ctx.fillStyle = '#141611'
+  ctx.fillStyle = GROUND
   ctx.fillRect(0, 0, width, height)
 
   if (!meta?.ready) {
@@ -1067,59 +1101,55 @@ export function drawIsoSprites(
     return
   }
 
-  const near = mapping.isoScale >= NEAR_SCALE
-  const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
-  prefetchView(cover, near)
+  const tight = visibleCells(mapping, width, height, false)
+  const live = tight.cover.length <= LIVE_CELL_CAP
+  const { cover, minX, maxX, minY, maxY } = live
+    ? visibleCells(mapping, width, height, true)
+    : tight
+  prefetchView(cover, live)
 
-  if (near && spriteTable.length > 1) {
-    atlasImages.forEach((image, page) => uploadAtlasPage(page, image))
+  if (live && spriteTable.length > 1) {
+    ensureSpriteGl()
+    atlasImages.forEach((image, page) => {
+      if (image.complete && image.naturalWidth > 0) {
+        uploadAtlasPage(page, image)
+      }
+    })
     const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
     if (visibleCount > 0) {
       const drawn = visiblePool.slice(0, visibleCount)
       drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
-      if (
-        drawSpritesGl(
-          ctx,
-          mapping,
-          width,
-          height,
-          drawn,
-          drawn.length,
-          spriteTable,
-          Math.max(1, meta?.pages ?? 1),
-        )
-      ) {
+      const painted = drawSpritesGl(
+        ctx,
+        mapping,
+        width,
+        height,
+        drawn,
+        drawn.length,
+        spriteTable,
+        spritePageCount(),
+      )
+      if (painted) {
         return
       }
     }
-  }
 
-  const haveLayer =
-    spriteLayer && spriteLayer.width === width && spriteLayer.height === height ? spriteLayer : null
-
-  if (!near) {
-    drawThumbsOrOverview(ctx, mapping, width, height, cover)
-    return
-  }
-
-  if (haveLayer) {
-    const destW = haveLayer.width * (mapping.isoScale / haveLayer.scale)
-    const destH = haveLayer.height * (mapping.isoScale / haveLayer.scale)
-    const destX = (haveLayer.centerX - mapping.center.x) * mapping.isoScale + width / 2 - destW / 2
-    const destY = (haveLayer.centerY - mapping.center.y) * mapping.isoScale + height / 2 - destH / 2
-    const covered = destX <= 2 && destY <= 2 && destX + destW >= width - 2 && destY + destH >= height - 2
-    if (!covered) {
-      drawThumbsOrOverview(ctx, mapping, width, height, cover)
+    const haveLayer =
+      spriteLayer && spriteLayer.width === width && spriteLayer.height === height ? spriteLayer : null
+    if (haveLayer) {
+      blitCachedLayer(ctx, haveLayer, mapping, width, height)
+      if (!cameraMoving && sprites.length > 0 && layerNeedsRefresh(haveLayer, mapping, cover)) {
+        startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
+      }
+      return
     }
-    blitCachedLayer(ctx, haveLayer, mapping, width, height)
-    if (!cameraMoving && sprites.length > 0 && layerNeedsRefresh(haveLayer, mapping, cover)) {
+
+    drawLiveUnderlay(ctx, mapping, width, height)
+    if (!cameraMoving && sprites.length > 0 && !ensureSpriteGl()) {
       startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
     }
     return
   }
 
   drawThumbsOrOverview(ctx, mapping, width, height, cover)
-  if (!cameraMoving && sprites.length > 0) {
-    startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
-  }
 }

@@ -1,40 +1,45 @@
 /**
- * GPU sprite pass. The game does this in OpenGL: one atlas in VRAM, only the
- * squares in the frustum, painter's order for alpha. Canvas 2D cannot.
+ * GPU sprite pass. The game does this in OpenGL: one atlas page in VRAM at a
+ * time, only the squares in the frustum, alpha test + depth so batching by
+ * page does not break painter's order.
+ *
+ * A TEXTURE_2D_ARRAY of every 2048 page is hundreds of MB and often fails to
+ * allocate; then this pass draws nothing and the 2D path upscales 512px cell
+ * thumbs. Per-page 2D textures upload only what the view has asked for.
  */
 
 import { ISO_LAYER_HEIGHT, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
 
 const HALF = 64
 const PAGE = 2048
-const MAX_INSTANCES = 48_000
+const MAX_INSTANCES = 32_768
 
 const VERT = `#version 300 es
 in vec2 a_unit;
 in vec4 a_dest;
 in vec4 a_uv;
-in float a_page;
+in float a_depth;
 uniform vec2 u_res;
 out vec2 v_uv;
-out float v_page;
 void main() {
   vec2 pos = a_dest.xy + a_unit * a_dest.zw;
   vec2 clip = (pos / u_res) * 2.0 - 1.0;
-  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  gl_Position = vec4(clip.x, -clip.y, a_depth, 1.0);
   v_uv = a_uv.xy + a_unit * a_uv.zw;
-  v_page = a_page;
 }
 `
 
 const FRAG = `#version 300 es
 precision mediump float;
-precision mediump sampler2DArray;
 in vec2 v_uv;
-in float v_page;
-uniform sampler2DArray u_tex;
+uniform sampler2D u_tex;
 out vec4 out_color;
 void main() {
-  out_color = texture(u_tex, vec3(v_uv, v_page));
+  vec4 color = texture(u_tex, v_uv);
+  if (color.a < 0.5) {
+    discard;
+  }
+  out_color = color;
 }
 `
 
@@ -62,14 +67,14 @@ interface GlState {
   vao: WebGLVertexArrayObject
   instanceBuf: WebGLBuffer
   instanceData: Float32Array
-  tex: WebGLTexture
-  pages: number
+  textures: Map<number, WebGLTexture>
   uploaded: boolean[]
   uRes: WebGLUniformLocation
 }
 
 let state: GlState | null = null
 let failed = false
+const pageBuckets: number[][] = []
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader | null {
   const shader = gl.createShader(type)
@@ -85,19 +90,19 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
   return shader
 }
 
-function init(pageCount: number): GlState | null {
+export function ensureSpriteGl(): GlState | null {
   if (failed) {
     return null
   }
-  if (state && state.pages >= pageCount) {
+  if (state) {
     return state
   }
   const canvas = document.createElement('canvas')
   const gl = canvas.getContext('webgl2', {
     alpha: true,
-    premultipliedAlpha: true,
+    premultipliedAlpha: false,
     antialias: false,
-    depth: false,
+    depth: true,
     stencil: false,
   })
   if (!gl) {
@@ -120,7 +125,7 @@ function init(pageCount: number): GlState | null {
   gl.bindAttribLocation(program, 0, 'a_unit')
   gl.bindAttribLocation(program, 1, 'a_dest')
   gl.bindAttribLocation(program, 2, 'a_uv')
-  gl.bindAttribLocation(program, 3, 'a_page')
+  gl.bindAttribLocation(program, 3, 'a_depth')
   gl.linkProgram(program)
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     failed = true
@@ -136,8 +141,7 @@ function init(pageCount: number): GlState | null {
   const vao = gl.createVertexArray()
   const unitBuf = gl.createBuffer()
   const instanceBuf = gl.createBuffer()
-  const tex = gl.createTexture()
-  if (!vao || !unitBuf || !instanceBuf || !tex) {
+  if (!vao || !unitBuf || !instanceBuf) {
     failed = true
     return null
   }
@@ -160,19 +164,13 @@ function init(pageCount: number): GlState | null {
   gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 32)
   gl.vertexAttribDivisor(3, 1)
 
-  const pages = Math.max(1, pageCount)
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex)
-  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, PAGE, PAGE, pages)
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1)
-
   gl.useProgram(program)
   gl.uniform1i(uTex, 0)
-  gl.enable(gl.BLEND)
-  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+  gl.disable(gl.BLEND)
+  gl.enable(gl.DEPTH_TEST)
+  gl.depthFunc(gl.LESS)
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0)
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
 
   state = {
     canvas,
@@ -181,38 +179,132 @@ function init(pageCount: number): GlState | null {
     vao,
     instanceBuf,
     instanceData: new Float32Array(MAX_INSTANCES * 9),
-    tex,
-    pages,
-    uploaded: Array.from({ length: pages }, () => false),
+    textures: new Map(),
+    uploaded: [],
     uRes,
   }
   return state
 }
 
+function textureForPage(gls: GlState, page: number): WebGLTexture | null {
+  const existing = gls.textures.get(page)
+  if (existing) {
+    return existing
+  }
+  const tex = gls.gl.createTexture()
+  if (!tex) {
+    return null
+  }
+  const { gl } = gls
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gls.textures.set(page, tex)
+  return tex
+}
+
 export function uploadAtlasPage(page: number, image: HTMLImageElement): void {
-  if (!image.complete || image.naturalWidth === 0) {
+  if (!image.complete || image.naturalWidth === 0 || page < 0) {
     return
   }
-  const gls = state
-  if (!gls || page < 0 || page >= gls.pages || gls.uploaded[page]) {
+  const gls = ensureSpriteGl()
+  if (!gls || gls.uploaded[page]) {
     return
   }
-  const { gl, tex } = gls
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex)
-  gl.texSubImage3D(
-    gl.TEXTURE_2D_ARRAY,
-    0,
-    0,
-    0,
-    page,
-    image.naturalWidth,
-    image.naturalHeight,
-    1,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    image,
-  )
+  const tex = textureForPage(gls, page)
+  if (!tex) {
+    return
+  }
+  const { gl } = gls
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image)
   gls.uploaded[page] = true
+}
+
+function bucketPage(page: number): number[] {
+  while (pageBuckets.length <= page) {
+    pageBuckets.push([])
+  }
+  const bucket = pageBuckets[page]
+  bucket.length = 0
+  return bucket
+}
+
+function drawPage(
+  gls: GlState,
+  page: number,
+  indices: number[],
+  rows: GlOccupant[],
+  sprites: Array<GlSprite | undefined>,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+  dpr: number,
+  count: number,
+): number {
+  const tex = gls.textures.get(page)
+  if (!tex || !gls.uploaded[page] || indices.length === 0) {
+    return 0
+  }
+  const { gl, instanceBuf, instanceData } = gls
+  const scale = mapping.isoScale
+  const cx = mapping.center.x
+  const cy = mapping.center.y
+  const invPage = 1 / PAGE
+  const denom = count + 1
+  let drawn = 0
+
+  gl.activeTexture(gl.TEXTURE0)
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+
+  let cursor = 0
+  while (cursor < indices.length) {
+    let written = 0
+    while (cursor < indices.length && written < MAX_INSTANCES) {
+      const index = indices[cursor]
+      cursor += 1
+      const occupant = rows[index]
+      const sprite = sprites[occupant.sprite]
+      if (!sprite || sprite.w <= 0 || sprite.h <= 0) {
+        continue
+      }
+      const destW = sprite.w * scale
+      const destH = sprite.h * scale
+      const dzi = worldToDzi(occupant.wx, occupant.wy)
+      const dx = (dzi.x - cx) * scale + width / 2 + sprite.ox * scale
+      const dy =
+        (dzi.y - cy) * scale +
+        height / 2 +
+        HALF * scale +
+        sprite.oy * scale -
+        occupant.z * ISO_LAYER_HEIGHT * scale
+      if (dx > width || dy > height || dx + destW < 0 || dy + destH < 0) {
+        continue
+      }
+      const base = written * 9
+      instanceData[base] = dx * dpr
+      instanceData[base + 1] = dy * dpr
+      instanceData[base + 2] = destW * dpr
+      instanceData[base + 3] = destH * dpr
+      instanceData[base + 4] = sprite.x * invPage
+      instanceData[base + 5] = sprite.y * invPage
+      instanceData[base + 6] = sprite.w * invPage
+      instanceData[base + 7] = sprite.h * invPage
+      // Back of the painter list is far (clip z → +1). Front is near (−1).
+      instanceData[base + 8] = 1 - (2 * (index + 1)) / denom
+      written += 1
+    }
+    if (written === 0) {
+      continue
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf)
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, written * 9))
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, written)
+    drawn += written
+  }
+  return drawn
 }
 
 export function drawSpritesGl(
@@ -223,13 +315,13 @@ export function drawSpritesGl(
   rows: GlOccupant[],
   count: number,
   sprites: Array<GlSprite | undefined>,
-  pageCount: number,
+  _pageCount: number,
 ): boolean {
-  const gls = init(Math.max(1, pageCount))
+  const gls = ensureSpriteGl()
   if (!gls || count === 0) {
     return false
   }
-  const { canvas, gl, program, vao, instanceBuf, instanceData, tex, uRes, uploaded } = gls
+  const { canvas, gl, program, vao, uRes } = gls
   const dpr = Math.max(1, target.getTransform().a || 1)
   const w = Math.max(1, Math.round(width * dpr))
   const h = Math.max(1, Math.round(height * dpr))
@@ -239,55 +331,43 @@ export function drawSpritesGl(
   }
   gl.viewport(0, 0, w, h)
   gl.clearColor(0, 0, 0, 0)
-  gl.clear(gl.COLOR_BUFFER_BIT)
+  gl.clearDepth(1)
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-  const scale = mapping.isoScale
-  const cx = mapping.center.x
-  const cy = mapping.center.y
-  let written = 0
-  const invPage = 1 / PAGE
-  for (let i = 0; i < count && written < MAX_INSTANCES; i += 1) {
-    const occupant = rows[i]
-    const sprite = sprites[occupant.sprite]
-    if (!sprite || sprite.w <= 0 || !uploaded[sprite.page]) {
-      continue
-    }
-    const destW = sprite.w * scale
-    const destH = sprite.h * scale
-    if (destW < 0.75 || destH < 0.75) {
-      continue
-    }
-    const dzi = worldToDzi(occupant.wx, occupant.wy)
-    const dx = (dzi.x - cx) * scale + width / 2 + sprite.ox * scale
-    const dy =
-      (dzi.y - cy) * scale + height / 2 + HALF * scale + sprite.oy * scale - occupant.z * ISO_LAYER_HEIGHT * scale
-    if (dx > width || dy > height || dx + destW < 0 || dy + destH < 0) {
-      continue
-    }
-    const base = written * 9
-    instanceData[base] = dx * dpr
-    instanceData[base + 1] = dy * dpr
-    instanceData[base + 2] = destW * dpr
-    instanceData[base + 3] = destH * dpr
-    instanceData[base + 4] = sprite.x * invPage
-    instanceData[base + 5] = sprite.y * invPage
-    instanceData[base + 6] = sprite.w * invPage
-    instanceData[base + 7] = sprite.h * invPage
-    instanceData[base + 8] = sprite.page
-    written += 1
+  for (let p = 0; p < pageBuckets.length; p += 1) {
+    pageBuckets[p].length = 0
   }
-  if (written === 0) {
-    return false
+  const usedPages: number[] = []
+  for (let i = 0; i < count; i += 1) {
+    const sprite = sprites[rows[i].sprite]
+    if (!sprite || !gls.uploaded[sprite.page]) {
+      continue
+    }
+    let bucket = pageBuckets[sprite.page]
+    if (!bucket) {
+      bucket = bucketPage(sprite.page)
+    }
+    if (bucket.length === 0) {
+      usedPages.push(sprite.page)
+    }
+    bucket.push(i)
   }
 
   gl.useProgram(program)
   gl.uniform2f(uRes, w, h)
   gl.bindVertexArray(vao)
-  gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf)
-  gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, written * 9))
-  gl.activeTexture(gl.TEXTURE0)
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex)
-  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, written)
+  gl.enable(gl.DEPTH_TEST)
+  gl.depthFunc(gl.LESS)
+  gl.disable(gl.BLEND)
+
+  let drawn = 0
+  for (const page of usedPages) {
+    drawn += drawPage(gls, page, pageBuckets[page], rows, sprites, mapping, width, height, dpr, count)
+    pageBuckets[page].length = 0
+  }
+  if (drawn === 0) {
+    return false
+  }
 
   const smoothing = target.imageSmoothingEnabled
   target.imageSmoothingEnabled = false
