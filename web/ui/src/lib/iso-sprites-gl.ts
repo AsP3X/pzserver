@@ -38,8 +38,12 @@ void main() {
   }
   vec2 css = (a_dzi - u_center) * u_scale + u_view * 0.5
     + vec2(a_origin.x, 64.0 + a_origin.y - a_z * u_layer) * u_scale;
-  vec2 dest = css * u_dpr - vec2(0.5);
-  vec2 dim = raw + vec2(1.0);
+  // 1px dest grow closes floor diamonds when minifying. At HUD 20+ it
+  // stretches quads so the last column samples the 1px atlas pad — roofs
+  // fray. Exact dest once a sprite pixel is half a device pixel or larger.
+  float close = step(0.5, u_scale * u_dpr);
+  vec2 dest = mix(css * u_dpr - vec2(0.5), css * u_dpr, close);
+  vec2 dim = mix(raw + vec2(1.0), max(raw, vec2(1.0)), close);
   vec2 pos = dest + a_unit * dim;
   vec2 clip = (pos / u_res) * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, a_depth, 1.0);
