@@ -451,7 +451,7 @@ export function WorldmapView({
       }
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
       ctx.imageSmoothingEnabled = modeRef.current !== 'iso-sprite'
-      element.style.imageRendering = modeRef.current === 'iso-sprite' ? 'pixelated' : 'auto'
+      element.style.imageRendering = 'auto'
 
       const overlay = {
         width,

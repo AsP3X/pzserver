@@ -22,17 +22,20 @@ const THUMB_PAD = HALF * 16 + ISO_LAYER_HEIGHT * 8
 const BUCKET = 16
 const BUCKETS = CELL / BUCKET
 /**
- * Live WebGL at HUD zoom 17 and closer. Below that, 512px cell thumbs — not
- * the 2048 county overview, which is mush through z16–z17.
+ * Live WebGL at HUD zoom 17 and closer. Mid-zoom draws 512px cell thumbs on
+ * top of a county underlay. The 2048 overview is never the only picture
+ * while a cell is still tens of pixels on screen (that was the z15 mush).
  */
 const LIVE_CELL_CAP = 96
-/** County overview only when a 512px thumb would be a stamp, not a neighbourhood. */
-const THUMB_CELLS = 280
-const OVERVIEW_W = 2048
-const MAX_INFLIGHT = 16
+const THUMB_DRAW_PX = 96
+const THUMB_ALWAYS_PX = 200
+const THUMB_DRAW_CELLS = 900
+const MIN_THUMB_CSS = 40
+const MAX_INFLIGHT = 20
 const CELL_LIMIT = 160
-const THUMB_LIMIT = 256
+const THUMB_LIMIT = 768
 const SORT_CAP = 80_000
+const STAMP_PREFETCH = 192
 /** Grass-ish, so holes do not flash the old near-black fill. */
 const GROUND = '#4e5c36'
 
@@ -101,7 +104,9 @@ const thumbWanted = new Set<string>()
 let overview: HTMLCanvasElement | null = null
 let overviewCtx: CanvasRenderingContext2D | null = null
 let overviewH = 0
+let overviewW = 0
 let bakedOverview: HTMLImageElement | null = null
+let heldLive = false
 let cameraMoving = false
 let atlasGeneration = 0
 let rasterFrame = 0
@@ -230,6 +235,10 @@ export async function loadSpriteMap(): Promise<void> {
     overviewImage.onload = () => {
       if (overviewImage.naturalWidth > 0) {
         bakedOverview = overviewImage
+        if (overviewCtx && overview && stampedOverview.size === 0) {
+          overviewCtx.imageSmoothingEnabled = true
+          overviewCtx.drawImage(bakedOverview, 0, 0, overview.width, overview.height)
+        }
         notify()
       }
     }
@@ -397,15 +406,42 @@ function atlasPage(page: number): HTMLImageElement {
   return image
 }
 
+function makeOverviewCanvas(widthPx: number): {
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+} | null {
+  const canvas = document.createElement('canvas')
+  const heightPx = Math.max(1, Math.round((widthPx * ISO_DZI.height) / ISO_DZI.width))
+  canvas.width = widthPx
+  canvas.height = heightPx
+  if (canvas.width !== widthPx || canvas.height !== heightPx) {
+    return null
+  }
+  const ctx = canvas.getContext('2d', { alpha: true })
+  if (!ctx) {
+    return null
+  }
+  return { canvas, ctx }
+}
+
 function ensureOverview() {
   if (overview && overviewCtx) {
     return
   }
-  overviewH = Math.max(1, Math.round((OVERVIEW_W * ISO_DZI.height) / ISO_DZI.width))
-  overview = document.createElement('canvas')
-  overview.width = OVERVIEW_W
-  overview.height = overviewH
-  overviewCtx = overview.getContext('2d', { alpha: true })
+  const made = makeOverviewCanvas(8192) ?? makeOverviewCanvas(4096) ?? makeOverviewCanvas(2048)
+  if (!made) {
+    return
+  }
+  overview = made.canvas
+  overviewCtx = made.ctx
+  overviewW = overview.width
+  overviewH = overview.height
+  overviewCtx.fillStyle = GROUND
+  overviewCtx.fillRect(0, 0, overviewW, overviewH)
+  if (bakedOverview && bakedOverview.naturalWidth > 0) {
+    overviewCtx.imageSmoothingEnabled = true
+    overviewCtx.drawImage(bakedOverview, 0, 0, overviewW, overviewH)
+  }
 }
 
 function stampOverview(cx: number, cy: number, image: HTMLImageElement) {
@@ -418,10 +454,11 @@ function stampOverview(cx: number, cy: number, image: HTMLImageElement) {
     return
   }
   const box = cellBox(cx, cy)
-  const sx = (box.left / ISO_DZI.width) * OVERVIEW_W
+  const sx = (box.left / ISO_DZI.width) * overviewW
   const sy = (box.top / ISO_DZI.height) * overviewH
-  const sw = ((box.right - box.left) / ISO_DZI.width) * OVERVIEW_W
+  const sw = ((box.right - box.left) / ISO_DZI.width) * overviewW
   const sh = ((box.bottom - box.top) / ISO_DZI.height) * overviewH
+  overviewCtx.imageSmoothingEnabled = true
   overviewCtx.drawImage(image, sx, sy, sw, sh)
   stampedOverview.add(key)
 }
@@ -434,12 +471,15 @@ function requestThumb(cx: number, cy: number, keep: boolean): HTMLImageElement |
   const existing = thumbImages.get(key)
   if (existing) {
     touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
+      if (thumbWanted.has(drop)) {
+        return false
+      }
       thumbImages.delete(drop)
       return true
     })
     return existing
   }
-  if (!keep && (stampedOverview.has(key) || bakedOverview)) {
+  if (!keep && stampedOverview.has(key)) {
     return null
   }
   if (queuedThumbs.has(key)) {
@@ -456,6 +496,9 @@ function requestThumb(cx: number, cy: number, keep: boolean): HTMLImageElement |
           if (keep || thumbWanted.has(key)) {
             thumbImages.set(key, image)
             touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
+              if (thumbWanted.has(drop)) {
+                return false
+              }
               thumbImages.delete(drop)
               return true
             })
@@ -565,26 +608,84 @@ function prefetchAtlas(cell: PackedCell) {
   }
 }
 
-function prefetchView(cover: { cx: number; cy: number }[], live: boolean) {
+function typicalThumbDest(mapping: IsoMapping): number {
+  const box = cellBox(0, 0)
+  return (box.right - box.left) * mapping.isoScale
+}
+
+function shouldDrawThumbs(mapping: IsoMapping, coverLen: number): boolean {
+  const destW = typicalThumbDest(mapping)
+  if (destW >= THUMB_ALWAYS_PX) {
+    return true
+  }
+  return destW >= THUMB_DRAW_PX && coverLen <= THUMB_DRAW_CELLS
+}
+
+function chooseLive(mapping: IsoMapping, coverLen: number): boolean {
+  const zoom = levelForScale(mapping.isoScale)
+  const enter = zoom >= 17 && coverLen <= LIVE_CELL_CAP
+  const hold = heldLive && zoom >= 17 && coverLen <= LIVE_CELL_CAP + 32
+  heldLive = enter || hold
+  return heldLive
+}
+
+function thumbOnScreen(
+  mapping: IsoMapping,
+  cx: number,
+  cy: number,
+  width: number,
+  height: number,
+): boolean {
+  const box = cellBox(cx, cy)
+  const destW = (box.right - box.left) * mapping.isoScale
+  const destH = (box.bottom - box.top) * mapping.isoScale
+  if (destW < MIN_THUMB_CSS && destH < MIN_THUMB_CSS) {
+    return false
+  }
+  const topLeft = dziToScreen(mapping, box.left, box.top)
+  return topLeft.x < width && topLeft.y < height && topLeft.x + destW > 0 && topLeft.y + destH > 0
+}
+
+function prefetchView(
+  cover: { cx: number; cy: number }[],
+  live: boolean,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+) {
   if (live) {
     thumbWanted.clear()
-    dropQueuedThumbsExcept(thumbWanted)
+    if (!cameraMoving) {
+      dropQueuedThumbsExcept(thumbWanted)
+    }
     for (const { cx, cy } of cover) {
       requestCell(cx, cy)
     }
     return
   }
-  if (cover.length > THUMB_CELLS) {
-    return
-  }
-  const wanted = new Set(cover.map(({ cx, cy }) => `${cx}_${cy}`))
+  const drawThumbs = shouldDrawThumbs(mapping, cover.length)
+  const visible = cover.filter(({ cx, cy }) => thumbOnScreen(mapping, cx, cy, width, height))
+  const centerX = mapping.center.x
+  const centerY = mapping.center.y
+  visible.sort((left, right) => {
+    const a = cellBox(left.cx, left.cy)
+    const b = cellBox(right.cx, right.cy)
+    const da = a.left + a.right - 2 * centerX
+    const db = a.top + a.bottom - 2 * centerY
+    const ea = b.left + b.right - 2 * centerX
+    const eb = b.top + b.bottom - 2 * centerY
+    return da * da + db * db - (ea * ea + eb * eb)
+  })
+  const fetch = drawThumbs ? visible : visible.slice(0, STAMP_PREFETCH)
   thumbWanted.clear()
-  for (const key of wanted) {
-    thumbWanted.add(key)
+  for (const { cx, cy } of fetch) {
+    thumbWanted.add(`${cx}_${cy}`)
   }
-  dropQueuedThumbsExcept(wanted)
-  for (const { cx, cy } of cover) {
-    requestThumb(cx, cy, true)
+  if (!cameraMoving) {
+    dropQueuedThumbsExcept(thumbWanted)
+  }
+  for (const { cx, cy } of fetch) {
+    requestThumb(cx, cy, drawThumbs)
   }
 }
 
@@ -766,13 +867,14 @@ function drawThumb(
   const topLeft = dziToScreen(mapping, box.left, box.top)
   const destW = (box.right - box.left) * mapping.isoScale
   const destH = (box.bottom - box.top) * mapping.isoScale
+  ctx.imageSmoothingEnabled = destW < image.naturalWidth
   drawClipped(
     ctx,
     image,
     topLeft.x,
     topLeft.y,
-    destW,
-    destH,
+    destW + 0.75,
+    destH + 0.75,
     width,
     height,
     image.naturalWidth,
@@ -790,6 +892,12 @@ function drawOverview(
   const destY = (0 - mapping.center.y) * mapping.isoScale + height / 2
   const destW = ISO_DZI.width * mapping.isoScale
   const destH = ISO_DZI.height * mapping.isoScale
+  ensureOverview()
+  ctx.imageSmoothingEnabled = true
+  if (overview && (stampedOverview.size > 0 || bakedOverview)) {
+    drawClipped(ctx, overview, destX, destY, destW, destH, width, height, overview.width, overview.height)
+    return true
+  }
   if (bakedOverview && bakedOverview.naturalWidth > 0) {
     drawClipped(
       ctx,
@@ -805,12 +913,7 @@ function drawOverview(
     )
     return true
   }
-  ensureOverview()
-  if (!overview) {
-    return false
-  }
-  drawClipped(ctx, overview, destX, destY, destW, destH, width, height, overview.width, overview.height)
-  return stampedOverview.size > 0
+  return false
 }
 
 function drawThumbsOrOverview(
@@ -820,21 +923,17 @@ function drawThumbsOrOverview(
   height: number,
   cover: { cx: number; cy: number }[],
 ) {
-  if (cover.length >= THUMB_CELLS) {
-    if (!bakedOverview) {
-      for (const { cx, cy } of cover) {
-        requestThumb(cx, cy, false)
-      }
-    }
-    ctx.imageSmoothingEnabled = true
-    drawOverview(ctx, mapping, width, height)
-    ctx.imageSmoothingEnabled = false
+  drawOverview(ctx, mapping, width, height)
+  if (!shouldDrawThumbs(mapping, cover.length)) {
     return
   }
-  ctx.imageSmoothingEnabled = false
   for (const { cx, cy } of cover) {
+    if (!thumbOnScreen(mapping, cx, cy, width, height)) {
+      continue
+    }
     drawThumb(ctx, mapping, cx, cy, width, height)
   }
+  ctx.imageSmoothingEnabled = false
 }
 
 function blitSprite(
@@ -1106,11 +1205,11 @@ export function drawIsoSprites(
   }
 
   const tight = visibleCells(mapping, width, height, false)
-  const live = levelForScale(mapping.isoScale) >= 17 && tight.cover.length <= LIVE_CELL_CAP
+  const live = chooseLive(mapping, tight.cover.length)
   const { cover, minX, maxX, minY, maxY } = live
     ? visibleCells(mapping, width, height, true)
     : tight
-  prefetchView(cover, live)
+  prefetchView(cover, live, mapping, width, height)
 
   if (live && spriteTable.length > 1) {
     ensureSpriteGl()
