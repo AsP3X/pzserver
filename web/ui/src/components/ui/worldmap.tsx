@@ -591,7 +591,7 @@ export function WorldmapView({
           if (viewRef.current) {
             setView({ ...viewRef.current })
           }
-        }, 120)
+        }, 200)
         return
       }
 

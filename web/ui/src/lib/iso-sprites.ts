@@ -17,7 +17,7 @@ const BUCKETS = CELL / BUCKET
 /** More cells than this → one county overview blit instead of thousands of thumbs. */
 const OVERVIEW_CELLS = 28
 const OVERVIEW_W = 2048
-const MAX_INFLIGHT = 8
+const MAX_INFLIGHT = 10
 const CELL_LIMIT = 48
 const THUMB_LIMIT = 96
 
@@ -154,9 +154,11 @@ export function setSpriteMapMoving(moving: boolean) {
     return
   }
   cameraMoving = moving
-  if (!moving) {
-    notify()
+  if (moving) {
+    cancelRaster()
+    return
   }
+  notify()
 }
 
 function cancelRaster() {
@@ -437,6 +439,31 @@ function decodeOccupancy(buffer: ArrayBuffer): PackedCell | 'empty' {
   return { count: filled, lx: olx, ly: oly, z: oz, sprite: osprite, bucketStart, bucketCount }
 }
 
+function prefetchAtlas(cell: PackedCell) {
+  if (sprites.length === 0) {
+    return
+  }
+  const seen = new Set<number>()
+  const { count, sprite } = cell
+  for (let i = 0; i < count; i += 1) {
+    const rec = spriteById.get(sprite[i])
+    if (!rec || seen.has(rec.page)) {
+      continue
+    }
+    seen.add(rec.page)
+    atlasPage(rec.page)
+  }
+}
+
+function prefetchView(cover: { cx: number; cy: number }[], near: boolean) {
+  for (const { cx, cy } of cover) {
+    if (near) {
+      requestCell(cx, cy)
+    }
+    requestThumb(cx, cy, true)
+  }
+}
+
 function dropCell(key: string): boolean {
   if (cells.get(key) === 'loading') {
     return false
@@ -460,7 +487,11 @@ function requestCell(cx: number, cy: number) {
         cells.set(key, 'empty')
         return
       }
-      cells.set(key, decodeOccupancy(await response.arrayBuffer()))
+      const packed = decodeOccupancy(await response.arrayBuffer())
+      cells.set(key, packed)
+      if (packed !== 'empty') {
+        prefetchAtlas(packed)
+      }
       notify()
     } catch {
       cells.set(key, 'empty')
@@ -674,6 +705,9 @@ function drawThumbsOrOverview(
     drawOverview(ctx, mapping, width, height)
     return
   }
+  if (bakedOverview) {
+    drawOverview(ctx, mapping, width, height)
+  }
   for (const { cx, cy } of cover) {
     drawThumb(ctx, mapping, cx, cy, width, height)
   }
@@ -883,6 +917,45 @@ function startRaster(
   rasterFrame = requestAnimationFrame(pumpRaster)
 }
 
+function blitCachedLayer(
+  ctx: CanvasRenderingContext2D,
+  layer: SpriteLayer,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+): boolean {
+  const destW = layer.width * (mapping.isoScale / layer.scale)
+  const destH = layer.height * (mapping.isoScale / layer.scale)
+  const destX = (layer.centerX - mapping.center.x) * mapping.isoScale + width / 2 - destW / 2
+  const destY = (layer.centerY - mapping.center.y) * mapping.isoScale + height / 2 - destH / 2
+  if (destW < 2 || destH < 2) {
+    return false
+  }
+  ctx.imageSmoothingEnabled = mapping.isoScale !== layer.scale
+  ctx.drawImage(layer.canvas, destX, destY, destW, destH)
+  return destX <= 2 && destY <= 2 && destX + destW >= width - 2 && destY + destH >= height - 2
+}
+
+function layerNeedsRefresh(
+  layer: SpriteLayer,
+  mapping: IsoMapping,
+  cover: { cx: number; cy: number }[],
+): boolean {
+  if (layer.atlas !== atlasGeneration) {
+    return true
+  }
+  if (layer.ready < readyCells(cover)) {
+    return true
+  }
+  const ratio = mapping.isoScale / layer.scale
+  if (ratio < 0.9 || ratio > 1.12) {
+    return true
+  }
+  const dx = (layer.centerX - mapping.center.x) * mapping.isoScale
+  const dy = (layer.centerY - mapping.center.y) * mapping.isoScale
+  return Math.abs(dx) > 28 || Math.abs(dy) > 28
+}
+
 export function drawIsoSprites(
   ctx: CanvasRenderingContext2D,
   mapping: IsoMapping,
@@ -899,31 +972,29 @@ export function drawIsoSprites(
 
   const near = mapping.isoScale >= NEAR_SCALE
   const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
+  prefetchView(cover, near)
 
-  if (
-    spriteLayer &&
-    spriteLayer.scale === mapping.isoScale &&
-    spriteLayer.width === width &&
-    spriteLayer.height === height
-  ) {
-    const dx = (spriteLayer.centerX - mapping.center.x) * mapping.isoScale
-    const dy = (spriteLayer.centerY - mapping.center.y) * mapping.isoScale
-    ctx.drawImage(spriteLayer.canvas, dx, dy)
-    if (
-      !cameraMoving &&
-      sprites.length > 0 &&
-      (Math.abs(dx) > 4 ||
-        Math.abs(dy) > 4 ||
-        spriteLayer.ready < readyCells(cover) ||
-        spriteLayer.atlas !== atlasGeneration)
-    ) {
-      startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
-    }
-    return
-  }
+  const haveLayer =
+    spriteLayer && spriteLayer.width === width && spriteLayer.height === height ? spriteLayer : null
 
   if (!near) {
     drawThumbsOrOverview(ctx, mapping, width, height, cover)
+    return
+  }
+
+  if (haveLayer) {
+    const destW = haveLayer.width * (mapping.isoScale / haveLayer.scale)
+    const destH = haveLayer.height * (mapping.isoScale / haveLayer.scale)
+    const destX = (haveLayer.centerX - mapping.center.x) * mapping.isoScale + width / 2 - destW / 2
+    const destY = (haveLayer.centerY - mapping.center.y) * mapping.isoScale + height / 2 - destH / 2
+    const covered = destX <= 2 && destY <= 2 && destX + destW >= width - 2 && destY + destH >= height - 2
+    if (!covered) {
+      drawThumbsOrOverview(ctx, mapping, width, height, cover)
+    }
+    blitCachedLayer(ctx, haveLayer, mapping, width, height)
+    if (!cameraMoving && sprites.length > 0 && layerNeedsRefresh(haveLayer, mapping, cover)) {
+      startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
+    }
     return
   }
 
