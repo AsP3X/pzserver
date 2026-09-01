@@ -45,7 +45,7 @@ const MIN_THUMB_CSS = 40
 const MAX_INFLIGHT = 20
 const CELL_LIMIT = 256
 const THUMB_LIMIT = 768
-const SORT_CAP = 80_000
+const SORT_CAP = 250_000
 const STAMP_PREFETCH = 192
 /** Below this iso scale, drop ground sprites that cover less than one CSS pixel. */
 const CLUTTER_SCALE = 0.08
@@ -1834,7 +1834,7 @@ export function drawIsoSprites(
     }
     const visibleCount = collectVisible(cover, minX, maxX, minY, maxY, mapping.isoScale)
     if (visibleCount > 0) {
-      const ordered = mapping.isoScale >= 0.22 && visibleCount <= SORT_CAP * 2
+      const ordered = visibleCount <= SORT_CAP
       const drawn = takeVisible(visibleCount, ordered)
       const dpr = Math.max(1, ctx.getTransform().a || 1)
       const painted = drawSpritesGl(

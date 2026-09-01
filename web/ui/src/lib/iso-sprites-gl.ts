@@ -38,12 +38,13 @@ void main() {
   }
   vec2 css = (a_dzi - u_center) * u_scale + u_view * 0.5
     + vec2(a_origin.x, 64.0 + a_origin.y - a_z * u_layer) * u_scale;
-  // 1px dest grow closes floor diamonds when minifying. At HUD 20+ it
-  // stretches quads so the last column samples the 1px atlas pad — roofs
-  // fray. Exact dest once a sprite pixel is half a device pixel or larger.
-  float close = step(0.5, u_scale * u_dpr);
-  vec2 dest = mix(css * u_dpr - vec2(0.5), css * u_dpr, close);
-  vec2 dim = mix(raw + vec2(1.0), max(raw, vec2(1.0)), close);
+  // Grow only squat ground tiles when minifying. Roofs are tall; stretching
+  // them overlaps rims at every live zoom and they z-fight.
+  float minify = 1.0 - step(0.5, u_scale * u_dpr);
+  float squat = 1.0 - step(97.0, a_size.y);
+  float grow = minify * squat;
+  vec2 dest = css * u_dpr - vec2(0.5) * grow;
+  vec2 dim = raw + vec2(grow);
   vec2 pos = dest + a_unit * dim;
   vec2 clip = (pos / u_res) * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, a_depth, 1.0);
@@ -101,6 +102,11 @@ interface GlState {
   batches: Map<number, PageBatch>
   batchPages: number[]
   epoch: number
+  fbo: WebGLFramebuffer | null
+  color: WebGLTexture | null
+  depth: WebGLRenderbuffer | null
+  fboW: number
+  fboH: number
   uRes: WebGLUniformLocation
   uCenter: WebGLUniformLocation
   uView: WebGLUniformLocation
@@ -216,6 +222,11 @@ export function ensureSpriteGl(): GlState | null {
     batches: new Map(),
     batchPages: [],
     epoch: -1,
+    fbo: null,
+    color: null,
+    depth: null,
+    fboW: 0,
+    fboH: 0,
     uRes,
     uCenter,
     uView,
@@ -254,6 +265,74 @@ export function spriteGlEpoch(): number {
   return state?.epoch ?? -1
 }
 
+function disposePass(gls: GlState): void {
+  const { gl } = gls
+  if (gls.fbo) {
+    gl.deleteFramebuffer(gls.fbo)
+  }
+  if (gls.color) {
+    gl.deleteTexture(gls.color)
+  }
+  if (gls.depth) {
+    gl.deleteRenderbuffer(gls.depth)
+  }
+  gls.fbo = null
+  gls.color = null
+  gls.depth = null
+  gls.fboW = 0
+  gls.fboH = 0
+}
+
+function bindPass(gls: GlState, w: number, h: number): void {
+  const { gl } = gls
+  if (gls.fbo && gls.fboW === w && gls.fboH === h) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, gls.fbo)
+    return
+  }
+  disposePass(gls)
+  const fbo = gl.createFramebuffer()
+  const color = gl.createTexture()
+  const depth = gl.createRenderbuffer()
+  if (!fbo || !color || !depth) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    return
+  }
+  gl.bindTexture(gl.TEXTURE_2D, color)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h)
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depth)
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h)
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0)
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth)
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    gl.deleteFramebuffer(fbo)
+    gl.deleteTexture(color)
+    gl.deleteRenderbuffer(depth)
+    return
+  }
+  gls.fbo = fbo
+  gls.color = color
+  gls.depth = depth
+  gls.fboW = w
+  gls.fboH = h
+}
+
+function blitPass(gls: GlState, w: number, h: number): void {
+  if (!gls.fbo) {
+    return
+  }
+  const { gl } = gls
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, gls.fbo)
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null)
+  gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST)
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+}
+
 function sizeGl(gls: GlState, width: number, height: number, dpr: number): { w: number; h: number } {
   const w = Math.max(1, Math.round(width * dpr))
   const h = Math.max(1, Math.round(height * dpr))
@@ -270,6 +349,7 @@ function sizeGl(gls: GlState, width: number, height: number, dpr: number): { w: 
 function paintBatches(gls: GlState, mapping: IsoMapping, width: number, height: number, dpr: number): number {
   const { w, h } = sizeGl(gls, width, height, dpr)
   const { gl, program, vao } = gls
+  bindPass(gls, w, h)
   gl.viewport(0, 0, w, h)
   gl.clearColor(GROUND_RGB[0], GROUND_RGB[1], GROUND_RGB[2], 1)
   gl.clearDepth(1)
@@ -298,6 +378,7 @@ function paintBatches(gls: GlState, mapping: IsoMapping, width: number, height: 
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, batch.count)
     drawn += batch.count
   }
+  blitPass(gls, w, h)
   return drawn
 }
 
@@ -402,9 +483,7 @@ function clipDepth(
   span: number,
 ): number {
   const tie = occupant.sprite & 255
-  if (ordered && count > 0) {
-    // Unique per occupant. A sprite-id nudge smaller than one sort step so
-    // coplanar roof pieces on the same square never share a depth sample.
+  if (count > 0 && (ordered || count <= 250_000)) {
     const step = 1 / (count + 1)
     const t = (index + 1) * step + ((tie + 1) / 256) * step
     return 1 - 2 * Math.min(1, t)
