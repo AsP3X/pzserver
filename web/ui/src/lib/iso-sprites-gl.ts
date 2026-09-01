@@ -220,8 +220,6 @@ export function uploadAtlasPage(page: number, image: HTMLImageElement): void {
   const { gl } = gls
   gl.bindTexture(gl.TEXTURE_2D, tex)
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image)
-  gl.generateMipmap(gl.TEXTURE_2D)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_NEAREST)
   gls.uploaded[page] = true
 }
 
@@ -301,10 +299,12 @@ function drawPage(
         continue
       }
       const base = written * 9
-      instanceData[base] = dx * dpr
-      instanceData[base + 1] = dy * dpr
-      instanceData[base + 2] = destW * dpr
-      instanceData[base + 3] = destH * dpr
+      // Grow 1 device pixel so neighbouring floor diamonds meet; UV stays the
+      // packed rect so we do not shrink the sampled bitmap.
+      instanceData[base] = dx * dpr - 0.5
+      instanceData[base + 1] = dy * dpr - 0.5
+      instanceData[base + 2] = destW * dpr + 1
+      instanceData[base + 3] = destH * dpr + 1
       instanceData[base + 4] = sprite.x * invPage
       instanceData[base + 5] = sprite.y * invPage
       instanceData[base + 6] = sprite.w * invPage
