@@ -10,8 +10,8 @@ import { ISO_DZI, ISO_LAYER_HEIGHT, dziToWorld, worldToDzi, type IsoMapping } fr
 const CELL = 256
 const HALF = 64
 const THUMB_PAD = HALF * 24
-/** Live sprites from about a neighbourhood in. County/town stay on the overview. */
-const NEAR_SCALE = 0.2
+/** Live sprites from zoom ~19 up. Below that, overview + cell thumbs. */
+const NEAR_SCALE = 0.1
 const BUCKET = 16
 const BUCKETS = CELL / BUCKET
 /** More cells than this → one county overview blit instead of thousands of thumbs. */
@@ -80,7 +80,8 @@ let spriteById = new Map<number, SpriteRecord>()
 let loading = false
 let notifyFrame = 0
 let inflight = 0
-const waitQueue: Array<() => void> = []
+const waitQueue: Array<{ key: string; urgent: boolean; run: () => void }> = []
+const thumbWanted = new Set<string>()
 let overview: HTMLCanvasElement | null = null
 let overviewCtx: CanvasRenderingContext2D | null = null
 let overviewH = 0
@@ -219,6 +220,7 @@ export async function loadSpriteMap(): Promise<void> {
         notify()
       }
     }
+    overviewImage.onerror = () => notify()
     overviewImage.src = `/api/v1/map-sprites/overview?v=${version}`
     const rows = await fetch(`/api/v1/map-sprites/sprites?v=${version}`).then(
       (response) => response.json() as Promise<SpriteRecord[]>,
@@ -233,24 +235,47 @@ export async function loadSpriteMap(): Promise<void> {
   }
 }
 
-function enqueue(start: () => Promise<void>, urgent = false) {
+function pumpQueue() {
+  const next = waitQueue.shift()
+  if (next) {
+    next.run()
+  }
+}
+
+function enqueue(start: () => Promise<void>, urgent = false, key = '') {
   const run = () => {
     inflight += 1
     void start().finally(() => {
       inflight -= 1
-      const next = waitQueue.shift()
-      if (next) {
-        next()
-      }
+      pumpQueue()
     })
   }
   if (inflight < MAX_INFLIGHT) {
     run()
-  } else if (urgent) {
-    waitQueue.unshift(run)
-  } else {
-    waitQueue.push(run)
+    return
   }
+  const item = { key, urgent, run }
+  if (urgent) {
+    waitQueue.unshift(item)
+  } else {
+    waitQueue.push(item)
+  }
+}
+
+function dropQueuedThumbsExcept(wanted: Set<string>) {
+  const keep: typeof waitQueue = []
+  for (const item of waitQueue) {
+    if (item.key.startsWith('thumb:')) {
+      const cell = item.key.slice(6)
+      if (!wanted.has(cell)) {
+        queuedThumbs.delete(cell)
+        continue
+      }
+    }
+    keep.push(item)
+  }
+  waitQueue.length = 0
+  waitQueue.push(...keep)
 }
 
 function touch(
@@ -327,6 +352,9 @@ function stampOverview(cx: number, cy: number, image: HTMLImageElement) {
 
 function requestThumb(cx: number, cy: number, keep: boolean): HTMLImageElement | null {
   const key = `${cx}_${cy}`
+  if (keep) {
+    thumbWanted.add(key)
+  }
   const existing = thumbImages.get(key)
   if (existing) {
     touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
@@ -335,37 +363,43 @@ function requestThumb(cx: number, cy: number, keep: boolean): HTMLImageElement |
     })
     return existing
   }
-  if (!keep && stampedOverview.has(key)) {
+  if (!keep && (stampedOverview.has(key) || bakedOverview)) {
     return null
   }
   if (queuedThumbs.has(key)) {
     return null
   }
   queuedThumbs.add(key)
-  enqueue(async () => {
-    await new Promise<void>((resolve) => {
-      const image = new Image()
-      image.decoding = 'async'
-      image.onload = () => {
-        stampOverview(cx, cy, image)
-        if (keep) {
-          thumbImages.set(key, image)
-          touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
-            thumbImages.delete(drop)
-            return true
-          })
+  enqueue(
+    async () => {
+      await new Promise<void>((resolve) => {
+        const image = new Image()
+        image.decoding = 'async'
+        image.onload = () => {
+          stampOverview(cx, cy, image)
+          if (keep || thumbWanted.has(key)) {
+            thumbImages.set(key, image)
+            touch(thumbOrder, key, THUMB_LIMIT, (drop) => {
+              thumbImages.delete(drop)
+              return true
+            })
+            notify()
+          } else {
+            notifyThumbs()
+          }
+          queuedThumbs.delete(key)
+          resolve()
         }
-        queuedThumbs.delete(key)
-        notifyThumbs()
-        resolve()
-      }
-      image.onerror = () => {
-        queuedThumbs.delete(key)
-        resolve()
-      }
-      image.src = `/api/v1/map-sprites/thumbs/${key}?v=${revision()}`
-    })
-  })
+        image.onerror = () => {
+          queuedThumbs.delete(key)
+          resolve()
+        }
+        image.src = `/api/v1/map-sprites/thumbs/${key}?v=${revision()}`
+      })
+    },
+    keep,
+    `thumb:${key}`,
+  )
   return null
 }
 
@@ -456,6 +490,15 @@ function prefetchAtlas(cell: PackedCell) {
 }
 
 function prefetchView(cover: { cx: number; cy: number }[], near: boolean) {
+  if (cover.length > OVERVIEW_CELLS) {
+    return
+  }
+  const wanted = new Set(cover.map(({ cx, cy }) => `${cx}_${cy}`))
+  thumbWanted.clear()
+  for (const key of wanted) {
+    thumbWanted.add(key)
+  }
+  dropQueuedThumbsExcept(wanted)
   for (const { cx, cy } of cover) {
     if (near) {
       requestCell(cx, cy)
@@ -485,6 +528,7 @@ function requestCell(cx: number, cy: number) {
       const response = await fetch(`/api/v1/map-sprites/cells/${key}?v=${revision()}`)
       if (!response.ok) {
         cells.set(key, 'empty')
+        notify()
         return
       }
       const packed = decodeOccupancy(await response.arrayBuffer())
@@ -495,8 +539,9 @@ function requestCell(cx: number, cy: number) {
       notify()
     } catch {
       cells.set(key, 'empty')
+      notify()
     }
-  }, true)
+  }, true, `cell:${key}`)
 }
 
 const cellBoxCache = new Map<string, ReturnType<typeof computeCellBox>>()
