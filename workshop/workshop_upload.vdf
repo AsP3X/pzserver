@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, /report for filing a player report from inside the game, and a friends list: right-click a survivor to ask, accept from the Knox Desk or the website."
-    "changenote"        "[h1]1.28 — Friends[/h1]\n[b]Added[/b]\n[list]\n[*]Right-click another survivor to send a friend request. They see \"Want to be friends?\" over your head.\n[*]Accept, decline, unfriend and block from the Knox Desk FRIENDS page, or from the website.\n[*]/friends add Name from chat does the same ask.\n[*]Friends who share a pin appear on your website map.\n[/list]"
+    "changenote"        "[h1]1.29 — Desk layout[/h1]\n[b]Changed[/b]\n[list]\n[*]The Knox Desk is a fixed 900x580 window. Players can no longer drag the corner to resize it.\n[*]The resize grip is hidden so the layout stays the one the pages were built for.\n[/list]"
 }

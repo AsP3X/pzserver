@@ -310,11 +310,14 @@ end
 KnoxDeskWindow = ISCollapsableWindow:derive("KnoxDeskWindow")
 
 function KnoxDeskWindow:initialise()
-    ISCollapsableWindow.initialise(self)
+    -- Lock before the parent builds children: vanilla :new defaults
+    -- resizable true, and createChildren only skips the grip if this is
+    -- already false.
     self.pin = true
-    self.resizable = true
-    self.minimumWidth = MIN_W
-    self.minimumHeight = MIN_H
+    self.resizable = false
+    self.minimumWidth = WIDTH
+    self.minimumHeight = HEIGHT
+    ISCollapsableWindow.initialise(self)
 end
 
 function KnoxDeskWindow:createChildren()
@@ -346,11 +349,13 @@ function KnoxDeskWindow:createChildren()
 
     self.railButtons = {}
 
-    -- Deliberately *not* overriding resizeWidget.resizeFunction. ISResizeWidget
-    -- does not call it as (self, w, h) — the old code assumed it did, so a drag
-    -- ran a signature the widget never passes. Vanilla already clamps to
-    -- minimumWidth/minimumHeight set above; prerender notices the new size and
-    -- relays out from there, which is the one path that always fires.
+    if self.resizeWidget then
+        self.resizeWidget:setVisible(false)
+    end
+    if self.resizeWidget2 then
+        self.resizeWidget2:setVisible(false)
+    end
+
     self:placeChrome()
     self:rebuildRail()
 end
@@ -383,8 +388,11 @@ function KnoxDeskWindow:placeChrome()
 
     local th = 16
     pcall(function() th = self:titleBarHeight() end)
-    local rh = 8
-    pcall(function() rh = self:resizeWidgetHeight() end)
+    local rh = 0
+    if self.resizable then
+        rh = 8
+        pcall(function() rh = self:resizeWidgetHeight() end)
+    end
 
     local innerH = h - th - rh
     local rail = KR_Desk.railWidth(w)
@@ -543,7 +551,7 @@ local function unmountCurrent()
     end
 end
 
---- Starting size, shrunk to fit a small screen rather than opening off it.
+--- Fixed desk size, shrunk only when the screen cannot hold WIDTH x HEIGHT.
 local function openGeometry()
     local screenW, screenH = 1280, 720
     pcall(function()
@@ -551,8 +559,14 @@ local function openGeometry()
         screenH = getCore():getScreenHeight()
     end)
 
-    local w = math.min(WIDTH, math.max(MIN_W, screenW - 80))
-    local h = math.min(HEIGHT, math.max(MIN_H, screenH - 120))
+    local w = WIDTH
+    local h = HEIGHT
+    if screenW - 80 < w then
+        w = math.max(MIN_W, screenW - 80)
+    end
+    if screenH - 120 < h then
+        h = math.max(MIN_H, screenH - 120)
+    end
     local x = math.max(10, math.floor((screenW - w) / 2))
     local y = math.max(10, math.floor((screenH - h) / 2))
 

@@ -1,8 +1,9 @@
 --
 -- Tests for the Knox Desk layout — KR_Desk.lua and KR_DeskReports.lua.
 --
--- These exist because the desk is resizable and nothing about a resize can be
--- checked by reading the code. The old shell wired
+-- The desk is a fixed 900x580 frame. Layout is still re-run if the window
+-- size is written in tests (or on a screen too small to hold the default).
+-- The old shell wired
 --
 --     self.resizeWidget.resizeFunction = KnoxDeskWindow.applySize
 --
@@ -272,6 +273,8 @@ end
 KR_Desk.show()
 local win = KR_Desk.instance()
 check("desk opened", win ~= nil)
+check("desk is not player-resizable", win and win.resizable == false)
+check("resize grip is hidden", win and (not win.resizeWidget or not win.resizeWidget:getIsVisible()))
 check("reports page registered and got a nav button",
     #win.railButtons == 1 and win.railButtons[1].title == "REPORTS",
     "rail buttons=" .. #win.railButtons)
@@ -315,7 +318,7 @@ local function resizeTo(w, h)
 end
 
 local MIN_W, MIN_H = KR_Desk.MIN_WIDTH, KR_Desk.MIN_HEIGHT
-local TH, RH = 16, 8
+local TH, RH = 16, 0
 
 local sizes = {}
 for w = MIN_W, 1700, 53 do
