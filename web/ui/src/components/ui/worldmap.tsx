@@ -435,8 +435,9 @@ export function WorldmapView({
         height = rect.height
         sizeRef.current = { width, height }
       }
-      const pixelsW = Math.max(1, Math.round(width))
-      const pixelsH = Math.max(1, Math.round(height))
+      const ratio = Math.min(window.devicePixelRatio || 1, 2)
+      const pixelsW = Math.max(1, Math.round(width * ratio))
+      const pixelsH = Math.max(1, Math.round(height * ratio))
       if (element.width !== pixelsW || element.height !== pixelsH) {
         element.width = pixelsW
         element.height = pixelsH
@@ -448,7 +449,8 @@ export function WorldmapView({
       if (!ctx) {
         return
       }
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+      ctx.imageSmoothingEnabled = modeRef.current !== 'iso-sprite'
 
       const overlay = {
         width,

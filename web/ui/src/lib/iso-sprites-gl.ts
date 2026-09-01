@@ -163,8 +163,8 @@ function init(pageCount: number): GlState | null {
   const pages = Math.max(1, pageCount)
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex)
   gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, PAGE, PAGE, pages)
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1)
@@ -230,8 +230,9 @@ export function drawSpritesGl(
     return false
   }
   const { canvas, gl, program, vao, instanceBuf, instanceData, tex, uRes, uploaded } = gls
-  const w = Math.max(1, Math.round(width))
-  const h = Math.max(1, Math.round(height))
+  const dpr = Math.max(1, target.getTransform().a || 1)
+  const w = Math.max(1, Math.round(width * dpr))
+  const h = Math.max(1, Math.round(height * dpr))
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w
     canvas.height = h
@@ -264,10 +265,10 @@ export function drawSpritesGl(
       continue
     }
     const base = written * 9
-    instanceData[base] = dx
-    instanceData[base + 1] = dy
-    instanceData[base + 2] = destW
-    instanceData[base + 3] = destH
+    instanceData[base] = dx * dpr
+    instanceData[base + 1] = dy * dpr
+    instanceData[base + 2] = destW * dpr
+    instanceData[base + 3] = destH * dpr
     instanceData[base + 4] = sprite.x * invPage
     instanceData[base + 5] = sprite.y * invPage
     instanceData[base + 6] = sprite.w * invPage
@@ -280,7 +281,7 @@ export function drawSpritesGl(
   }
 
   gl.useProgram(program)
-  gl.uniform2f(uRes, width, height)
+  gl.uniform2f(uRes, w, h)
   gl.bindVertexArray(vao)
   gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf)
   gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, written * 9))
@@ -288,6 +289,9 @@ export function drawSpritesGl(
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex)
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, written)
 
+  const smoothing = target.imageSmoothingEnabled
+  target.imageSmoothingEnabled = false
   target.drawImage(canvas, 0, 0, width, height)
+  target.imageSmoothingEnabled = smoothing
   return true
 }

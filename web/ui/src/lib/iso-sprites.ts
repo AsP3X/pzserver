@@ -764,7 +764,7 @@ function drawOverview(
   const destY = (0 - mapping.center.y) * mapping.isoScale + height / 2
   const destW = ISO_DZI.width * mapping.isoScale
   const destH = ISO_DZI.height * mapping.isoScale
-  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingEnabled = false
   if (bakedOverview && bakedOverview.naturalWidth > 0) {
     drawClipped(
       ctx,
@@ -795,7 +795,7 @@ function drawThumbsOrOverview(
   height: number,
   cover: { cx: number; cy: number }[],
 ) {
-  ctx.imageSmoothingEnabled = mapping.isoScale < 0.4
+  ctx.imageSmoothingEnabled = false
   if (cover.length >= OVERVIEW_CELLS) {
     if (!bakedOverview) {
       for (const { cx, cy } of cover) {
@@ -804,9 +804,6 @@ function drawThumbsOrOverview(
     }
     drawOverview(ctx, mapping, width, height)
     return
-  }
-  if (bakedOverview) {
-    drawOverview(ctx, mapping, width, height)
   }
   for (const { cx, cy } of cover) {
     drawThumb(ctx, mapping, cx, cy, width, height)
@@ -1031,7 +1028,7 @@ function blitCachedLayer(
   if (destW < 2 || destH < 2) {
     return false
   }
-  ctx.imageSmoothingEnabled = mapping.isoScale !== layer.scale
+  ctx.imageSmoothingEnabled = false
   ctx.drawImage(layer.canvas, destX, destY, destW, destH)
   return destX <= 2 && destY <= 2 && destX + destW >= width - 2 && destY + destH >= height - 2
 }
