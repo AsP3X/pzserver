@@ -252,6 +252,8 @@ export function WorldmapView({
   const drawFrame = useRef(0)
   const sizeRef = useRef({ width: 0, height: 0 })
   const idleTimer = useRef(0)
+  const insideZoomRef = useRef(false)
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
   modeRef.current = mode
 
   const scheduleDraw = useCallback(() => {
@@ -487,7 +489,11 @@ export function WorldmapView({
         element.style.height = `${height}px`
       }
 
-      const ctx = element.getContext('2d', { alpha: false, desynchronized: true })
+      let ctx = ctxRef.current
+      if (!ctx || ctx.canvas !== element) {
+        ctx = element.getContext('2d', { alpha: false, desynchronized: true })
+        ctxRef.current = ctx
+      }
       if (!ctx) {
         return
       }
@@ -530,7 +536,11 @@ export function WorldmapView({
         const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, width, height)
         if (modeRef.current === 'iso-sprite') {
           drawIsoSprites(ctx, mapping, width, height)
-          setInsideNeedsZoom(spriteCutawayFloor() !== null && !spriteMapDrawingLive())
+          const needsZoom = spriteCutawayFloor() !== null && !spriteMapDrawingLive()
+          if (insideZoomRef.current !== needsZoom) {
+            insideZoomRef.current = needsZoom
+            setInsideNeedsZoom(needsZoom)
+          }
         } else {
           drawIsoTiles(ctx, mapping, width, height)
         }

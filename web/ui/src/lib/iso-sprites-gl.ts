@@ -10,19 +10,37 @@
 
 import { ISO_LAYER_HEIGHT, type IsoMapping } from '@/lib/iso-tiles'
 
-const HALF = 64
 const PAGE = 2048
-const MAX_INSTANCES = 32_768
+const FLOATS = 12
+const STRIDE = FLOATS * 4
 
 const VERT = `#version 300 es
 in vec2 a_unit;
-in vec4 a_dest;
+in vec2 a_dzi;
+in vec2 a_origin;
+in vec2 a_size;
+in float a_z;
 in vec4 a_uv;
 in float a_depth;
 uniform vec2 u_res;
+uniform vec2 u_center;
+uniform vec2 u_view;
+uniform float u_scale;
+uniform float u_dpr;
+uniform float u_layer;
 out vec2 v_uv;
 void main() {
-  vec2 pos = a_dest.xy + a_unit * a_dest.zw;
+  vec2 raw = a_size * u_scale * u_dpr;
+  if (raw.x < 0.5 && raw.y < 0.5) {
+    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+    v_uv = a_uv.xy;
+    return;
+  }
+  vec2 css = (a_dzi - u_center) * u_scale + u_view * 0.5
+    + vec2(a_origin.x, 64.0 + a_origin.y - a_z * u_layer) * u_scale;
+  vec2 dest = css * u_dpr - vec2(0.5);
+  vec2 dim = raw + vec2(1.0);
+  vec2 pos = dest + a_unit * dim;
   vec2 clip = (pos / u_res) * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, a_depth, 1.0);
   v_uv = a_uv.xy + a_unit * a_uv.zw;
@@ -62,22 +80,33 @@ export interface GlOccupant {
   dziY: number
 }
 
+interface PageBatch {
+  buf: WebGLBuffer
+  data: Float32Array
+  capacity: number
+  count: number
+}
+
 interface GlState {
   canvas: HTMLCanvasElement
   gl: WebGL2RenderingContext
   program: WebGLProgram
   vao: WebGLVertexArrayObject
-  instanceBuf: WebGLBuffer
-  instanceData: Float32Array
   textures: Map<number, WebGLTexture>
   uploaded: boolean[]
+  batches: Map<number, PageBatch>
+  batchPages: number[]
+  epoch: number
   uRes: WebGLUniformLocation
+  uCenter: WebGLUniformLocation
+  uView: WebGLUniformLocation
+  uScale: WebGLUniformLocation
+  uDpr: WebGLUniformLocation
+  uLayer: WebGLUniformLocation
 }
 
 let state: GlState | null = null
 let failed = false
-const pageBuckets: number[][] = []
-const usedPages: number[] = []
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader | null {
   const shader = gl.createShader(type)
@@ -126,9 +155,12 @@ export function ensureSpriteGl(): GlState | null {
   gl.attachShader(program, vs)
   gl.attachShader(program, fs)
   gl.bindAttribLocation(program, 0, 'a_unit')
-  gl.bindAttribLocation(program, 1, 'a_dest')
-  gl.bindAttribLocation(program, 2, 'a_uv')
-  gl.bindAttribLocation(program, 3, 'a_depth')
+  gl.bindAttribLocation(program, 1, 'a_dzi')
+  gl.bindAttribLocation(program, 2, 'a_origin')
+  gl.bindAttribLocation(program, 3, 'a_size')
+  gl.bindAttribLocation(program, 4, 'a_z')
+  gl.bindAttribLocation(program, 5, 'a_uv')
+  gl.bindAttribLocation(program, 6, 'a_depth')
   gl.linkProgram(program)
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     failed = true
@@ -136,15 +168,19 @@ export function ensureSpriteGl(): GlState | null {
   }
   const uRes = gl.getUniformLocation(program, 'u_res')
   const uTex = gl.getUniformLocation(program, 'u_tex')
-  if (!uRes || !uTex) {
+  const uCenter = gl.getUniformLocation(program, 'u_center')
+  const uView = gl.getUniformLocation(program, 'u_view')
+  const uScale = gl.getUniformLocation(program, 'u_scale')
+  const uDpr = gl.getUniformLocation(program, 'u_dpr')
+  const uLayer = gl.getUniformLocation(program, 'u_layer')
+  if (!uRes || !uTex || !uCenter || !uView || !uScale || !uDpr || !uLayer) {
     failed = true
     return null
   }
 
   const vao = gl.createVertexArray()
   const unitBuf = gl.createBuffer()
-  const instanceBuf = gl.createBuffer()
-  if (!vao || !unitBuf || !instanceBuf) {
+  if (!vao || !unitBuf) {
     failed = true
     return null
   }
@@ -153,19 +189,10 @@ export function ensureSpriteGl(): GlState | null {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW)
   gl.enableVertexAttribArray(0)
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
-
-  const stride = 36
-  gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf)
-  gl.bufferData(gl.ARRAY_BUFFER, MAX_INSTANCES * stride, gl.DYNAMIC_DRAW)
-  gl.enableVertexAttribArray(1)
-  gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 0)
-  gl.vertexAttribDivisor(1, 1)
-  gl.enableVertexAttribArray(2)
-  gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 16)
-  gl.vertexAttribDivisor(2, 1)
-  gl.enableVertexAttribArray(3)
-  gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 32)
-  gl.vertexAttribDivisor(3, 1)
+  for (let loc = 1; loc <= 6; loc += 1) {
+    gl.enableVertexAttribArray(loc)
+    gl.vertexAttribDivisor(loc, 1)
+  }
 
   gl.useProgram(program)
   gl.uniform1i(uTex, 0)
@@ -180,11 +207,17 @@ export function ensureSpriteGl(): GlState | null {
     gl,
     program,
     vao,
-    instanceBuf,
-    instanceData: new Float32Array(MAX_INSTANCES * 9),
     textures: new Map(),
     uploaded: [],
+    batches: new Map(),
+    batchPages: [],
+    epoch: -1,
     uRes,
+    uCenter,
+    uView,
+    uScale,
+    uDpr,
+    uLayer,
   }
   return state
 }
@@ -232,13 +265,31 @@ export function uploadAtlasPage(page: number, image: TexImageSource): void {
   gls.uploaded[page] = true
 }
 
-function bucketPage(page: number): number[] {
-  while (pageBuckets.length <= page) {
-    pageBuckets.push([])
+function bindInstanceAttribs(gl: WebGL2RenderingContext, buf: WebGLBuffer): void {
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, STRIDE, 0)
+  gl.vertexAttribPointer(2, 2, gl.FLOAT, false, STRIDE, 8)
+  gl.vertexAttribPointer(3, 2, gl.FLOAT, false, STRIDE, 16)
+  gl.vertexAttribPointer(4, 1, gl.FLOAT, false, STRIDE, 24)
+  gl.vertexAttribPointer(5, 4, gl.FLOAT, false, STRIDE, 28)
+  gl.vertexAttribPointer(6, 1, gl.FLOAT, false, STRIDE, 44)
+}
+
+function pageBatch(gls: GlState, page: number, count: number): PageBatch | null {
+  let batch = gls.batches.get(page)
+  if (!batch) {
+    const buf = gls.gl.createBuffer()
+    if (!buf) {
+      return null
+    }
+    batch = { buf, data: new Float32Array(count * FLOATS), capacity: count, count: 0 }
+    gls.batches.set(page, batch)
+  } else if (count > batch.capacity) {
+    batch.data = new Float32Array(count * FLOATS)
+    batch.capacity = count
   }
-  const bucket = pageBuckets[page]
-  bucket.length = 0
-  return bucket
+  batch.count = count
+  return batch
 }
 
 /** Slots per iso square so adjacent floors (and the 1px dest overlap) never share a depth. */
@@ -270,90 +321,80 @@ function clipDepth(
   return ndc
 }
 
-function drawPage(
+function rebuildBatches(
   gls: GlState,
-  page: number,
-  indices: number[],
   rows: GlOccupant[],
-  sprites: Array<GlSprite | undefined>,
-  mapping: IsoMapping,
-  width: number,
-  height: number,
-  dpr: number,
   count: number,
+  sprites: Array<GlSprite | undefined>,
   ordered: boolean,
-  minDiag: number,
-  span: number,
 ): number {
-  const tex = gls.textures.get(page)
-  if (!tex || !gls.uploaded[page] || indices.length === 0) {
-    return 0
-  }
-  const { gl, instanceBuf, instanceData } = gls
-  const scale = mapping.isoScale
-  const cx = mapping.center.x
-  const cy = mapping.center.y
-  const invPage = 1 / PAGE
-  let drawn = 0
-
-  gl.activeTexture(gl.TEXTURE0)
-  gl.bindTexture(gl.TEXTURE_2D, tex)
-
-  let cursor = 0
-  while (cursor < indices.length) {
-    let written = 0
-    while (cursor < indices.length && written < MAX_INSTANCES) {
-      const index = indices[cursor]
-      cursor += 1
-      const occupant = rows[index]
-      const sprite = sprites[occupant.sprite]
-      if (!sprite || sprite.w <= 0 || sprite.h <= 0) {
-        continue
-      }
-      const destW = sprite.w * scale
-      const destH = sprite.h * scale
-      if (destW * dpr < 0.5 && destH * dpr < 0.5) {
-        continue
-      }
-      const dx = (occupant.dziX - cx) * scale + width / 2 + sprite.ox * scale
-      const dy =
-        (occupant.dziY - cy) * scale +
-        height / 2 +
-        HALF * scale +
-        sprite.oy * scale -
-        occupant.z * ISO_LAYER_HEIGHT * scale
-      if (dx > width || dy > height || dx + destW < 0 || dy + destH < 0) {
-        continue
-      }
-      const base = written * 9
-      // Grow 1 device pixel so neighbouring floor diamonds meet; UV stays the
-      // packed rect so we do not shrink the sampled bitmap.
-      instanceData[base] = dx * dpr - 0.5
-      instanceData[base + 1] = dy * dpr - 0.5
-      instanceData[base + 2] = destW * dpr + 1
-      instanceData[base + 3] = destH * dpr + 1
-      instanceData[base + 4] = sprite.x * invPage
-      instanceData[base + 5] = sprite.y * invPage
-      instanceData[base + 6] = sprite.w * invPage
-      instanceData[base + 7] = sprite.h * invPage
-      instanceData[base + 8] = clipDepth(
-        occupant,
-        sprite,
-        index,
-        count,
-        ordered,
-        minDiag,
-        span,
-      )
-      written += 1
+  const { gl, uploaded } = gls
+  const counts = new Map<number, number>()
+  let minDiag = rows[0].wx + rows[0].wy
+  let maxDiag = minDiag
+  for (let i = 0; i < count; i += 1) {
+    const occupant = rows[i]
+    const diag = occupant.wx + occupant.wy
+    if (diag < minDiag) {
+      minDiag = diag
     }
-    if (written === 0) {
+    if (diag > maxDiag) {
+      maxDiag = diag
+    }
+    const sprite = sprites[occupant.sprite]
+    if (!sprite || sprite.w <= 0 || sprite.h <= 0 || !uploaded[sprite.page]) {
       continue
     }
-    gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf)
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, written * 9))
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, written)
-    drawn += written
+    counts.set(sprite.page, (counts.get(sprite.page) ?? 0) + 1)
+  }
+  const span = Math.max(0, maxDiag - minDiag)
+  gls.batchPages.length = 0
+  const cursors = new Map<number, number>()
+  for (const [page, n] of counts) {
+    const batch = pageBatch(gls, page, n)
+    if (!batch) {
+      continue
+    }
+    cursors.set(page, 0)
+    gls.batchPages.push(page)
+  }
+  const invPage = 1 / PAGE
+  for (let i = 0; i < count; i += 1) {
+    const occupant = rows[i]
+    const sprite = sprites[occupant.sprite]
+    if (!sprite || sprite.w <= 0 || sprite.h <= 0 || !uploaded[sprite.page]) {
+      continue
+    }
+    const batch = gls.batches.get(sprite.page)
+    const written = cursors.get(sprite.page)
+    if (!batch || written === undefined) {
+      continue
+    }
+    const base = written * FLOATS
+    const data = batch.data
+    data[base] = occupant.dziX
+    data[base + 1] = occupant.dziY
+    data[base + 2] = sprite.ox
+    data[base + 3] = sprite.oy
+    data[base + 4] = sprite.w
+    data[base + 5] = sprite.h
+    data[base + 6] = occupant.z
+    data[base + 7] = sprite.x * invPage
+    data[base + 8] = sprite.y * invPage
+    data[base + 9] = sprite.w * invPage
+    data[base + 10] = sprite.h * invPage
+    data[base + 11] = clipDepth(occupant, sprite, i, count, ordered, minDiag, span)
+    cursors.set(sprite.page, written + 1)
+  }
+  let drawn = 0
+  for (const page of gls.batchPages) {
+    const batch = gls.batches.get(page)
+    if (!batch || batch.count === 0) {
+      continue
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, batch.buf)
+    gl.bufferData(gl.ARRAY_BUFFER, batch.data.subarray(0, batch.count * FLOATS), gl.DYNAMIC_DRAW)
+    drawn += batch.count
   }
   return drawn
 }
@@ -368,12 +409,13 @@ export function drawSpritesGl(
   sprites: Array<GlSprite | undefined>,
   _pageCount: number,
   ordered = true,
+  epoch = 0,
 ): boolean {
   const gls = ensureSpriteGl()
   if (!gls || count === 0) {
     return false
   }
-  const { canvas, gl, program, vao, uRes } = gls
+  const { canvas, gl, program, vao } = gls
   const dpr = Math.max(1, target.getTransform().a || 1)
   const w = Math.max(1, Math.round(width * dpr))
   const h = Math.max(1, Math.round(height * dpr))
@@ -386,61 +428,35 @@ export function drawSpritesGl(
   gl.clearDepth(1)
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-  for (let p = 0; p < pageBuckets.length; p += 1) {
-    pageBuckets[p].length = 0
+  if (gls.epoch !== epoch) {
+    const packed = rebuildBatches(gls, rows, count, sprites, ordered)
+    gls.epoch = packed > 0 ? epoch : -1
   }
-  usedPages.length = 0
-  let minDiag = rows[0].wx + rows[0].wy
-  let maxDiag = minDiag
-  for (let i = 0; i < count; i += 1) {
-    const occupant = rows[i]
-    const diag = occupant.wx + occupant.wy
-    if (diag < minDiag) {
-      minDiag = diag
-    }
-    if (diag > maxDiag) {
-      maxDiag = diag
-    }
-    const sprite = sprites[occupant.sprite]
-    if (!sprite || !gls.uploaded[sprite.page]) {
-      continue
-    }
-    let bucket = pageBuckets[sprite.page]
-    if (!bucket) {
-      bucket = bucketPage(sprite.page)
-    }
-    if (bucket.length === 0) {
-      usedPages.push(sprite.page)
-    }
-    bucket.push(i)
-  }
-  const span = Math.max(0, maxDiag - minDiag)
 
   gl.useProgram(program)
-  gl.uniform2f(uRes, w, h)
+  gl.uniform2f(gls.uRes, w, h)
+  gl.uniform2f(gls.uCenter, mapping.center.x, mapping.center.y)
+  gl.uniform2f(gls.uView, width, height)
+  gl.uniform1f(gls.uScale, mapping.isoScale)
+  gl.uniform1f(gls.uDpr, dpr)
+  gl.uniform1f(gls.uLayer, ISO_LAYER_HEIGHT)
   gl.bindVertexArray(vao)
   gl.enable(gl.DEPTH_TEST)
   gl.depthFunc(gl.LESS)
   gl.disable(gl.BLEND)
 
   let drawn = 0
-  for (const page of usedPages) {
-    drawn += drawPage(
-      gls,
-      page,
-      pageBuckets[page],
-      rows,
-      sprites,
-      mapping,
-      width,
-      height,
-      dpr,
-      count,
-      ordered,
-      minDiag,
-      span,
-    )
-    pageBuckets[page].length = 0
+  for (const page of gls.batchPages) {
+    const batch = gls.batches.get(page)
+    const tex = gls.textures.get(page)
+    if (!batch || !tex || !gls.uploaded[page] || batch.count === 0) {
+      continue
+    }
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    bindInstanceAttribs(gl, batch.buf)
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, batch.count)
+    drawn += batch.count
   }
   if (drawn === 0) {
     return false

@@ -122,6 +122,11 @@ interface CollectCache {
 
 let collectCache: CollectCache | null = null
 let sortedCount = -1
+let gpuBatchEpoch = 1
+
+function bumpGpuBatches() {
+  gpuBatchEpoch += 1
+}
 
 let meta: SpriteMeta | null = null
 let sprites: SpriteRecord[] = []
@@ -141,7 +146,7 @@ let cutawayFloor: number | null = null
 let roofById = new Uint8Array(0)
 let lastDrawLive = false
 let atlasWarm = 0
-const liveRemove = new Map<string, Set<number>>()
+const liveRemove = new Map<number, Set<number>>()
 const liveAdd: Array<{ wx: number; wy: number; z: number; sprite: number }> = []
 let liveRevision = -1
 let livePoll = 0
@@ -284,6 +289,7 @@ export function setSpriteCutawayFloor(floor: number | null): void {
   cutawayFloor = next
   collectCache = null
   sortedCount = -1
+  bumpGpuBatches()
   spriteLayer = null
   cancelRaster()
   notify()
@@ -414,6 +420,7 @@ function applySpriteTable(rows: SpriteRecord[]) {
   sprites = rows
   collectCache = null
   sortedCount = -1
+  bumpGpuBatches()
   const maxId = rows.reduce((max, row) => (row.id > max ? row.id : max), 0)
   spriteTable = new Array(maxId + 1)
   const namedRoofs: number[] = []
@@ -469,8 +476,8 @@ function decodeRoofBin(buffer: ArrayBuffer): number[] {
   return ids
 }
 
-function liveKey(wx: number, wy: number, z: number): string {
-  return `${wx}_${wy}_${z}`
+function liveKey(wx: number, wy: number, z: number): number {
+  return wx * 1_000_000_000 + wy * 10_000 + (z + 128)
 }
 
 function decodeLiveBin(buffer: ArrayBuffer): { revision: number; rows: Array<{ wx: number; wy: number; z: number; remove: number; add: number }> } {
@@ -508,6 +515,7 @@ function applyLiveRows(rows: Array<{ wx: number; wy: number; z: number; remove: 
   liveAdd.length = 0
   collectCache = null
   sortedCount = -1
+  bumpGpuBatches()
   for (const row of rows) {
     const key = liveKey(row.wx, row.wy, row.z)
     if (row.remove) {
@@ -697,6 +705,7 @@ function atlasPage(page: number): AtlasSource | null {
       atlasImages.set(page, source)
       uploadAtlasPage(page, source)
       atlasGeneration += 1
+      bumpGpuBatches()
       notify()
     } catch {
       atlasFailed.add(page)
@@ -1055,6 +1064,7 @@ function dropCell(key: string): boolean {
   cells.delete(key)
   collectCache = null
   sortedCount = -1
+  bumpGpuBatches()
   return true
 }
 
@@ -1408,6 +1418,7 @@ function takeVisible(count: number, ordered: boolean): VisibleSprite[] {
   sortScratch.length = count
   sortScratch.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
   sortedCount = count
+  bumpGpuBatches()
   return sortScratch
 }
 
@@ -1455,6 +1466,7 @@ function collectVisible(
     return collectCache.count
   }
   sortedCount = -1
+  bumpGpuBatches()
   let visibleCount = 0
   for (const { cx, cy } of cover) {
     requestCell(cx, cy)
@@ -1753,6 +1765,7 @@ export function drawIsoSprites(
         spriteTable,
         spritePageCount(),
         ordered,
+        gpuBatchEpoch,
       )
       if (painted) {
         lastDrawLive = true
