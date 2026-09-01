@@ -1834,7 +1834,7 @@ export function drawIsoSprites(
     }
     const visibleCount = collectVisible(cover, minX, maxX, minY, maxY, mapping.isoScale)
     if (visibleCount > 0) {
-      const ordered = visibleCount <= SORT_CAP && mapping.isoScale >= 0.22
+      const ordered = mapping.isoScale >= 0.22 && visibleCount <= SORT_CAP * 2
       const drawn = takeVisible(visibleCount, ordered)
       const dpr = Math.max(1, ctx.getTransform().a || 1)
       const painted = drawSpritesGl(

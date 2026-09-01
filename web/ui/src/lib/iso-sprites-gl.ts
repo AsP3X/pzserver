@@ -202,7 +202,7 @@ export function ensureSpriteGl(): GlState | null {
   gl.uniform1i(uTex, 0)
   gl.disable(gl.BLEND)
   gl.enable(gl.DEPTH_TEST)
-  gl.depthFunc(gl.LESS)
+  gl.depthFunc(gl.LEQUAL)
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0)
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
 
@@ -283,7 +283,7 @@ function paintBatches(gls: GlState, mapping: IsoMapping, width: number, height: 
   gl.uniform1f(gls.uLayer, ISO_LAYER_HEIGHT)
   gl.bindVertexArray(vao)
   gl.enable(gl.DEPTH_TEST)
-  gl.depthFunc(gl.LESS)
+  gl.depthFunc(gl.LEQUAL)
   gl.disable(gl.BLEND)
   let drawn = 0
   for (const page of gls.batchPages) {
@@ -401,13 +401,18 @@ function clipDepth(
   minDiag: number,
   span: number,
 ): number {
+  const tie = occupant.sprite & 255
   if (ordered && count > 0) {
-    return 1 - (2 * (index + 1)) / (count + 1)
+    // Unique per occupant. A sprite-id nudge smaller than one sort step so
+    // coplanar roof pieces on the same square never share a depth sample.
+    const step = 1 / (count + 1)
+    const t = (index + 1) * step + ((tie + 1) / 256) * step
+    return 1 - 2 * Math.min(1, t)
   }
   const diag = occupant.wx + occupant.wy - minDiag
   const storey = Math.min(31, Math.max(0, occupant.z + 8))
   const tall = sprite ? Math.min(63, sprite.h >> 2) : 0
-  const key = diag * SQUARE_SLOTS + storey * 64 + tall
+  const key = diag * SQUARE_SLOTS + storey * 64 + (tall ^ tie)
   const ndc = 1 - (2 * key) / Math.max(1, (span + 1) * SQUARE_SLOTS)
   if (ndc < -1) {
     return -1
