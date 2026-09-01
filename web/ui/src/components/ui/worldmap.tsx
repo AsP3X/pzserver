@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BoxSelect, Loader2, Maximize2, Minus, Plus } from 'lucide-react'
+import { BoxSelect, ChevronDown, ChevronUp, Layers, Loader2, Maximize2, Minus, Plus } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
 import {
@@ -20,9 +20,11 @@ import {
   drawIsoSprites,
   loadSpriteMap,
   onSpriteMapChange,
+  setSpriteCutawayFloor,
   setSpriteMapMoving,
   spriteMapMoving,
   spriteMapReady,
+  spriteStoreyRange,
 } from '@/lib/iso-sprites'
 import type { TileMeta, UpdatingJob } from '@/lib/iso-tiles'
 import {
@@ -94,6 +96,7 @@ const MAX_SCALE = 4
 const DEFAULT_SCALE = 0.71
 const DRAG_SLOP = 5
 const MODE_KEY = 'knox.map.basemap'
+const INSIDE_KEY = 'knox.map.inside'
 const FALLBACK_BOUNDS: Worldmap['bounds'] = [0, 0, 19_967, 16_127]
 
 /**
@@ -127,6 +130,27 @@ function jobStageLabel(
 ): string {
   const key = JOB_STAGE_KEY[stage] ?? 'map.job.running'
   return t(key)
+}
+
+function readInside(): { on: boolean; floor: number } {
+  if (typeof window === 'undefined') {
+    return { on: false, floor: 0 }
+  }
+  try {
+    const raw = window.localStorage.getItem(INSIDE_KEY)
+    if (!raw) {
+      return { on: false, floor: 0 }
+    }
+    const parsed = JSON.parse(raw) as { on?: boolean; floor?: number }
+    const floor = Number(parsed.floor)
+    return { on: parsed.on === true, floor: Number.isFinite(floor) ? Math.max(0, Math.round(floor)) : 0 }
+  } catch {
+    return { on: false, floor: 0 }
+  }
+}
+
+function writeInside(on: boolean, floor: number) {
+  window.localStorage.setItem(INSIDE_KEY, JSON.stringify({ on, floor }))
 }
 
 function readMode(): MapBasemap {
@@ -208,6 +232,8 @@ export function WorldmapView({
   } | null>(null)
   const [isoFellBack, setIsoFellBack] = useState(false)
   const [spriteReady, setSpriteReady] = useState(spriteMapReady)
+  const [inside, setInside] = useState(() => readInside().on)
+  const [floor, setFloor] = useState(() => readInside().floor)
   const [tileMeta, setTileMeta] = useState<TileMeta | null>(null)
   const [tapeTick, setTapeTick] = useState(0)
   const updating = tileMeta?.updating ?? NO_UPDATING
@@ -279,6 +305,17 @@ export function WorldmapView({
   useEffect(() => {
     void loadSpriteMap()
   }, [])
+
+  useEffect(() => {
+    const { min, max } = spriteStoreyRange()
+    const clamped = Math.min(max, Math.max(min, floor))
+    if (clamped !== floor) {
+      setFloor(clamped)
+      return
+    }
+    writeInside(inside, clamped)
+    setSpriteCutawayFloor(mode === 'iso-sprite' && inside ? clamped : null)
+  }, [floor, inside, mode, spriteReady])
 
   /**
    * Pyramid bounds, plus any cells a tile job is painting. Poll so a
@@ -982,6 +1019,42 @@ export function WorldmapView({
         ) : null}
         <Control label={t('map.zoom_out')} onClick={() => zoomAt(1 / 1.5)} icon={Minus} />
         <Control label={t('map.recentre')} onClick={reset} icon={Maximize2} />
+        {mode === 'iso-sprite' && spriteReady ? (
+          <>
+            <Control
+              active={inside}
+              label={t('map.inside')}
+              onClick={() => setInside((on) => !on)}
+              icon={Layers}
+            />
+            {inside ? (
+              <>
+                <Control
+                  disabled={floor >= spriteStoreyRange().max}
+                  label={t('map.floor_up')}
+                  onClick={() => setFloor((value) => value + 1)}
+                  icon={ChevronUp}
+                />
+                <div
+                  aria-live="polite"
+                  aria-label={
+                    floor === 0 ? t('map.ground_floor') : t('map.floor_number', { count: floor })
+                  }
+                  title={floor === 0 ? t('map.ground_floor') : t('map.floor_number', { count: floor })}
+                  className="grid h-8 min-w-8 place-items-center border border-fence-bright bg-void/85 px-1 font-mono text-[0.6875rem] text-bone"
+                >
+                  {floor}
+                </div>
+                <Control
+                  disabled={floor <= spriteStoreyRange().min}
+                  label={t('map.floor_down')}
+                  onClick={() => setFloor((value) => value - 1)}
+                  icon={ChevronDown}
+                />
+              </>
+            ) : null}
+          </>
+        ) : null}
         {cursor && cursorCell ? (
           <div
             aria-label={`${t('map.coordinates')} ${Math.round(cursor.x)}, ${Math.round(cursor.y)}. ${t('map.cell')} ${cursorCell.x}, ${cursorCell.y}`}
@@ -1051,18 +1124,30 @@ function Control({
   label,
   onClick,
   icon: Icon,
+  active = false,
+  disabled = false,
 }: {
   label: string
   onClick: () => void
   icon: typeof Plus
+  active?: boolean
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
+      aria-pressed={active}
       title={label}
-      className="grid size-8 place-items-center border border-fence-bright bg-void/85 text-smoke transition-colors hover:border-hazard hover:text-hazard"
+      className={cn(
+        'grid size-8 place-items-center border bg-void/85 transition-colors',
+        active
+          ? 'border-hazard text-hazard'
+          : 'border-fence-bright text-smoke hover:border-hazard hover:text-hazard',
+        disabled ? 'cursor-not-allowed opacity-40 hover:border-fence-bright hover:text-smoke' : '',
+      )}
     >
       <Icon aria-hidden="true" className="size-4" strokeWidth={1.5} />
     </button>

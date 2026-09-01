@@ -107,6 +107,7 @@ let overviewH = 0
 let overviewW = 0
 let bakedOverview: HTMLImageElement | null = null
 let heldLive = false
+let cutawayFloor: number | null = null
 let cameraMoving = false
 let atlasGeneration = 0
 let rasterFrame = 0
@@ -122,6 +123,7 @@ interface SpriteLayer {
   height: number
   ready: number
   atlas: number
+  cutaway: number | null
 }
 
 interface RasterJob {
@@ -138,6 +140,7 @@ interface RasterJob {
   scale: number
   ready: number
   atlas: number
+  cutaway: number | null
 }
 
 let thumbNotifyWait = 0
@@ -212,6 +215,34 @@ export function onSpriteMapChange(listener: () => void): () => void {
 
 export function spriteMapReady(): boolean {
   return meta?.ready === true
+}
+
+/** Inclusive lotpack z range in the catalogue. `z_max` in meta is exclusive. */
+export function spriteStoreyRange(): { min: number; max: number } {
+  const min = meta?.z_min ?? 0
+  const exclusive = meta?.z_max
+  const max = exclusive != null && exclusive > 0 ? exclusive - 1 : 7
+  return { min: Math.min(0, min), max: Math.max(0, max) }
+}
+
+/** `null` draws every storey (roofs on). A number hides everything above it. */
+export function spriteCutawayFloor(): number | null {
+  return cutawayFloor
+}
+
+export function setSpriteCutawayFloor(floor: number | null): void {
+  let next = floor
+  if (next !== null) {
+    const { min, max } = spriteStoreyRange()
+    next = Math.min(max, Math.max(min, next))
+  }
+  if (cutawayFloor === next) {
+    return
+  }
+  cutawayFloor = next
+  spriteLayer = null
+  cancelRaster()
+  notify()
 }
 
 export async function loadSpriteMap(): Promise<void> {
@@ -623,8 +654,9 @@ function shouldDrawThumbs(mapping: IsoMapping, coverLen: number): boolean {
 
 function chooseLive(mapping: IsoMapping, coverLen: number): boolean {
   const zoom = levelForScale(mapping.isoScale)
-  const enter = zoom >= 17 && coverLen <= LIVE_CELL_CAP
-  const hold = heldLive && zoom >= 17 && coverLen <= LIVE_CELL_CAP + 32
+  const wantLive = cutawayFloor !== null || zoom >= 17
+  const enter = wantLive && coverLen <= LIVE_CELL_CAP
+  const hold = heldLive && wantLive && coverLen <= LIVE_CELL_CAP + 32
   heldLive = enter || hold
   return heldLive
 }
@@ -1018,6 +1050,9 @@ function collectVisible(
           if (wx < minX || wx > maxX || wy < minY || wy > maxY) {
             continue
           }
+          if (cutawayFloor !== null && z[i] > cutawayFloor) {
+            continue
+          }
           const row = visiblePool[visibleCount]
           if (row) {
             row.wx = wx
@@ -1070,6 +1105,7 @@ function pumpRaster() {
     height: job.height,
     ready: job.ready,
     atlas: job.atlas,
+    cutaway: job.cutaway,
   }
   rasterJob = null
   notify()
@@ -1101,7 +1137,8 @@ function startRaster(
     rasterJob &&
     cameraMatches(rasterJob, mapping, width, height) &&
     rasterJob.ready === ready &&
-    rasterJob.atlas === atlasGeneration
+    rasterJob.atlas === atlasGeneration &&
+    rasterJob.cutaway === cutawayFloor
   ) {
     return
   }
@@ -1137,6 +1174,7 @@ function startRaster(
     scale: mapping.isoScale,
     ready,
     atlas: atlasGeneration,
+    cutaway: cutawayFloor,
   }
   rasterFrame = requestAnimationFrame(pumpRaster)
 }
@@ -1165,7 +1203,7 @@ function layerNeedsRefresh(
   mapping: IsoMapping,
   cover: { cx: number; cy: number }[],
 ): boolean {
-  if (layer.atlas !== atlasGeneration) {
+  if (layer.atlas !== atlasGeneration || layer.cutaway !== cutawayFloor) {
     return true
   }
   if (layer.ready < readyCells(cover)) {
@@ -1242,7 +1280,12 @@ export function drawIsoSprites(
     }
 
     const haveLayer =
-      spriteLayer && spriteLayer.width === width && spriteLayer.height === height ? spriteLayer : null
+      spriteLayer &&
+      spriteLayer.width === width &&
+      spriteLayer.height === height &&
+      spriteLayer.cutaway === cutawayFloor
+        ? spriteLayer
+        : null
     if (haveLayer) {
       blitCachedLayer(ctx, haveLayer, mapping, width, height)
       if (!cameraMoving && sprites.length > 0 && layerNeedsRefresh(haveLayer, mapping, cover)) {
@@ -1251,7 +1294,9 @@ export function drawIsoSprites(
       return
     }
 
-    drawLiveUnderlay(ctx, mapping, width, height, cover)
+    if (cutawayFloor === null) {
+      drawLiveUnderlay(ctx, mapping, width, height, cover)
+    }
     if (!cameraMoving && sprites.length > 0 && !ensureSpriteGl()) {
       startRaster(mapping, width, height, cover, minX, maxX, minY, maxY)
     }
