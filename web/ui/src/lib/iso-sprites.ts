@@ -14,7 +14,15 @@ import {
   worldToDzi,
   type IsoMapping,
 } from '@/lib/iso-tiles'
-import { drawSpritesGl, ensureSpriteGl, uploadAtlasPage } from '@/lib/iso-sprites-gl'
+import {
+  attachSpriteGl,
+  drawSpritesGl,
+  ensureSpriteGl,
+  presentSpriteGl,
+  setSpriteGlOnScreen,
+  spriteGlEpoch,
+  uploadAtlasPage,
+} from '@/lib/iso-sprites-gl'
 
 const CELL = 256
 const HALF = 64
@@ -125,9 +133,11 @@ interface CollectCache {
 let collectCache: CollectCache | null = null
 let sortedCount = -1
 let gpuBatchEpoch = 1
+let panSnap = ''
 
 function bumpGpuBatches() {
   gpuBatchEpoch += 1
+  panSnap = ''
 }
 
 let meta: SpriteMeta | null = null
@@ -1179,7 +1189,7 @@ function drawClipped(
   ctx.drawImage(image, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0)
 }
 
-function visibleCells(mapping: IsoMapping, width: number, height: number, live: boolean) {
+function worldWindow(mapping: IsoMapping, width: number, height: number, live: boolean) {
   const corners = [
     mapping.toWorld(0, 0),
     mapping.toWorld(width, 0),
@@ -1206,17 +1216,71 @@ function visibleCells(mapping: IsoMapping, width: number, height: number, live: 
       maxY = point.y
     }
   }
-  const cx0 = Math.floor((minX - reach) / CELL)
-  const cy0 = Math.floor((minY - reach) / CELL)
-  const cx1 = Math.floor((maxX + reach) / CELL)
-  const cy1 = Math.floor((maxY + reach) / CELL)
+  return {
+    minX: minX - reach,
+    maxX: maxX + reach,
+    minY: minY - reach,
+    maxY: maxY + reach,
+  }
+}
+
+function viewSnapKey(mapping: IsoMapping, width: number, height: number): string {
+  const step = snapStep(mapping.isoScale)
+  const win = worldWindow(mapping, width, height, true)
+  return [
+    snapWorld(win.minX, false, step),
+    snapWorld(win.maxX, true, step),
+    snapWorld(win.minY, false, step),
+    snapWorld(win.maxY, true, step),
+    step,
+    cutawayFloor ?? '',
+    liveRevision,
+  ].join(':')
+}
+
+export function attachSpriteGlLayer(host: HTMLElement, behind: HTMLElement): void {
+  attachSpriteGl(host, behind)
+}
+
+export function hideSpriteGlLayer(): void {
+  setSpriteGlOnScreen(false)
+}
+
+export function panLiveSprites(
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+  dpr: number,
+): boolean {
+  if (!cameraMoving || !lastDrawLive || spriteTable.length <= 1) {
+    return false
+  }
+  const zoom = levelForScale(mapping.isoScale)
+  if (cutawayFloor === null && zoom < 17) {
+    return false
+  }
+  if (spriteGlEpoch() !== gpuBatchEpoch) {
+    return false
+  }
+  if (viewSnapKey(mapping, width, height) !== panSnap) {
+    return false
+  }
+  return presentSpriteGl(mapping, width, height, dpr)
+}
+
+function visibleCells(mapping: IsoMapping, width: number, height: number, live: boolean) {
+  const { minX, maxX, minY, maxY } = worldWindow(mapping, width, height, live)
+  const cx0 = Math.floor(minX / CELL)
+  const cy0 = Math.floor(minY / CELL)
+  const cx1 = Math.floor(maxX / CELL)
+  const cy1 = Math.floor(maxY / CELL)
   const out: { cx: number; cy: number }[] = []
   for (let cx = cx0; cx <= cx1; cx += 1) {
     for (let cy = cy0; cy <= cy1; cy += 1) {
       out.push({ cx, cy })
     }
   }
-  return { cover: out, minX: minX - reach, maxX: maxX + reach, minY: minY - reach, maxY: maxY + reach }
+  return { cover: out, minX, maxX, minY, maxY }
 }
 
 function dziToScreen(mapping: IsoMapping, px: number, py: number) {
@@ -1738,6 +1802,7 @@ export function drawIsoSprites(
   height: number,
 ): void {
   lastDrawLive = false
+  setSpriteGlOnScreen(false)
   ctx.fillStyle = GROUND
   ctx.fillRect(0, 0, width, height)
 
@@ -1771,6 +1836,7 @@ export function drawIsoSprites(
     if (visibleCount > 0) {
       const ordered = visibleCount <= SORT_CAP && mapping.isoScale >= 0.22
       const drawn = takeVisible(visibleCount, ordered)
+      const dpr = Math.max(1, ctx.getTransform().a || 1)
       const painted = drawSpritesGl(
         ctx,
         mapping,
@@ -1782,9 +1848,12 @@ export function drawIsoSprites(
         spritePageCount(),
         ordered,
         gpuBatchEpoch,
+        dpr,
+        !cameraMoving,
       )
       if (painted) {
         lastDrawLive = true
+        panSnap = viewSnapKey(mapping, width, height)
         return
       }
     }

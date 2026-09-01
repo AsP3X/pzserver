@@ -27,6 +27,9 @@ import {
   spriteMapDrawingLive,
   spriteMapReady,
   spriteStoreyRange,
+  attachSpriteGlLayer,
+  hideSpriteGlLayer,
+  panLiveSprites,
 } from '@/lib/iso-sprites'
 import type { TileMeta, UpdatingJob } from '@/lib/iso-tiles'
 import {
@@ -535,13 +538,25 @@ export function WorldmapView({
         }
         const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, width, height)
         if (modeRef.current === 'iso-sprite') {
+          attachSpriteGlLayer(box, element)
+          if (spriteMapMoving() && panLiveSprites(mapping, width, height, ratio)) {
+            element.style.visibility = 'hidden'
+            return
+          }
           drawIsoSprites(ctx, mapping, width, height)
           const needsZoom = spriteCutawayFloor() !== null && !spriteMapDrawingLive()
           if (insideZoomRef.current !== needsZoom) {
             insideZoomRef.current = needsZoom
             setInsideNeedsZoom(needsZoom)
           }
+          if (spriteMapMoving() && spriteMapDrawingLive()) {
+            element.style.visibility = 'hidden'
+            return
+          }
+          element.style.visibility = 'visible'
         } else {
+          element.style.visibility = 'visible'
+          hideSpriteGlLayer()
           drawIsoTiles(ctx, mapping, width, height)
         }
         const moving = spriteMapMoving()
@@ -557,6 +572,8 @@ export function WorldmapView({
       }
 
       if (map) {
+        element.style.visibility = 'visible'
+        hideSpriteGlLayer()
         const moving = spriteMapMoving()
         drawWorldmap(
           ctx,

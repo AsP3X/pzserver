@@ -222,6 +222,96 @@ export function ensureSpriteGl(): GlState | null {
   return state
 }
 
+const GROUND_RGB: [number, number, number] = [0x4e / 255, 0x5c / 255, 0x36 / 255]
+
+export function attachSpriteGl(host: HTMLElement, behind: HTMLElement): void {
+  const gls = ensureSpriteGl()
+  if (!gls) {
+    return
+  }
+  const el = gls.canvas
+  if (el.parentNode !== host) {
+    el.className = 'pointer-events-none absolute inset-0 block'
+    el.style.imageRendering = 'pixelated'
+    el.style.background = '#4e5c36'
+    el.style.visibility = 'hidden'
+    host.insertBefore(el, behind)
+  }
+}
+
+export function setSpriteGlOnScreen(on: boolean): void {
+  if (!state) {
+    return
+  }
+  state.canvas.style.visibility = on ? 'visible' : 'hidden'
+}
+
+export function spriteGlEpoch(): number {
+  return state?.epoch ?? -1
+}
+
+function sizeGl(gls: GlState, width: number, height: number, dpr: number): { w: number; h: number } {
+  const w = Math.max(1, Math.round(width * dpr))
+  const h = Math.max(1, Math.round(height * dpr))
+  if (gls.canvas.width !== w || gls.canvas.height !== h) {
+    gls.canvas.width = w
+    gls.canvas.height = h
+  }
+  return { w, h }
+}
+
+function paintBatches(gls: GlState, mapping: IsoMapping, width: number, height: number, dpr: number): number {
+  const { w, h } = sizeGl(gls, width, height, dpr)
+  const { gl, program, vao } = gls
+  gl.viewport(0, 0, w, h)
+  gl.clearColor(GROUND_RGB[0], GROUND_RGB[1], GROUND_RGB[2], 1)
+  gl.clearDepth(1)
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+  gl.useProgram(program)
+  gl.uniform2f(gls.uRes, w, h)
+  gl.uniform2f(gls.uCenter, mapping.center.x, mapping.center.y)
+  gl.uniform2f(gls.uView, width, height)
+  gl.uniform1f(gls.uScale, mapping.isoScale)
+  gl.uniform1f(gls.uDpr, dpr)
+  gl.uniform1f(gls.uLayer, ISO_LAYER_HEIGHT)
+  gl.bindVertexArray(vao)
+  gl.enable(gl.DEPTH_TEST)
+  gl.depthFunc(gl.LESS)
+  gl.disable(gl.BLEND)
+  let drawn = 0
+  for (const page of gls.batchPages) {
+    const batch = gls.batches.get(page)
+    const tex = gls.textures.get(page)
+    if (!batch || !tex || !gls.uploaded[page] || batch.count === 0) {
+      continue
+    }
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    bindInstanceAttribs(gl, batch.buf)
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, batch.count)
+    drawn += batch.count
+  }
+  return drawn
+}
+
+export function presentSpriteGl(
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+  dpr: number,
+): boolean {
+  const gls = state
+  if (!gls || gls.epoch < 0 || gls.batchPages.length === 0) {
+    return false
+  }
+  const drawn = paintBatches(gls, mapping, width, height, Math.max(1, dpr))
+  if (drawn === 0) {
+    return false
+  }
+  setSpriteGlOnScreen(true)
+  return true
+}
+
 function textureForPage(gls: GlState, page: number): WebGLTexture | null {
   const existing = gls.textures.get(page)
   if (existing) {
@@ -400,7 +490,7 @@ function rebuildBatches(
 }
 
 export function drawSpritesGl(
-  target: CanvasRenderingContext2D,
+  target: CanvasRenderingContext2D | null,
   mapping: IsoMapping,
   width: number,
   height: number,
@@ -410,61 +500,30 @@ export function drawSpritesGl(
   _pageCount: number,
   ordered = true,
   epoch = 0,
+  dpr = 1,
+  blit = true,
 ): boolean {
   const gls = ensureSpriteGl()
   if (!gls || count === 0) {
     return false
   }
-  const { canvas, gl, program, vao } = gls
-  const dpr = Math.max(1, target.getTransform().a || 1)
-  const w = Math.max(1, Math.round(width * dpr))
-  const h = Math.max(1, Math.round(height * dpr))
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w
-    canvas.height = h
-  }
-  gl.viewport(0, 0, w, h)
-  gl.clearColor(0, 0, 0, 0)
-  gl.clearDepth(1)
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-
+  const pixelRatio = Math.max(1, dpr)
   if (gls.epoch !== epoch) {
     const packed = rebuildBatches(gls, rows, count, sprites, ordered)
     gls.epoch = packed > 0 ? epoch : -1
   }
-
-  gl.useProgram(program)
-  gl.uniform2f(gls.uRes, w, h)
-  gl.uniform2f(gls.uCenter, mapping.center.x, mapping.center.y)
-  gl.uniform2f(gls.uView, width, height)
-  gl.uniform1f(gls.uScale, mapping.isoScale)
-  gl.uniform1f(gls.uDpr, dpr)
-  gl.uniform1f(gls.uLayer, ISO_LAYER_HEIGHT)
-  gl.bindVertexArray(vao)
-  gl.enable(gl.DEPTH_TEST)
-  gl.depthFunc(gl.LESS)
-  gl.disable(gl.BLEND)
-
-  let drawn = 0
-  for (const page of gls.batchPages) {
-    const batch = gls.batches.get(page)
-    const tex = gls.textures.get(page)
-    if (!batch || !tex || !gls.uploaded[page] || batch.count === 0) {
-      continue
-    }
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, tex)
-    bindInstanceAttribs(gl, batch.buf)
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, batch.count)
-    drawn += batch.count
-  }
+  const drawn = paintBatches(gls, mapping, width, height, pixelRatio)
   if (drawn === 0) {
     return false
   }
-
-  const smoothing = target.imageSmoothingEnabled
-  target.imageSmoothingEnabled = false
-  target.drawImage(canvas, 0, 0, width, height)
-  target.imageSmoothingEnabled = smoothing
+  if (blit && target) {
+    setSpriteGlOnScreen(false)
+    const smoothing = target.imageSmoothingEnabled
+    target.imageSmoothingEnabled = false
+    target.drawImage(gls.canvas, 0, 0, width, height)
+    target.imageSmoothingEnabled = smoothing
+  } else {
+    setSpriteGlOnScreen(true)
+  }
   return true
 }
