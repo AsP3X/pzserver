@@ -124,6 +124,56 @@ impl MapSprites {
         read_meta(&con).unwrap_or_else(|_| SpriteMeta::absent())
     }
 
+    /// Compact UV table: magic `SPRC`, u32 count, then `count` records of
+    /// `{ page,x,y,w,h: u16, ox,oy: i16 }` in id order (id = index + 1).
+    pub async fn sprites_bin(&self) -> ApiResult<Option<Vec<u8>>> {
+        let Some(inner) = self.inner.clone() else {
+            return Ok(None);
+        };
+        let blob = tokio::task::spawn_blocking(move || -> rusqlite::Result<Vec<u8>> {
+            let con = inner.checkout().lock().expect("sprite map mutex poisoned");
+            let mut stmt = con.prepare(
+                "SELECT id, page, x, y, w, h, ox, oy FROM sprites ORDER BY id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            })?;
+            let records: Vec<(i64, i64, i64, i64, i64, i64, i64, i64)> =
+                rows.collect::<rusqlite::Result<_>>()?;
+            let max_id = records.iter().map(|row| row.0).max().unwrap_or(0).max(0) as usize;
+            let mut out = vec![0u8; 8 + max_id * 14];
+            out[0..4].copy_from_slice(b"SPRC");
+            out[4..8].copy_from_slice(&(max_id as u32).to_le_bytes());
+            for (id, page, x, y, w, h, ox, oy) in records {
+                if id < 1 {
+                    continue;
+                }
+                let offset = 8 + (id as usize - 1) * 14;
+                write_u16(&mut out, offset, page);
+                write_u16(&mut out, offset + 2, x);
+                write_u16(&mut out, offset + 4, y);
+                write_u16(&mut out, offset + 6, w);
+                write_u16(&mut out, offset + 8, h);
+                write_i16(&mut out, offset + 10, ox);
+                write_i16(&mut out, offset + 12, oy);
+            }
+            Ok(out)
+        })
+        .await
+        .map_err(|error| ApiError::Internal(format!("sprite bin did not finish: {error}")))?
+        .map_err(|error| ApiError::Internal(format!("sprite bin failed: {error}")))?;
+        Ok(Some(blob))
+    }
+
     pub async fn sprites(&self) -> ApiResult<Vec<SpriteRecord>> {
         self.rows(
             "SELECT id, name, page, x, y, w, h, ox, oy FROM sprites ORDER BY id",
@@ -220,6 +270,16 @@ impl MapSprites {
         .map_err(|error| ApiError::Internal(format!("sprite list failed: {error}")))?;
         Ok(rows)
     }
+}
+
+fn write_u16(buf: &mut [u8], offset: usize, value: i64) {
+    let raw = (value.clamp(0, i64::from(u16::MAX)) as u16).to_le_bytes();
+    buf[offset..offset + 2].copy_from_slice(&raw);
+}
+
+fn write_i16(buf: &mut [u8], offset: usize, value: i64) {
+    let raw = (value.clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16).to_le_bytes();
+    buf[offset..offset + 2].copy_from_slice(&raw);
 }
 
 fn tune(con: &Connection) {

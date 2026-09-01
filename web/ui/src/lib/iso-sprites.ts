@@ -6,6 +6,7 @@
  */
 
 import { ISO_DZI, ISO_LAYER_HEIGHT, dziToWorld, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
+import { drawSpritesGl, uploadAtlasPage } from '@/lib/iso-sprites-gl'
 
 const CELL = 256
 const HALF = 64
@@ -77,6 +78,7 @@ const stampedOverview = new Set<string>()
 let meta: SpriteMeta | null = null
 let sprites: SpriteRecord[] = []
 let spriteById = new Map<number, SpriteRecord>()
+let spriteTable: Array<SpriteRecord | undefined> = []
 let loading = false
 let notifyFrame = 0
 let inflight = 0
@@ -222,11 +224,15 @@ export async function loadSpriteMap(): Promise<void> {
     }
     overviewImage.onerror = () => notify()
     overviewImage.src = `/api/v1/map-sprites/overview?v=${version}`
-    const rows = await fetch(`/api/v1/map-sprites/sprites?v=${version}`).then(
-      (response) => response.json() as Promise<SpriteRecord[]>,
-    )
-    sprites = rows
-    spriteById = new Map(rows.map((row) => [row.id, row]))
+    const packed = await fetch(`/api/v1/map-sprites/sprites.bin?v=${version}`)
+    if (packed.ok) {
+      applySpriteTable(decodeSpriteBin(await packed.arrayBuffer()))
+    } else {
+      const rows = await fetch(`/api/v1/map-sprites/sprites?v=${version}`).then(
+        (response) => response.json() as Promise<SpriteRecord[]>,
+      )
+      applySpriteTable(rows)
+    }
     notify()
   } catch {
     meta = { ready: false } as SpriteMeta
@@ -301,6 +307,54 @@ function touch(
   }
 }
 
+function applySpriteTable(rows: SpriteRecord[]) {
+  sprites = rows
+  spriteById = new Map(rows.map((row) => [row.id, row]))
+  const maxId = rows.reduce((max, row) => (row.id > max ? row.id : max), 0)
+  spriteTable = new Array(maxId + 1)
+  for (const row of rows) {
+    spriteTable[row.id] = row
+  }
+}
+
+function decodeSpriteBin(buffer: ArrayBuffer): SpriteRecord[] {
+  const view = new DataView(buffer)
+  if (
+    view.byteLength < 8 ||
+    view.getUint8(0) !== 0x53 ||
+    view.getUint8(1) !== 0x50 ||
+    view.getUint8(2) !== 0x52 ||
+    view.getUint8(3) !== 0x43
+  ) {
+    return []
+  }
+  const count = view.getUint32(4, true)
+  const rows: SpriteRecord[] = []
+  for (let i = 0; i < count; i += 1) {
+    const offset = 8 + i * 14
+    if (offset + 14 > view.byteLength) {
+      break
+    }
+    const w = view.getUint16(offset + 6, true)
+    const h = view.getUint16(offset + 8, true)
+    if (w === 0 || h === 0) {
+      continue
+    }
+    rows.push({
+      id: i + 1,
+      name: '',
+      page: view.getUint16(offset, true),
+      x: view.getUint16(offset + 2, true),
+      y: view.getUint16(offset + 4, true),
+      w,
+      h,
+      ox: view.getInt16(offset + 10, true),
+      oy: view.getInt16(offset + 12, true),
+    })
+  }
+  return rows
+}
+
 function revision(): string {
   return meta?.generated_at ?? ''
 }
@@ -314,6 +368,7 @@ function atlasPage(page: number): HTMLImageElement {
   image.decoding = 'async'
   atlasImages.set(page, image)
   image.onload = () => {
+    uploadAtlasPage(page, image)
     atlasGeneration += 1
     notify()
   }
@@ -1018,6 +1073,29 @@ export function drawIsoSprites(
   const near = mapping.isoScale >= NEAR_SCALE
   const { cover, minX, maxX, minY, maxY } = visibleCells(mapping, width, height, near)
   prefetchView(cover, near)
+
+  if (near && spriteTable.length > 1) {
+    atlasImages.forEach((image, page) => uploadAtlasPage(page, image))
+    const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
+    if (visibleCount > 0) {
+      const drawn = visiblePool.slice(0, visibleCount)
+      drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
+      if (
+        drawSpritesGl(
+          ctx,
+          mapping,
+          width,
+          height,
+          drawn,
+          drawn.length,
+          spriteTable,
+          Math.max(1, meta?.pages ?? 1),
+        )
+      ) {
+        return
+      }
+    }
+  }
 
   const haveLayer =
     spriteLayer && spriteLayer.width === width && spriteLayer.height === height ? spriteLayer : null

@@ -14,6 +14,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/map-sprites/meta", get(meta))
         .route("/map-sprites/sprites", get(sprites))
+        .route("/map-sprites/sprites.bin", get(sprites_bin))
         .route("/map-sprites/atlas/{page}", get(atlas))
         .route("/map-sprites/cells/{cell}", get(cell))
         .route("/map-sprites/thumbs/{cell}", get(thumb))
@@ -25,6 +26,10 @@ async fn meta(State(state): State<AppState>) -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store, no-cache")],
         Json(state.map_sprites.meta()),
     )
+}
+
+async fn sprites_bin(State(state): State<AppState>) -> Response {
+    blob(state.map_sprites.sprites_bin().await, "application/octet-stream")
 }
 
 async fn sprites(State(state): State<AppState>) -> impl IntoResponse {
