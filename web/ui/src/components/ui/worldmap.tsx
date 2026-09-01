@@ -490,7 +490,7 @@ export function WorldmapView({
 
       let ctx = ctxRef.current
       if (!ctx || ctx.canvas !== element) {
-        ctx = element.getContext('2d', { alpha: false, desynchronized: true })
+        ctx = element.getContext('2d', { alpha: true, desynchronized: true })
         ctxRef.current = ctx
       }
       if (!ctx) {
@@ -526,6 +526,10 @@ export function WorldmapView({
           label: jobStageLabel(t, job.stage),
         })),
       }
+      const moving = spriteMapMoving()
+      const panOverlay = moving
+        ? { ...overlay, zones: [], updating: [], draftRect: null, brush: null }
+        : overlay
 
       if (isoCamera(modeRef.current)) {
         const floor = minIsoScaleForViewport(width, height)
@@ -537,10 +541,15 @@ export function WorldmapView({
           }
         }
         const mapping = isoMapping(latest.x, latest.y, isoScaleRef.current, width, height)
+        const paintPins = () => {
+          drawMapOverlays(ctx, panOverlay, (x, y) => mapping.toScreen(x, y), 2)
+        }
         if (modeRef.current === 'iso-sprite') {
           attachSpriteGlLayer(box, element)
-          if (spriteMapMoving() && panLiveSprites(mapping, width, height, ratio)) {
-            element.style.visibility = 'hidden'
+          if (moving && panLiveSprites(mapping, width, height, ratio)) {
+            element.style.visibility = 'visible'
+            ctx.clearRect(0, 0, width, height)
+            paintPins()
             return
           }
           drawIsoSprites(ctx, mapping, width, height)
@@ -549,8 +558,10 @@ export function WorldmapView({
             insideZoomRef.current = needsZoom
             setInsideNeedsZoom(needsZoom)
           }
-          if (spriteMapMoving() && spriteMapDrawingLive()) {
-            element.style.visibility = 'hidden'
+          if (moving && spriteMapDrawingLive()) {
+            element.style.visibility = 'visible'
+            ctx.clearRect(0, 0, width, height)
+            paintPins()
             return
           }
           element.style.visibility = 'visible'
@@ -559,30 +570,14 @@ export function WorldmapView({
           hideSpriteGlLayer()
           drawIsoTiles(ctx, mapping, width, height)
         }
-        const moving = spriteMapMoving()
-        drawMapOverlays(
-          ctx,
-          moving
-            ? { ...overlay, markers: [], zones: [], updating: [], destination: null }
-            : overlay,
-          (x, y) => mapping.toScreen(x, y),
-          2,
-        )
+        paintPins()
         return
       }
 
       if (map) {
         element.style.visibility = 'visible'
         hideSpriteGlLayer()
-        const moving = spriteMapMoving()
-        drawWorldmap(
-          ctx,
-          map,
-          latest,
-          moving
-            ? { ...overlay, markers: [], zones: [], updating: [], destination: null }
-            : overlay,
-        )
+        drawWorldmap(ctx, map, latest, panOverlay)
         return
       }
 
