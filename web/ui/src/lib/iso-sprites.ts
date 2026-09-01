@@ -22,6 +22,8 @@ const HALF = 64
 const THUMB_PAD = HALF * 16 + ISO_LAYER_HEIGHT * 8
 const BUCKET = 16
 const BUCKETS = CELL / BUCKET
+/** Keep occupancy/GPU batches stable for about this many CSS pixels of pan. */
+const SNAP_PAN_PX = 240
 /**
  * Live WebGL at HUD zoom 17 and closer. Mid-zoom draws 512px cell thumbs on
  * top of a county underlay. The 2048 overview is never the only picture
@@ -1023,7 +1025,7 @@ function prefetchView(
       }
       dropQueuedThumbsExcept(thumbWanted)
     }
-    if (cutawayFloor === null) {
+    if (cutawayFloor === null && !cameraMoving) {
       for (const key of thumbWanted) {
         const split = key.indexOf('_')
         requestThumb(Number(key.slice(0, split)), Number(key.slice(split + 1)), true)
@@ -1422,11 +1424,20 @@ function takeVisible(count: number, ordered: boolean): VisibleSprite[] {
   return sortScratch
 }
 
-function snapWorld(value: number, ceil: boolean): number {
-  if (ceil) {
-    return Math.ceil(value / BUCKET) * BUCKET
+function snapStep(scale: number): number {
+  const squares = Math.ceil(SNAP_PAN_PX / (Math.max(scale, 1e-6) * HALF))
+  let step = BUCKET
+  while (step < squares && step < CELL) {
+    step *= 2
   }
-  return Math.floor(value / BUCKET) * BUCKET
+  return step
+}
+
+function snapWorld(value: number, ceil: boolean, step: number): number {
+  if (ceil) {
+    return Math.ceil(value / step) * step
+  }
+  return Math.floor(value / step) * step
 }
 
 function collectVisible(
@@ -1439,10 +1450,11 @@ function collectVisible(
 ): number {
   const ready = readyCells(cover)
   const skip = skipClutterKey(scale)
-  const snapMinX = snapWorld(minX, false)
-  const snapMaxX = snapWorld(maxX, true)
-  const snapMinY = snapWorld(minY, false)
-  const snapMaxY = snapWorld(maxY, true)
+  const step = snapStep(scale)
+  const snapMinX = snapWorld(minX, false, step)
+  const snapMaxX = snapWorld(maxX, true, step)
+  const snapMinY = snapWorld(minY, false, step)
+  const snapMaxY = snapWorld(maxY, true, step)
   const cx0 = cover[0]?.cx ?? 0
   const cy0 = cover[0]?.cy ?? 0
   const cx1 = cover[cover.length - 1]?.cx ?? -1
@@ -1748,7 +1760,11 @@ export function drawIsoSprites(
         uploadAtlasPage(page, image)
       }
     })
-    if (cutawayFloor === null && readyCells(cover) < cover.length) {
+    if (
+      cutawayFloor === null &&
+      !cameraMoving &&
+      readyCells(cover) < cover.length
+    ) {
       drawMissingCellThumbs(ctx, mapping, width, height, cover)
     }
     const visibleCount = collectVisible(cover, minX, maxX, minY, maxY, mapping.isoScale)

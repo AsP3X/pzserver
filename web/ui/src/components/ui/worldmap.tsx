@@ -640,7 +640,7 @@ export function WorldmapView({
         )
         viewRef.current = clamp({ x: camera.x, y: camera.y, scale: nextScale })
         setSpriteMapMoving(true)
-        drawRef.current()
+        scheduleDraw()
         window.clearTimeout(idleTimer.current)
         idleTimer.current = window.setTimeout(() => {
           setSpriteMapMoving(false)
@@ -672,7 +672,7 @@ export function WorldmapView({
         ),
       )
     },
-    [clamp, map, setBoth],
+    [clamp, map, setBoth, scheduleDraw],
   )
 
   useEffect(() => {
@@ -910,7 +910,7 @@ export function WorldmapView({
           held.lastX = event.clientX
           held.lastY = event.clientY
           setSpriteMapMoving(true)
-          drawRef.current()
+          scheduleDraw()
         }}
         onPointerUp={(event) => {
           const held = gesture.current
