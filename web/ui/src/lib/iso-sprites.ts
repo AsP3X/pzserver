@@ -33,10 +33,12 @@ const THUMB_ALWAYS_PX = 200
 const THUMB_DRAW_CELLS = 900
 const MIN_THUMB_CSS = 40
 const MAX_INFLIGHT = 20
-const CELL_LIMIT = 192
+const CELL_LIMIT = 256
 const THUMB_LIMIT = 768
 const SORT_CAP = 80_000
 const STAMP_PREFETCH = 192
+/** Below this iso scale, drop ground sprites that cover less than one CSS pixel. */
+const CLUTTER_SCALE = 0.08
 /** Grass-ish, so holes do not flash the old near-black fill. */
 const GROUND = '#4e5c36'
 
@@ -82,9 +84,15 @@ interface VisibleSprite {
   wy: number
   z: number
   sprite: number
+  dziX: number
+  dziY: number
 }
 
-const atlasImages = new Map<number, HTMLImageElement>()
+type AtlasSource = HTMLImageElement | ImageBitmap
+
+const atlasImages = new Map<number, AtlasSource>()
+const atlasInflight = new Set<number>()
+const atlasFailed = new Set<number>()
 const thumbImages = new Map<string, HTMLImageElement>()
 const thumbOrder: string[] = []
 const cells = new Map<string, PackedCell | 'loading' | 'empty'>()
@@ -92,11 +100,31 @@ const cellOrder: string[] = []
 const queuedThumbs = new Set<string>()
 const listeners = new Set<() => void>()
 const visiblePool: VisibleSprite[] = []
+const sortScratch: VisibleSprite[] = []
 const stampedOverview = new Set<string>()
+
+interface CollectCache {
+  cx0: number
+  cy0: number
+  cx1: number
+  cy1: number
+  n: number
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  cutaway: number | null
+  liveRevision: number
+  ready: number
+  skip: number
+  count: number
+}
+
+let collectCache: CollectCache | null = null
+let sortedCount = -1
 
 let meta: SpriteMeta | null = null
 let sprites: SpriteRecord[] = []
-let spriteById = new Map<number, SpriteRecord>()
 let spriteTable: Array<SpriteRecord | undefined> = []
 let loading = false
 let notifyFrame = 0
@@ -254,6 +282,8 @@ export function setSpriteCutawayFloor(floor: number | null): void {
     return
   }
   cutawayFloor = next
+  collectCache = null
+  sortedCount = -1
   spriteLayer = null
   cancelRaster()
   notify()
@@ -382,7 +412,8 @@ function touch(
 
 function applySpriteTable(rows: SpriteRecord[]) {
   sprites = rows
-  spriteById = new Map(rows.map((row) => [row.id, row]))
+  collectCache = null
+  sortedCount = -1
   const maxId = rows.reduce((max, row) => (row.id > max ? row.id : max), 0)
   spriteTable = new Array(maxId + 1)
   const namedRoofs: number[] = []
@@ -475,6 +506,8 @@ function decodeLiveBin(buffer: ArrayBuffer): { revision: number; rows: Array<{ w
 function applyLiveRows(rows: Array<{ wx: number; wy: number; z: number; remove: number; add: number }>) {
   liveRemove.clear()
   liveAdd.length = 0
+  collectCache = null
+  sortedCount = -1
   for (const row of rows) {
     const key = liveKey(row.wx, row.wy, row.z)
     if (row.remove) {
@@ -487,6 +520,10 @@ function applyLiveRows(rows: Array<{ wx: number; wy: number; z: number; remove: 
     }
     if (row.add) {
       liveAdd.push({ wx: row.wx, wy: row.wy, z: row.z, sprite: row.add })
+      const rec = spriteTable[row.add]
+      if (rec) {
+        atlasPage(rec.page)
+      }
     }
   }
 }
@@ -526,6 +563,12 @@ function warmAtlas() {
   atlasWarm = 0
   const n = spritePageCount()
   const step = () => {
+    if (cameraMoving || inflight > 8) {
+      if (atlasWarm < n) {
+        window.setTimeout(step, 80)
+      }
+      return
+    }
     let batch = 0
     while (atlasWarm < n && batch < 4) {
       atlasPage(atlasWarm)
@@ -591,21 +634,77 @@ function revision(): string {
   return meta?.generated_at ?? ''
 }
 
-function atlasPage(page: number): HTMLImageElement {
+function atlasReady(image: AtlasSource): boolean {
+  if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
+    return image.width > 0
+  }
+  const el = image as HTMLImageElement
+  return el.complete && el.naturalWidth > 0
+}
+
+function blobToImage(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.decoding = 'async'
+    const url = URL.createObjectURL(blob)
+    image.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(image)
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('atlas image'))
+    }
+    image.src = url
+  })
+}
+
+async function decodeAtlasBlob(blob: Blob): Promise<AtlasSource> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(blob, {
+        premultiplyAlpha: 'none',
+        colorSpaceConversion: 'none',
+      })
+    } catch {
+      try {
+        return await createImageBitmap(blob)
+      } catch {
+        // Fall through to HTMLImageElement.
+      }
+    }
+  }
+  return blobToImage(blob)
+}
+
+function atlasPage(page: number): AtlasSource | null {
   const existing = atlasImages.get(page)
   if (existing) {
     return existing
   }
-  const image = new Image()
-  image.decoding = 'async'
-  atlasImages.set(page, image)
-  image.onload = () => {
-    uploadAtlasPage(page, image)
-    atlasGeneration += 1
-    notify()
+  if (page < 0 || atlasInflight.has(page) || atlasFailed.has(page)) {
+    return null
   }
-  image.src = `/api/v1/map-sprites/atlas/${page}?v=${revision()}`
-  return image
+  atlasInflight.add(page)
+  void (async () => {
+    try {
+      const response = await fetch(`/api/v1/map-sprites/atlas/${page}?v=${revision()}`)
+      if (!response.ok) {
+        atlasFailed.add(page)
+        return
+      }
+      const source = await decodeAtlasBlob(await response.blob())
+      atlasImages.set(page, source)
+      uploadAtlasPage(page, source)
+      atlasGeneration += 1
+      notify()
+    } catch {
+      atlasFailed.add(page)
+    } finally {
+      atlasInflight.delete(page)
+    }
+  })()
+  return null
 }
 
 function makeOverviewCanvas(widthPx: number): {
@@ -878,11 +977,48 @@ function prefetchView(
 ) {
   if (live) {
     thumbWanted.clear()
+    if (cover.length === 0) {
+      return
+    }
+    let cx0 = cover[0].cx
+    let cy0 = cover[0].cy
+    let cx1 = cx0
+    let cy1 = cy0
+    for (const { cx, cy } of cover) {
+      requestCell(cx, cy, true)
+      if (cx < cx0) {
+        cx0 = cx
+      }
+      if (cy < cy0) {
+        cy0 = cy
+      }
+      if (cx > cx1) {
+        cx1 = cx
+      }
+      if (cy > cy1) {
+        cy1 = cy
+      }
+      const occupants = cells.get(`${cx}_${cy}`)
+      if (!occupants || occupants === 'loading') {
+        thumbWanted.add(`${cx}_${cy}`)
+      }
+    }
     if (!cameraMoving) {
+      for (let cx = cx0 - 1; cx <= cx1 + 1; cx += 1) {
+        for (let cy = cy0 - 1; cy <= cy1 + 1; cy += 1) {
+          if (cx >= cx0 && cx <= cx1 && cy >= cy0 && cy <= cy1) {
+            continue
+          }
+          requestCell(cx, cy, false)
+        }
+      }
       dropQueuedThumbsExcept(thumbWanted)
     }
-    for (const { cx, cy } of cover) {
-      requestCell(cx, cy)
+    if (cutawayFloor === null) {
+      for (const key of thumbWanted) {
+        const split = key.indexOf('_')
+        requestThumb(Number(key.slice(0, split)), Number(key.slice(split + 1)), true)
+      }
     }
     return
   }
@@ -917,10 +1053,12 @@ function dropCell(key: string): boolean {
     return false
   }
   cells.delete(key)
+  collectCache = null
+  sortedCount = -1
   return true
 }
 
-function requestCell(cx: number, cy: number) {
+function requestCell(cx: number, cy: number, urgent = true) {
   const key = `${cx}_${cy}`
   if (cells.has(key)) {
     touch(cellOrder, key, CELL_LIMIT, dropCell)
@@ -946,7 +1084,7 @@ function requestCell(cx: number, cy: number) {
       cells.set(key, 'empty')
       notify()
     }
-  }, true, `cell:${key}`)
+  }, urgent, `cell:${key}`)
 }
 
 const cellBoxCache = new Map<string, ReturnType<typeof computeCellBox>>()
@@ -1166,12 +1304,12 @@ function blitSprite(
   width: number,
   height: number,
 ) {
-  const sprite = spriteById.get(occupant.sprite)
+  const sprite = spriteTable[occupant.sprite]
   if (!sprite) {
     return
   }
   const page = atlasPage(sprite.page)
-  if (!page.complete || page.naturalWidth === 0) {
+  if (!page || !atlasReady(page)) {
     return
   }
   const scale = mapping.isoScale
@@ -1183,9 +1321,13 @@ function blitSprite(
   if (destW < 1.2 || destH < 1.2) {
     return
   }
-  const top = mapping.toScreen(occupant.wx, occupant.wy)
-  const dx = top.x + sprite.ox * scale
-  const dy = top.y + HALF * scale + sprite.oy * scale - occupant.z * ISO_LAYER_HEIGHT * scale
+  const dx = (occupant.dziX - mapping.center.x) * scale + width / 2 + sprite.ox * scale
+  const dy =
+    (occupant.dziY - mapping.center.y) * scale +
+    height / 2 +
+    HALF * scale +
+    sprite.oy * scale -
+    occupant.z * ISO_LAYER_HEIGHT * scale
   drawClipped(
     ctx,
     page,
@@ -1202,13 +1344,117 @@ function blitSprite(
   )
 }
 
+function readyCells(cover: { cx: number; cy: number }[]): number {
+  let ready = 0
+  for (const { cx, cy } of cover) {
+    const occupants = cells.get(`${cx}_${cy}`)
+    if (occupants && occupants !== 'loading') {
+      ready += 1
+    }
+  }
+  return ready
+}
+
+function skipClutterKey(scale: number): number {
+  if (scale >= CLUTTER_SCALE) {
+    return 0
+  }
+  return Math.round(1 / Math.max(scale, 1e-6))
+}
+
+function isSubpixelGround(spriteId: number, z: number, scale: number): boolean {
+  if (z > 0 || scale >= CLUTTER_SCALE) {
+    return false
+  }
+  const rec = spriteTable[spriteId]
+  if (!rec) {
+    return false
+  }
+  return rec.w * scale < 1 && rec.h * scale < 1
+}
+
+function writeVisible(
+  count: number,
+  wx: number,
+  wy: number,
+  z: number,
+  sprite: number,
+): number {
+  const dzi = worldToDzi(wx, wy)
+  const row = visiblePool[count]
+  if (row) {
+    row.wx = wx
+    row.wy = wy
+    row.z = z
+    row.sprite = sprite
+    row.dziX = dzi.x
+    row.dziY = dzi.y
+  } else {
+    visiblePool.push({ wx, wy, z, sprite, dziX: dzi.x, dziY: dzi.y })
+  }
+  return count + 1
+}
+
+function takeVisible(count: number, ordered: boolean): VisibleSprite[] {
+  if (!ordered) {
+    return visiblePool
+  }
+  if (sortedCount === count && sortScratch.length === count) {
+    return sortScratch
+  }
+  for (let i = 0; i < count; i += 1) {
+    sortScratch[i] = visiblePool[i]
+  }
+  sortScratch.length = count
+  sortScratch.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
+  sortedCount = count
+  return sortScratch
+}
+
+function snapWorld(value: number, ceil: boolean): number {
+  if (ceil) {
+    return Math.ceil(value / BUCKET) * BUCKET
+  }
+  return Math.floor(value / BUCKET) * BUCKET
+}
+
 function collectVisible(
   cover: { cx: number; cy: number }[],
   minX: number,
   maxX: number,
   minY: number,
   maxY: number,
+  scale: number,
 ): number {
+  const ready = readyCells(cover)
+  const skip = skipClutterKey(scale)
+  const snapMinX = snapWorld(minX, false)
+  const snapMaxX = snapWorld(maxX, true)
+  const snapMinY = snapWorld(minY, false)
+  const snapMaxY = snapWorld(maxY, true)
+  const cx0 = cover[0]?.cx ?? 0
+  const cy0 = cover[0]?.cy ?? 0
+  const cx1 = cover[cover.length - 1]?.cx ?? -1
+  const cy1 = cover[cover.length - 1]?.cy ?? -1
+  if (
+    collectCache &&
+    collectCache.n === cover.length &&
+    collectCache.cx0 === cx0 &&
+    collectCache.cy0 === cy0 &&
+    collectCache.cx1 === cx1 &&
+    collectCache.cy1 === cy1 &&
+    collectCache.minX === snapMinX &&
+    collectCache.maxX === snapMaxX &&
+    collectCache.minY === snapMinY &&
+    collectCache.maxY === snapMaxY &&
+    collectCache.cutaway === cutawayFloor &&
+    collectCache.liveRevision === liveRevision &&
+    collectCache.ready === ready &&
+    collectCache.skip === skip
+  ) {
+    return collectCache.count
+  }
+  sortedCount = -1
   let visibleCount = 0
   for (const { cx, cy } of cover) {
     requestCell(cx, cy)
@@ -1219,10 +1465,10 @@ function collectVisible(
     const originX = cx * CELL
     const originY = cy * CELL
     const { lx, ly, z, sprite, bucketStart, bucketCount } = occupants
-    const lx0 = Math.max(0, Math.floor(minX - originX))
-    const lx1 = Math.min(CELL - 1, Math.ceil(maxX - originX))
-    const ly0 = Math.max(0, Math.floor(minY - originY))
-    const ly1 = Math.min(CELL - 1, Math.ceil(maxY - originY))
+    const lx0 = Math.max(0, Math.floor(snapMinX - originX))
+    const lx1 = Math.min(CELL - 1, Math.ceil(snapMaxX - originX))
+    const ly0 = Math.max(0, Math.floor(snapMinY - originY))
+    const ly1 = Math.min(CELL - 1, Math.ceil(snapMaxY - originY))
     if (lx1 < lx0 || ly1 < ly0) {
       continue
     }
@@ -1238,7 +1484,7 @@ function collectVisible(
         for (let i = start; i < end; i += 1) {
           const wx = originX + lx[i]
           const wy = originY + ly[i]
-          if (wx < minX || wx > maxX || wy < minY || wy > maxY) {
+          if (wx < snapMinX || wx > snapMaxX || wy < snapMinY || wy > snapMaxY) {
             continue
           }
           if (cutawayFloor !== null && (z[i] > cutawayFloor || roofById[sprite[i]])) {
@@ -1248,37 +1494,41 @@ function collectVisible(
           if (gone && gone.has(sprite[i])) {
             continue
           }
-          const row = visiblePool[visibleCount]
-          if (row) {
-            row.wx = wx
-            row.wy = wy
-            row.z = z[i]
-            row.sprite = sprite[i]
-          } else {
-            visiblePool.push({ wx, wy, z: z[i], sprite: sprite[i] })
+          if (isSubpixelGround(sprite[i], z[i], scale)) {
+            continue
           }
-          visibleCount += 1
+          visibleCount = writeVisible(visibleCount, wx, wy, z[i], sprite[i])
         }
       }
     }
   }
   for (const patch of liveAdd) {
-    if (patch.wx < minX || patch.wx > maxX || patch.wy < minY || patch.wy > maxY) {
+    if (patch.wx < snapMinX || patch.wx > snapMaxX || patch.wy < snapMinY || patch.wy > snapMaxY) {
       continue
     }
     if (cutawayFloor !== null && (patch.z > cutawayFloor || roofById[patch.sprite])) {
       continue
     }
-    const row = visiblePool[visibleCount]
-    if (row) {
-      row.wx = patch.wx
-      row.wy = patch.wy
-      row.z = patch.z
-      row.sprite = patch.sprite
-    } else {
-      visiblePool.push({ wx: patch.wx, wy: patch.wy, z: patch.z, sprite: patch.sprite })
+    if (isSubpixelGround(patch.sprite, patch.z, scale)) {
+      continue
     }
-    visibleCount += 1
+    visibleCount = writeVisible(visibleCount, patch.wx, patch.wy, patch.z, patch.sprite)
+  }
+  collectCache = {
+    cx0,
+    cy0,
+    cx1,
+    cy1,
+    n: cover.length,
+    minX: snapMinX,
+    maxX: snapMaxX,
+    minY: snapMinY,
+    maxY: snapMaxY,
+    cutaway: cutawayFloor,
+    liveRevision,
+    ready,
+    skip,
+    count: visibleCount,
   }
   return visibleCount
 }
@@ -1324,17 +1574,6 @@ function pumpRaster() {
   notify()
 }
 
-function readyCells(cover: { cx: number; cy: number }[]): number {
-  let ready = 0
-  for (const { cx, cy } of cover) {
-    const occupants = cells.get(`${cx}_${cy}`)
-    if (occupants && occupants !== 'loading') {
-      ready += 1
-    }
-  }
-  return ready
-}
-
 function startRaster(
   mapping: IsoMapping,
   width: number,
@@ -1356,14 +1595,21 @@ function startRaster(
     return
   }
   cancelRaster()
-  const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
+  const visibleCount = collectVisible(cover, minX, maxX, minY, maxY, mapping.isoScale)
   if (visibleCount === 0) {
     return
   }
   const rows: VisibleSprite[] = []
   for (let i = 0; i < visibleCount; i += 1) {
     const src = visiblePool[i]
-    rows.push({ wx: src.wx, wy: src.wy, z: src.z, sprite: src.sprite })
+    rows.push({
+      wx: src.wx,
+      wy: src.wy,
+      z: src.z,
+      sprite: src.sprite,
+      dziX: src.dziX,
+      dziY: src.dziY,
+    })
   }
   rows.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
   const canvas = document.createElement('canvas')
@@ -1441,6 +1687,26 @@ function drawLiveUnderlay(
   drawThumbsOrOverview(ctx, mapping, width, height, cover)
 }
 
+function drawMissingCellThumbs(
+  ctx: CanvasRenderingContext2D,
+  mapping: IsoMapping,
+  width: number,
+  height: number,
+  cover: { cx: number; cy: number }[],
+) {
+  for (const { cx, cy } of cover) {
+    const occupants = cells.get(`${cx}_${cy}`)
+    if (occupants && occupants !== 'loading') {
+      continue
+    }
+    if (!thumbOnScreen(mapping, cx, cy, width, height)) {
+      continue
+    }
+    drawThumb(ctx, mapping, cx, cy, width, height)
+  }
+  ctx.imageSmoothingEnabled = false
+}
+
 export function drawIsoSprites(
   ctx: CanvasRenderingContext2D,
   mapping: IsoMapping,
@@ -1466,17 +1732,18 @@ export function drawIsoSprites(
   if (live && spriteTable.length > 1) {
     ensureSpriteGl()
     atlasImages.forEach((image, page) => {
-      if (image.complete && image.naturalWidth > 0) {
+      if (atlasReady(image)) {
         uploadAtlasPage(page, image)
       }
     })
-    const visibleCount = collectVisible(cover, minX, maxX, minY, maxY)
+    if (cutawayFloor === null && readyCells(cover) < cover.length) {
+      drawMissingCellThumbs(ctx, mapping, width, height, cover)
+    }
+    const visibleCount = collectVisible(cover, minX, maxX, minY, maxY, mapping.isoScale)
     if (visibleCount > 0) {
-      const ordered = visibleCount <= SORT_CAP && mapping.isoScale >= 0.22
-      const drawn = ordered ? visiblePool.slice(0, visibleCount) : visiblePool
-      if (ordered) {
-        drawn.sort((left, right) => left.wx + left.wy - (right.wx + right.wy) || left.z - right.z)
-      }
+      const ordered =
+        !cameraMoving && visibleCount <= SORT_CAP && mapping.isoScale >= 0.22
+      const drawn = takeVisible(visibleCount, ordered)
       const painted = drawSpritesGl(
         ctx,
         mapping,

@@ -8,7 +8,7 @@
  * thumbs. Per-page 2D textures upload only what the view has asked for.
  */
 
-import { ISO_LAYER_HEIGHT, worldToDzi, type IsoMapping } from '@/lib/iso-tiles'
+import { ISO_LAYER_HEIGHT, type IsoMapping } from '@/lib/iso-tiles'
 
 const HALF = 64
 const PAGE = 2048
@@ -58,6 +58,8 @@ export interface GlOccupant {
   wy: number
   z: number
   sprite: number
+  dziX: number
+  dziY: number
 }
 
 interface GlState {
@@ -75,6 +77,7 @@ interface GlState {
 let state: GlState | null = null
 let failed = false
 const pageBuckets: number[][] = []
+const usedPages: number[] = []
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader | null {
   const shader = gl.createShader(type)
@@ -205,8 +208,14 @@ function textureForPage(gls: GlState, page: number): WebGLTexture | null {
   return tex
 }
 
-export function uploadAtlasPage(page: number, image: HTMLImageElement): void {
-  if (!image.complete || image.naturalWidth === 0 || page < 0) {
+export function uploadAtlasPage(page: number, image: TexImageSource): void {
+  if (page < 0) {
+    return
+  }
+  if (image instanceof HTMLImageElement && (!image.complete || image.naturalWidth === 0)) {
+    return
+  }
+  if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap && image.width === 0) {
     return
   }
   const gls = ensureSpriteGl()
@@ -287,10 +296,12 @@ function drawPage(
       }
       const destW = sprite.w * scale
       const destH = sprite.h * scale
-      const dzi = worldToDzi(occupant.wx, occupant.wy)
-      const dx = (dzi.x - cx) * scale + width / 2 + sprite.ox * scale
+      if (destW * dpr < 0.5 && destH * dpr < 0.5) {
+        continue
+      }
+      const dx = (occupant.dziX - cx) * scale + width / 2 + sprite.ox * scale
       const dy =
-        (dzi.y - cy) * scale +
+        (occupant.dziY - cy) * scale +
         height / 2 +
         HALF * scale +
         sprite.oy * scale -
@@ -354,7 +365,7 @@ export function drawSpritesGl(
   for (let p = 0; p < pageBuckets.length; p += 1) {
     pageBuckets[p].length = 0
   }
-  const usedPages: number[] = []
+  usedPages.length = 0
   for (let i = 0; i < count; i += 1) {
     const sprite = sprites[rows[i].sprite]
     if (!sprite || !gls.uploaded[sprite.page]) {
