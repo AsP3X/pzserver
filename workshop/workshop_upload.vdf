@@ -7,5 +7,5 @@
     "visibility"        "0"
     "title"             "Knox Relay"
     "description"       "Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, /report for filing a player report from inside the game, and a friends list: right-click a survivor to ask, accept from the Knox Desk or the website."
-    "changenote"        "[h1]1.29 — Desk layout[/h1]\n[b]Changed[/b]\n[list]\n[*]The Knox Desk is a fixed 900x580 window. Players can no longer drag the corner to resize it.\n[*]The resize grip is hidden so the layout stays the one the pages were built for.\n[/list]"
+    "changenote"        "[h1]1.30 — Desk lock and Inbox[/h1]\n[b]Changed[/b]\n[list]\n[*]The Knox Desk stays at 900x580. A previously dragged size in layout.ini no longer comes back, and the resize grip is gone.\n[*]Inbox is a two-column Notices / Message layout with MARK READ pinned under the message. On a narrow screen it stacks instead of overlapping.\n[*]Inbox no longer re-paginates the message body every frame.\n[/list]"
 }

@@ -63,6 +63,30 @@ local RAIL_SHARE = 0.17
 
 KR_Desk.MIN_WIDTH = MIN_W
 KR_Desk.MIN_HEIGHT = MIN_H
+KR_Desk.WIDTH = WIDTH
+KR_Desk.HEIGHT = HEIGHT
+
+--- Fixed desk size, shrunk only when the screen cannot hold WIDTH x HEIGHT.
+local function openGeometry()
+    local screenW, screenH = 1280, 720
+    pcall(function()
+        screenW = getCore():getScreenWidth()
+        screenH = getCore():getScreenHeight()
+    end)
+
+    local w = WIDTH
+    local h = HEIGHT
+    if screenW - 80 < w then
+        w = math.max(MIN_W, screenW - 80)
+    end
+    if screenH - 120 < h then
+        h = math.max(MIN_H, screenH - 120)
+    end
+    local x = math.max(10, math.floor((screenW - w) / 2))
+    local y = math.max(10, math.floor((screenH - h) / 2))
+
+    return x, y, w, h
+end
 
 --------------------------------------------------------------------------
 -- Geometry helpers, shared with the pages
@@ -99,6 +123,22 @@ function KR_Desk.box(el, x, y, w, h)
     end)
 
     KR_Desk.refit(el)
+end
+
+--- Stop vanilla from stretching or shoving a widget we place by hand.
+---
+--- ISUIElement defaults keepOnScreen on, and a scrolling list that also
+--- anchors right+bottom will grow with its parent and paint over the
+--- widgets we laid out next to it. Pages call this once at create time.
+function KR_Desk.lockWidget(el)
+    if not el then
+        return
+    end
+    el.keepOnScreen = false
+    el.anchorLeft = true
+    el.anchorRight = false
+    el.anchorTop = true
+    el.anchorBottom = false
 end
 
 --- Re-derive whatever a widget caches from its own size.
@@ -315,9 +355,12 @@ function KnoxDeskWindow:initialise()
     -- already false.
     self.pin = true
     self.resizable = false
-    self.minimumWidth = WIDTH
-    self.minimumHeight = HEIGHT
+    -- Floor only. The live size is WIDTH x HEIGHT, or MIN_* on a tiny screen.
+    -- Pinning minimumWidth to WIDTH fought openGeometry() on 800px displays.
+    self.minimumWidth = MIN_W
+    self.minimumHeight = MIN_H
     ISCollapsableWindow.initialise(self)
+    self.resizable = false
 end
 
 function KnoxDeskWindow:createChildren()
@@ -329,35 +372,97 @@ function KnoxDeskWindow:createChildren()
     self.rail:initialise()
     self.rail.backgroundColor = KR_Desk.Color.void
     self.rail.borderColor = KR_Desk.Color.clear
-    self.rail.keepOnScreen = false
-    self.rail.anchorLeft = true
-    self.rail.anchorRight = false
-    self.rail.anchorTop = true
-    self.rail.anchorBottom = false
+    KR_Desk.lockWidget(self.rail)
     self:addChild(self.rail)
 
     self.host = ISPanel:new(RAIL_MIN, 20, 100, 100)
     self.host:initialise()
     self.host.backgroundColor = KR_Desk.Color.ash
     self.host.borderColor = KR_Desk.Color.clear
-    self.host.keepOnScreen = false
-    self.host.anchorLeft = true
-    self.host.anchorRight = false
-    self.host.anchorTop = true
-    self.host.anchorBottom = false
+    KR_Desk.lockWidget(self.host)
     self:addChild(self.host)
 
     self.railButtons = {}
-
-    if self.resizeWidget then
-        self.resizeWidget:setVisible(false)
-    end
-    if self.resizeWidget2 then
-        self.resizeWidget2:setVisible(false)
-    end
-
+    self:hideResizeGrip()
     self:placeChrome()
     self:rebuildRail()
+end
+
+function KnoxDeskWindow:hideResizeGrip()
+    self.resizable = false
+    local function hideGrip(grip)
+        if not grip then
+            return
+        end
+        grip:setVisible(false)
+        pcall(function() grip:setCapture(false) end)
+        -- Invisible grips still eat clicks on some B42 builds.
+        KR_Desk.box(grip, -40, -40, 1, 1)
+    end
+    hideGrip(self.resizeWidget)
+    hideGrip(self.resizeWidget2)
+end
+
+--- Vanilla still calls this after a layout.ini restore. Stay locked.
+function KnoxDeskWindow:setResizable(_value)
+    self.resizable = false
+    self:hideResizeGrip()
+end
+
+--- B42 writes the last dragged size into layout.ini and restores it on
+--- addToUIManager. Ignore width/height; the desk is not player-sized.
+function KnoxDeskWindow:RestoreLayout(_name, layout)
+    if type(layout) == "table" then
+        local x = tonumber(layout.x)
+        local y = tonumber(layout.y)
+        if x and y then
+            self:setX(x)
+            self:setY(y)
+        end
+        if tostring(layout.pin) == "true" then
+            self.pin = true
+            pcall(function() self:pin() end)
+        end
+    end
+    self:applyLockedSize()
+    self:placeChrome()
+end
+
+function KnoxDeskWindow:SaveLayout(_name, layout)
+    if type(layout) ~= "table" then
+        return
+    end
+    layout.x = tostring(math.floor(self:getX() or 0))
+    layout.y = tostring(math.floor(self:getY() or 0))
+    layout.width = tostring(WIDTH)
+    layout.height = tostring(HEIGHT)
+    layout.pin = "true"
+end
+
+--- Snap the frame to WIDTH x HEIGHT (or the shrunk openGeometry on a
+--- small screen). Tests set `_layoutUnlocked` so they can still sweep sizes.
+function KnoxDeskWindow:applyLockedSize()
+    if self._layoutUnlocked then
+        return false
+    end
+    local _x, _y, w, h = openGeometry()
+    local changed = false
+    if self:getWidth() ~= w then
+        self:setWidth(w)
+        changed = true
+    end
+    if self:getHeight() ~= h then
+        self:setHeight(h)
+        changed = true
+    end
+    pcall(function()
+        local peer = self.javaObject
+        if peer then
+            peer:setWidth(w)
+            peer:setHeight(h)
+        end
+    end)
+    return changed
 end
 
 --- Rail width for a given frame width. Free function so the layout tests can
@@ -460,9 +565,10 @@ function KnoxDeskWindow:layoutRail()
 end
 
 function KnoxDeskWindow:prerender()
+    local sizeChanged = self:applyLockedSize()
     local w = self:getWidth()
     local h = self:getHeight()
-    if w ~= self._chromeW or h ~= self._chromeH then
+    if sizeChanged or w ~= self._chromeW or h ~= self._chromeH then
         self:placeChrome()
         self:layoutPage()
     end
@@ -551,28 +657,6 @@ local function unmountCurrent()
     end
 end
 
---- Fixed desk size, shrunk only when the screen cannot hold WIDTH x HEIGHT.
-local function openGeometry()
-    local screenW, screenH = 1280, 720
-    pcall(function()
-        screenW = getCore():getScreenWidth()
-        screenH = getCore():getScreenHeight()
-    end)
-
-    local w = WIDTH
-    local h = HEIGHT
-    if screenW - 80 < w then
-        w = math.max(MIN_W, screenW - 80)
-    end
-    if screenH - 120 < h then
-        h = math.max(MIN_H, screenH - 120)
-    end
-    local x = math.max(10, math.floor((screenW - w) / 2))
-    local y = math.max(10, math.floor((screenH - h) / 2))
-
-    return x, y, w, h
-end
-
 function KR_Desk.show(pageId)
     if not instance then
         local x, y, w, h = openGeometry()
@@ -587,6 +671,10 @@ function KR_Desk.show(pageId)
         instance:setVisible(true)
         instance:addToUIManager()
     end
+    -- RestoreLayout runs during addToUIManager and can write a saved drag
+    -- size over the constructor. Snap after that, then size the hole.
+    instance:applyLockedSize()
+    instance:hideResizeGrip()
     instance:placeChrome()
 
     pageId = pageId or activeId or defaultPageId()

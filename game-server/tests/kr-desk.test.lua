@@ -275,9 +275,26 @@ local win = KR_Desk.instance()
 check("desk opened", win ~= nil)
 check("desk is not player-resizable", win and win.resizable == false)
 check("resize grip is hidden", win and (not win.resizeWidget or not win.resizeWidget:getIsVisible()))
+check("open desk is the locked 900x580 frame",
+    win and win:getWidth() == KR_Desk.WIDTH and win:getHeight() == KR_Desk.HEIGHT,
+    win and string.format("%dx%d", win:getWidth(), win:getHeight()))
 check("reports page registered and got a nav button",
     #win.railButtons == 1 and win.railButtons[1].title == "REPORTS",
     "rail buttons=" .. #win.railButtons)
+
+-- B42 restores the last dragged size from layout.ini on addToUIManager.
+win:RestoreLayout("KNOX DESK", { x = "40", y = "40", width = "1600", height = "1000", pin = "true" })
+check("layout.ini cannot stretch the desk",
+    win:getWidth() == KR_Desk.WIDTH and win:getHeight() == KR_Desk.HEIGHT,
+    string.format("%dx%d", win:getWidth(), win:getHeight()))
+check("layout.ini still keeps the window on screen",
+    win:getX() == 40 and win:getY() == 40)
+
+local saved = {}
+win:SaveLayout("KNOX DESK", saved)
+check("saved layout writes the locked size, not a drag",
+    saved.width == tostring(KR_Desk.WIDTH) and saved.height == tostring(KR_Desk.HEIGHT),
+    "width=" .. tostring(saved.width) .. " height=" .. tostring(saved.height))
 
 local function feed(count)
     local reports = {}
@@ -311,7 +328,11 @@ check("tickets reached the list", view and view.list.count == 12,
 
 --- Drive the frame to a size the way the game does: write width/height, then
 --- let prerender notice and relay out.
+---
+--- Production prerender snaps back to 900x580. Tests set `_layoutUnlocked`
+--- so the sweep can still prove pages tile at the shrunk-screen sizes.
 local function resizeTo(w, h)
+    win._layoutUnlocked = true
     win:setWidth(w)
     win:setHeight(h)
     win:prerender()
@@ -502,6 +523,134 @@ for _, button in ipairs(win.railButtons) do
     end
 end
 check("nav buttons stay inside the rail when many pages register", spilled == nil, spilled)
+
+--------------------------------------------------------------------------
+-- Locked size snaps back when the player is not supposed to resize
+--------------------------------------------------------------------------
+
+win._layoutUnlocked = false
+win:setWidth(1600)
+win:setHeight(1000)
+win:prerender()
+check("prerender restores the locked 900x580 desk",
+    win:getWidth() == KR_Desk.WIDTH and win:getHeight() == KR_Desk.HEIGHT,
+    string.format("%dx%d", win:getWidth(), win:getHeight()))
+win._layoutUnlocked = true
+
+--------------------------------------------------------------------------
+-- Inbox page
+--------------------------------------------------------------------------
+
+assert(loadfile(CLIENT .. "KR_DeskInbox.lua"))()
+KR_Desk.show("inbox")
+view = win.host.children[1]
+check("inbox view mounted into the host", view ~= nil and view.Type == "KnoxInboxView")
+
+local function feedNotices(count)
+    local list = {}
+    for i = 1, count do
+        list[i] = {
+            id = i,
+            title = "Notice " .. i .. " with a deliberately long title line",
+            kind = (i % 2 == 0) and "vault" or "shop",
+            unread = (i % 2 == 1),
+            body = "Body text for notice " .. i .. " that wraps across the message pane.",
+        }
+    end
+    fire("OnServerCommand", "KnoxRelay", "deskInbox", { notices = list })
+end
+
+feedNotices(8)
+check("notices reached the inbox list", view and view.list.count == 8,
+    view and ("count=" .. tostring(view.list.count)))
+check("inbox body shows the selected notice",
+    view and type(view.body.text) == "string" and #view.body.text > 10)
+
+local function inboxWidgets()
+    return { list = view.list, body = view.body, clear = view.clear }
+end
+
+local function sweepInbox(label)
+    local badTile, badInside, badOverlap = nil, nil, nil
+    for _, size in ipairs(sizes) do
+        local w, h = size[1], size[2]
+        resizeTo(w, h)
+
+        local innerH = h - TH - RH
+        local rail, host = win.rail, win.host
+        if not badTile then
+            local okTile = rail:getX() == 0
+                and host:getX() == rail:getWidth()
+                and rail:getWidth() + host:getWidth() == w
+                and rail:getY() == TH and host:getY() == TH
+                and rail:getHeight() == innerH and host:getHeight() == innerH
+            if not okTile then
+                badTile = string.format("%dx%d: %s %s (innerH=%d)",
+                    w, h, describe("rail", rail), describe("host", host), innerH)
+            end
+        end
+        if not badInside then
+            for name, el in pairs(inboxWidgets()) do
+                if el:getIsVisible() and not inside(el, view:getWidth(), view:getHeight()) then
+                    badInside = string.format("%dx%d: %s escapes view %dx%d",
+                        w, h, describe(name, el), view:getWidth(), view:getHeight())
+                    break
+                end
+            end
+        end
+        if not badOverlap then
+            local list = {}
+            for name, el in pairs(inboxWidgets()) do
+                if el:getIsVisible() then list[#list + 1] = { name = name, el = el } end
+            end
+            for i = 1, #list do
+                for j = i + 1, #list do
+                    if overlaps(rect(list[i].el), rect(list[j].el)) then
+                        badOverlap = string.format("%dx%d: %s over %s",
+                            w, h, describe(list[i].name, list[i].el), describe(list[j].name, list[j].el))
+                        break
+                    end
+                end
+                if badOverlap then break end
+            end
+        end
+    end
+    check(label .. ": rail and page tile the content area", badTile == nil, badTile)
+    check(label .. ": every widget stays inside the page", badInside == nil, badInside)
+    check(label .. ": no two widgets overlap", badOverlap == nil, badOverlap)
+end
+
+sweepInbox("inbox")
+
+resizeTo(KR_Desk.WIDTH, KR_Desk.HEIGHT)
+check("wide inbox puts the message beside the list",
+    view.body:getX() > view.list:getX() + view.list:getWidth() - 1,
+    describe("list", view.list) .. " " .. describe("body", view.body))
+check("wide inbox pins MARK READ under the message",
+    view.clear:getY() > view.body:getY() + view.body:getHeight() - 1
+        and view.clear:getX() >= view.body:getX() - 1,
+    describe("body", view.body) .. " " .. describe("clear", view.clear))
+
+resizeTo(MIN_W, MIN_H)
+check("narrow inbox stacks the message under the list",
+    view.body:getY() > view.list:getY() + view.list:getHeight() - 1,
+    describe("list", view.list) .. " " .. describe("body", view.body))
+check("narrow inbox keeps MARK READ below the message",
+    view.clear:getY() > view.body:getY() + view.body:getHeight() - 1,
+    describe("body", view.body) .. " " .. describe("clear", view.clear))
+
+local pagesBefore = view.body.paginated or 0
+view:prerender()
+view:prerender()
+view:prerender()
+check("inbox does not re-paginate the body every frame",
+    (view.body.paginated or 0) == pagesBefore,
+    "before=" .. tostring(pagesBefore) .. " after=" .. tostring(view.body.paginated))
+
+feedNotices(0)
+resizeTo(MIN_W, MIN_H)
+check("empty inbox still lays out a list and a body",
+    view.list:getHeight() > 0 and view.body:getHeight() > 0 and view.list.count == 0)
 
 --------------------------------------------------------------------------
 
