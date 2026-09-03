@@ -8,10 +8,10 @@ services:
     restart: unless-stopped
     # Allow clean world save on stop (PZ needs time to flush chunks)
     stop_grace_period: 60s
-    # Architecture note: the game UID and Laravel www-data both write the shared
+    # Architecture note: the game process and web-api both write the shared
     # Lua bridge under ./data/zomboid/Lua. Prefer world-writable files (0666) and
-    # non-sticky dirs (0777) via zomboid:heal-lua-bridge. Optionally align UIDs
-    # with user: "${PZ_SHARED_UID:-1000}:${PZ_SHARED_GID:-1000}" on app+game when
+    # non-sticky dirs (0777). Optionally align UIDs with
+    # user: "${PZ_SHARED_UID:-1000}:${PZ_SHARED_GID:-1000}" on game-server when
     # your host image supports a non-root game process (not all do).
     ports:
       - "${PZ_GAME_PORT:-16261}:${PZ_GAME_PORT:-16261}/udp"
@@ -25,58 +25,8 @@ services:
       # Private: RCON from web-api only
       - pzserver-internal
 
-  # The Laravel `app` and `queue` services lived here, parked in c318e99 and
-  # removed with the ./app tree. Live starts use web-ui + web-api from
-  # docker-compose.web.yml; git history has the old definitions.
-
-  # ---------------------------------------------------------------------------
-  # PostgreSQL — Primary database
-  # ---------------------------------------------------------------------------
-  db:
-    image: postgres:16-alpine
-    container_name: pz-db
-    restart: unless-stopped
-    # Not published on the host — reachable via DNS name "db" on pzserver-internal.
-    volumes:
-      - ${PZ_POSTGRES_HOST:-./data/postgres}:/var/lib/postgresql/data
-      - ./db/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
-    environment:
-      POSTGRES_DB: ${DB_DATABASE:-zomboid}
-      POSTGRES_USER: ${DB_USERNAME:-zomboid}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-zomboid}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-zomboid} -d ${DB_DATABASE:-zomboid}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - pzserver-internal
-
-  # ---------------------------------------------------------------------------
-  # Redis — Queue, cache, rate limiting
-  # ---------------------------------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: pz-redis
-    restart: unless-stopped
-    volumes:
-      - ${PZ_REDIS_HOST:-./data/redis}:/data
-    environment:
-      # The literal string "null" counts as no password, not as a password
-      # spelled n-u-l-l. Laravel's env() maps "null" to PHP null, so a
-      # REDIS_PASSWORD=null (which is what Laravel's own .env.example uses to
-      # mean "none") had the app connecting anonymously while this container
-      # was enforcing "null" as the actual secret — every request failing with
-      # NOAUTH while both files looked like they agreed.
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-    command: /bin/sh -c 'set -- --appendonly yes; [ -n "$$REDIS_PASSWORD" ] && [ "$$REDIS_PASSWORD" != "null" ] && set -- "$$@" --requirepass "$$REDIS_PASSWORD"; exec redis-server "$$@"'
-    healthcheck:
-      test: ["CMD-SHELL", 'if [ -n "$$REDIS_PASSWORD" ] && [ "$$REDIS_PASSWORD" != "null" ]; then REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping; else redis-cli ping; fi']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - pzserver-internal
+  # Live panel is web-ui + web-api + web-db from docker-compose.web.yml.
+  # The Laravel app/queue/db/redis services were removed with the ./app tree.
 
   # ---------------------------------------------------------------------------
   # Docker Socket Proxy — Restricted Docker API access for web-api
@@ -117,14 +67,14 @@ services:
     networks:
       # Public edge (shared reverse-proxy network)
       - proxy-network
-      # Reach app on the private network
+      # Reach web-ui on the private network
       - pzserver-internal
 
 # -----------------------------------------------------------------------------
 # Networks
 # -----------------------------------------------------------------------------
 # proxy-network      — public / shared edge (join existing proxy stack; external)
-# pzserver-internal  — private stack network (db, redis, app, queue, RCON)
+# pzserver-internal  — private stack network (web-db, docker-socket-proxy, RCON)
 networks:
   proxy-network:
     name: proxy-network
@@ -142,7 +92,6 @@ networks:
 #   ./data/server            SteamCMD dedicated server install
 #   ./data/backups           panel backups
 #   ./data/map-tiles         render scratch (html tree, texture cache); the pack is the volume
-#   ./data/postgres          PostgreSQL data
-#   ./data/redis             Redis AOF/data
+#   ./data/web-postgres      Panel PostgreSQL (web-db)
 #   ./data/caddy-data        Caddy certificates / storage
 #   ./data/caddy-config      Caddy config state

@@ -657,12 +657,8 @@ if ($proceed.ToLower() -eq "n") {
 Write-Host ""
 Write-Host "Generating secrets..." -ForegroundColor White
 
-$DB_PASS = New-Secret 24
 $RCON_PASS = New-Secret 16
 $PZ_ADMIN_PASS = New-Secret 16
-$API_SECRET = New-Secret 48
-$APP_SECRET = New-AppKey
-$REDIS_PASS = New-Secret 20
 
 # ══════════════════════════════════════════════════════════════════════
 # Generate self-signed certificate (IP mode only)
@@ -772,10 +768,6 @@ $rootEnv = Set-EnvValue $rootEnv "PZ_MAX_PLAYERS" $PZ_MAX_PLAYERS
 $rootEnv = Set-EnvValue $rootEnv "PZ_MAX_RAM" $PZ_MAX_RAM
 $rootEnv = Set-EnvValue $rootEnv "PZ_RCON_PASSWORD" $RCON_PASS
 $rootEnv = Set-EnvValue $rootEnv "PZ_STEAM_BRANCH" $PZ_STEAM_BRANCH
-$rootEnv = Set-EnvValue $rootEnv "APP_ENV" $APP_ENV
-$rootEnv = Set-EnvValue $rootEnv "APP_KEY" "base64:$APP_SECRET"
-$rootEnv = Set-EnvValue $rootEnv "APP_DEBUG" $APP_DEBUG
-$rootEnv = Set-EnvValue $rootEnv "APP_URL" $APP_URL
 if ($rootEnv -notmatch '(?m)^WEB_PROXY_MODE=') {
     $rootEnv = $rootEnv.TrimEnd() + "`nWEB_PROXY_MODE=$WEB_PROXY_MODE`n"
 } else {
@@ -783,9 +775,7 @@ if ($rootEnv -notmatch '(?m)^WEB_PROXY_MODE=') {
 }
 $rootEnv = Set-EnvValue $rootEnv "CADDY_HTTP_PORT" $CADDY_HTTP_PORT
 $rootEnv = Set-EnvValue $rootEnv "CADDY_HTTPS_PORT" $CADDY_HTTPS_PORT
-$rootEnv = Set-EnvValue $rootEnv "DB_PASSWORD" $DB_PASS
-$rootEnv = Set-EnvValue $rootEnv "REDIS_PASSWORD" $REDIS_PASS
-$rootEnv = Set-EnvValue $rootEnv "API_KEY" $API_SECRET
+$rootEnv = Set-EnvValue $rootEnv "WEB_PUBLIC_URL" $APP_URL
 $rootEnv = Set-EnvValue $rootEnv "ADMIN_USERNAME" $ADMIN_USERNAME
 $rootEnv = Set-EnvValue $rootEnv "ADMIN_EMAIL" $ADMIN_EMAIL
 $rootEnv = Set-EnvValue $rootEnv "ADMIN_PASSWORD" $ADMIN_PASSWORD
@@ -800,8 +790,7 @@ Write-FileUtf8NoBom ".env" $rootEnv
 Write-Host "Ensuring host data directories (./data/*)..."
 foreach ($d in @(
     "data\zomboid", "data\zomboid\Lua", "data\server", "data\backups", "data\map-tiles",
-    "data\postgres", "data\redis",
-    "data\caddy-data", "data\caddy-config"
+    "data\caddy-data", "data\caddy-config", "data\web-postgres"
 )) {
     if (-not (Test-Path $d)) {
         New-Item -ItemType Directory -Force -Path $d | Out-Null
@@ -876,21 +865,6 @@ if (Test-Path "game-version.conf") {
     Write-FileUtf8NoBom "game-version.conf" $gvContent
 }
 
-# ══════════════════════════════════════════════════════════════════════
-# Sync passwords into existing volumes
-# ══════════════════════════════════════════════════════════════════════
-Write-Host "Syncing database password..."
-docker exec pz-db psql -U zomboid -d zomboid -c "ALTER USER zomboid PASSWORD '$DB_PASS';" 2>$null | Out-Null
-
-Write-Host "Syncing Redis password..."
-if ($REDIS_PASS) {
-    # Try without auth first, then with auth (needed on re-run when Redis already has a password)
-    docker exec pz-redis redis-cli CONFIG SET requirepass "$REDIS_PASS" 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        docker exec pz-redis redis-cli -a "$REDIS_PASS" CONFIG SET requirepass "$REDIS_PASS" 2>$null | Out-Null
-    }
-}
-
 # The Laravel cache clears and zomboid:create-admin used to run here, against the
 # app container parked in c318e99. Neither has a successor to call: there is no
 # config cache to clear, and web-api creates the first administrator itself at
@@ -945,7 +919,7 @@ if ($ADMIN_PASS_GENERATED) {
     Write-Host "  Admin Pass:    (as entered)"
 }
 Write-Host ""
-Write-Host "  API Key:       $API_SECRET" -ForegroundColor DarkGray
+
 Write-Host ""
 
 # Game server status

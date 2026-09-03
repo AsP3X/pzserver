@@ -85,7 +85,7 @@ $env:PZ_SETUP_ASSUME_YES = "1"; .\make.ps1 init
 | Network | Type | Services |
 |---------|------|----------|
 | **`proxy-network`** | external (public edge) | `game-server`, `web-ui`, `web-api` (+ `caddy` in caddy mode) |
-| **`pzserver-internal`** | internal (private) | `web-api`, `web-db`, `db`, `redis`, `docker-socket-proxy`, + `game-server` for RCON |
+| **`pzserver-internal`** | internal (private) | `web-api`, `web-db`, `docker-socket-proxy`, + `game-server` for RCON |
 
 `proxy-network` is shared with your reverse-proxy stack when present. Deploy creates it if missing.
 
@@ -120,8 +120,7 @@ NPM Proxy Host example:
 | `./data/server/` | SteamCMD dedicated server install (~7 GB) |
 | `./data/backups/` | Panel backups |
 | `./data/map-tiles/` | Admin player map basemap — **one** `tiles.sqlite` file after generation (see [Map tiles](#map-tiles-admin-player-map)) |
-| `./data/postgres/` | PostgreSQL database files |
-| `./data/redis/` | Redis AOF / data |
+| `./data/web-postgres/` | Panel PostgreSQL (`web-db`) |
 | `./data/caddy-data/` | Caddy certs/storage (if `WEB_PROXY_MODE=caddy`) |
 | `./data/caddy-config/` | Caddy config state |
 
@@ -139,31 +138,11 @@ These are generated on the host and are gitignored:
 
 ## Map basemap (admin player map)
 
-> **Currently unavailable.** The player map and both basemap generators were
-> Laravel features of the `app` container, parked in `c318e99`. The Rust API
-> that replaced it has no map routes, so the `artisan` commands below have
-> nothing to run in — they are kept as the reference for what the feature did.
-> Everything else in this README describes the stack as it runs today.
-
-The admin **Player map** shows live/offline player markers on a basemap. **Map view** toggle:
-
-- **Vector (2D)** — default schematic basemap (`map.json`, low resource). [docs/map-vector.md](docs/map-vector.md)
-- **3D isometric** — game-like tiles; **live CDN first** (no wait), optional local generate with `--profile=lite`. [docs/map-tiles.md](docs/map-tiles.md)
-
-```bash
-# Rebuild after a PZ map update or when Map= / map mods change
-docker exec -it pz-app php artisan zomboid:build-worldmap-vector --list-only
-docker exec -it pz-app php artisan zomboid:build-worldmap-vector
-# or:
-docker compose exec app php artisan zomboid:build-worldmap-vector
-make exec CMD="php artisan zomboid:build-worldmap-vector"
-```
-
-Force isometric proxy or local tiles with `PZ_MAP_BASEMAP=proxy` or `PZ_MAP_BASEMAP=local`.
+The admin **Player map** shows live/offline player markers on a basemap. Generate or refresh packs with `make map-tiles` / `make map-sprites`. See [docs/map-tiles.md](docs/map-tiles.md) and [docs/map-sprites.md](docs/map-sprites.md).
 
 ### Advanced: local isometric tiles
 
-Optional photorealistic tiles via `pzmap2dzi` (Admin → Player map → **Isometric tiles** / advanced, or artisan). **Opt-in** and heavy (CPU/RAM/disk); not required when the vector basemap is active. Force with `PZ_MAP_BASEMAP=local` after generating.
+Optional photorealistic tiles via `pzmap2dzi`. **Opt-in** and heavy (CPU/RAM/disk).
 
 **Important storage design:** raw DZI output is a pyramid of hundreds of thousands to **millions** of small image files. That makes deletes, host backups, and filesystem ops extremely slow. After render, this stack **packs all tiles into a single SQLite database** and deletes the loose pyramid:
 
@@ -177,61 +156,18 @@ The panel serves tiles from the pack at `/admin/map-tiles/{z}/{x}_{y}`.
 
 ### Commands
 
-Run inside the **app** container (`pz-app`). Stack must already be up.
-
 ```bash
-# Clear previous tiles / partial runs
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --clear
-
-# Lite generate (recommended on a live server — low disk/CPU)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=lite
-
-# Full detail generate (heavier — prefer when the game is idle)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force --profile=full
-
-# Stop a running job (keeps partial tiles for resume)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --stop
-
-# Resume after stop or crash (incremental; does not wipe)
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --resume
-
-# Already have a multi-file DZI pyramid? Pack it without re-rendering
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
-```
-
-Via Compose service name (same effect):
-
-```bash
-docker compose exec app php artisan zomboid:generate-map-tiles --force --profile=lite
-docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
-```
-
-Or with Make / PowerShell wrappers:
-
-```bash
-make exec CMD="php artisan zomboid:generate-map-tiles --force --profile=lite"
+make map-tiles              # render + pack tiles.sqlite (hours)
+make map-sprites            # sprite isometric catalogue
+make map-sprites-live       # door/window overlay from the live save
 ```
 
 ```powershell
-.\make.ps1 exec php artisan zomboid:generate-map-tiles --force --profile=lite
-.\make.ps1 exec php artisan zomboid:generate-map-tiles --pack-only
+.\make.ps1 map-tiles
+.\make.ps1 map-sprites
 ```
 
-| Flag | Meaning |
-|------|---------|
-| `--force` | Clear existing pack/loose tiles and re-render from scratch |
-| `--profile=lite\|full` | **lite** (default): ground only, fewer zooms; **full**: more building layers |
-| `--resume` | Continue an interrupted render (never deletes loose tiles) |
-| `--stop` | Request stop of a running job (keeps partial tiles) |
-| `--clear` | Only delete tiles + progress state, then exit |
-| `--pack-only` | Convert an existing loose pyramid into `tiles.sqlite` (no re-render) |
-| `--keep-loose` | Do not delete the multi-file pyramid after packing |
-| `--workers=N` | Override render worker count (default: 1 via `PZ_MAP_WORKERS`) |
-| `--map=` | Specific map name for pzmap2dzi (default: all / vanilla) |
-
-Env: `PZ_MAP_TILES_PATH` (container path, default `/map-tiles`) / host bind `PZ_MAP_TILES_HOST` (default `./data/map-tiles`).
-
-Full details: **[docs/map-tiles.md](docs/map-tiles.md)**.
+Full details: **[docs/map-tiles.md](docs/map-tiles.md)**, **[docs/map-sprites.md](docs/map-sprites.md)**.
 
 ---
 
@@ -242,10 +178,9 @@ Full details: **[docs/map-tiles.md](docs/map-tiles.md)**.
 | Service | Role |
 |---------|------|
 | `game-server` | PZ dedicated server (SteamCMD, B42 by default) |
-| `app` | Laravel + React admin panel |
-| `queue` | Backups, scheduled restarts, long jobs |
-| `db` | PostgreSQL 16 |
-| `redis` | Cache, queues, sessions |
+| `web-api` | Rust control plane (RCON, Docker, Lua bridge) |
+| `web-ui` | Vite/React admin + public site |
+| `web-db` | PostgreSQL 16 (panel data) |
 | `docker-socket-proxy` | Safe start/stop/logs for the game container |
 | `caddy` | Optional HTTPS reverse proxy |
 
@@ -294,7 +229,7 @@ Then:
 Open the panel → **Configuration** / **Sandbox** / **Mods**.  
 Changes to `.ini` / sandbox typically need a **server restart** from the panel.
 
-Persistent data lives in Docker volumes (`pz-data`, `pz-server-files`, `pz-postgres`, `pz-backups`, …).
+Persistent data lives under `./data/` (`zomboid`, `server`, `web-postgres`, `backups`, …).
 
 ---
 
@@ -336,18 +271,17 @@ Persistent data lives in Docker volumes (`pz-data`, `pz-server-files`, `pz-postg
 
 ```
 Players ──UDP 16261/16262──► game-server (PZ B42)
-Admin  ──TCP 8000 / 443────► app (panel) ──RCON──► game-server
-                               │
-                               ├── db (Postgres)
-                               ├── redis
-                               └── docker-socket-proxy (lifecycle)
+Admin  ──TCP 8100 / 443────► web-ui ──► web-api ──RCON──► game-server
+                                           │
+                                           ├── web-db (Postgres)
+                                           └── docker-socket-proxy (lifecycle)
 ```
 
 ---
 
 ## Docs
 
-- Upstream feature list & screenshots: original [README history](https://github.com/trongio/Zomboid_Server_Manager_Docker)
+- Upstream project (AGPL-3.0): [Zomboid Manager](https://github.com/trongio/Zomboid_Server_Manager_Docker)
 - Install deep-dives: `docs/installation-windows.md`, `docs/installation-linux.md`
 - Map vector basemap: `docs/map-vector.md`
 - Map tiles (optional isometric + SQLite pack): `docs/map-tiles.md`

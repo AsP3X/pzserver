@@ -89,7 +89,7 @@ echo "[configure-server] Applying configuration..."
 # Values here take priority over env var defaults so web UI changes survive restarts.
 #
 # Lives in Server/ (next to the INI and .mod_state) because that is the directory
-# the app container (www-data) can write on the shared volume; the data root above
+# web-api can write on the shared volume; the data root above
 # is root-owned and not app-writable. Older builds wrote it to the data root, so
 # migrate that file into Server/ once if it's still there.
 CONFIG_STATE_FILE="${INI_DIR}/.config_state"
@@ -539,7 +539,7 @@ fi
 #   "cannot open file writer for <player>" / "cannot write export_requests.json"
 # when Lua/ or Lua/inventory is missing or not world-writable (bind mounts).
 # Use 0777 dirs + 0666 files (no sticky bit) so game (steam/root) and Laravel
-# (www-data) can both open and replace each other's files.
+# (web-api) can both open and replace each other's files.
 LUA_DIR="${PZ_CONFIG_DIR}/Lua"
 mkdir -p "${LUA_DIR}/inventory" 2>/dev/null \
     || echo "[configure-server] WARNING: Cannot create ${LUA_DIR}/inventory"
@@ -566,7 +566,7 @@ if [ -d "${LUA_DIR}/inventory" ]; then
 fi
 
 # Ensure config files are world-readable/writable so both steam (game server)
-# and www-data (app container) can access them on the shared volume.
+# and web-api can access them on the shared volume.
 chmod 666 "$INI_FILE" 2>/dev/null || true
 [ -f "$SANDBOX_FILE" ] && chmod 666 "$SANDBOX_FILE" 2>/dev/null || true
 

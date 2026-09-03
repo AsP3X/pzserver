@@ -77,7 +77,7 @@ show_help() {
     ./deploy.sh --help             This help
 
   ${BOLD}Service names${NC} (for --logs / --restart):
-    game-server  web-api  web-ui  web-db  db  redis  docker-socket-proxy  ${DIM}caddy (caddy mode only)${NC}
+    game-server  web-api  web-ui  web-db  docker-socket-proxy  ${DIM}caddy (caddy mode only)${NC}
 
   ${BOLD}After deploy:${NC}
     Panel:   http://localhost:8100  (default WEB_UI_PORT; --status shows the real one)

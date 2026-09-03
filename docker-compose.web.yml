@@ -1,9 +1,7 @@
 # -----------------------------------------------------------------------------
 # Web stack: Rust API + Vite UI + its own Postgres.
 #
-# Included in the default `make up` / live compose start. The Laravel panel
-# (`app` / `queue` in docker-compose.yml) is commented out so a live server
-# only brings up this UI plus game-server and the shared infrastructure.
+# Included in the default `make up` / live compose start with game-server.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.<arch>.yml \
 #                  -f docker-compose.web.yml up -d
@@ -18,8 +16,7 @@ services:
     image: postgres:16-alpine
     container_name: pz-web-db
     restart: unless-stopped
-    # Internal only, same as pz-db. docker-compose.web-dev.yml publishes it for
-    # host development.
+    # Internal only. docker-compose.web-dev.yml publishes it for host development.
     volumes:
       - ${PZ_WEB_POSTGRES_HOST:-./data/web-postgres}:/var/lib/postgresql/data
     environment:

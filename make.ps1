@@ -90,8 +90,6 @@ function Ensure-DataDirs {
         "data\map-tiles",
         "data\map-tiles\html\map_data\base",
         "data\server\media\texturepacks",
-        "data\postgres",
-        "data\redis",
         "data\caddy-data",
         "data\caddy-config",
         "data\web-postgres"
@@ -245,7 +243,7 @@ function Confirm-AdminPrivileges {
 }
 
 function Ensure-DbVolume {
-    # Postgres is bind-mounted at ./data/postgres
+    # Panel Postgres is bind-mounted at ./data/web-postgres
     Ensure-DataDirs
 }
 
@@ -596,20 +594,20 @@ function Do-DbCheck {
 function Do-DbInit {
     Assert-DockerEnvironment
     Ensure-DataDirs
-    Write-Host "Postgres data dir: ./data/postgres (bind mount). Run '.\make.ps1 up' to start."
+    Write-Host "Postgres data dir: ./data/web-postgres (bind mount). Run '.\make.ps1 up' to start."
 }
 
 function Do-DbReset {
     Assert-DockerEnvironment
-    Write-Host "WARNING: This will PERMANENTLY delete ./data/postgres." -ForegroundColor Red
+    Write-Host "WARNING: This will PERMANENTLY delete ./data/web-postgres (the panel database)." -ForegroundColor Red
     $confirm = Read-Host "Type RESET_DB and press Enter to continue"
     if ($confirm -ne "RESET_DB") {
         Write-Host "Cancelled."
         return
     }
     Invoke-Compose @("down")
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data\postgres"
-    New-Item -ItemType Directory -Force -Path "data\postgres" | Out-Null
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "data\web-postgres"
+    New-Item -ItemType Directory -Force -Path "data\web-postgres" | Out-Null
     Write-Host "Postgres data dir recreated. Run '.\make.ps1 up' to start with an empty DB."
 }
 
@@ -622,7 +620,7 @@ function Do-DbBackup {
     Write-Host "Backing up database..."
     try {
         $process = Start-Process -FilePath "docker" `
-            -ArgumentList @("exec", "pz-db", "pg_dump", "-U", "zomboid", "-d", "zomboid", "--no-owner") `
+            -ArgumentList @("exec", "pz-web-db", "pg_dump", "-U", "knox", "-d", "knox", "--no-owner") `
             -RedirectStandardOutput $backupFile `
             -RedirectStandardError $stderrFile `
             -NoNewWindow `
@@ -649,9 +647,9 @@ function Do-DbRestore {
     $latest = Get-ChildItem "db-backups\*.sql" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     Write-Host "Restoring from $($latest.Name)..."
     # Use docker cp to avoid PowerShell pipe encoding issues
-    docker cp $latest.FullName "pz-db:/tmp/restore.sql"
-    docker exec pz-db psql -U zomboid -d zomboid -f /tmp/restore.sql
-    docker exec pz-db rm /tmp/restore.sql
+    docker cp $latest.FullName "pz-web-db:/tmp/restore.sql"
+    docker exec pz-web-db psql -U knox -d knox -f /tmp/restore.sql
+    docker exec pz-web-db rm /tmp/restore.sql
     Write-Host "Restored."
 }
 
@@ -813,7 +811,7 @@ function Do-Help {
     Write-Host "    .\make.ps1 pull             Pull latest images"
     Write-Host ""
     Write-Host "  Service names:" -ForegroundColor White
-    Write-Host "    game-server  web-api  web-ui  web-db  db  redis  docker-socket-proxy"
+    Write-Host "    game-server  web-api  web-ui  web-db  docker-socket-proxy"
     Write-Host ""
     Write-Host "  Firewall (Windows Firewall - requires Administrator):" -ForegroundColor White
     Write-Host "    .\make.ps1 expose           Open game ports (UDP)"

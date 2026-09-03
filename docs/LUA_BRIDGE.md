@@ -1,13 +1,13 @@
 # Lua bridge operations
 
-The game server and Laravel app share `data/zomboid/Lua` (bind-mounted as
-`/home/steam/Zomboid/Lua` and `/lua-bridge`).
+The game server and `web-api` share `data/zomboid/Lua` (bind-mounted as
+`/home/steam/Zomboid/Lua` in the game container and the Lua path in `web-api`).
 
 ## Permissions model
 
 - Directories: `0777` (**no sticky bit**)
 - Files: `0666`
-- Sticky `1777` breaks atomic rename when `www-data` and `steam`/`root` alternate ownership
+- Sticky `1777` breaks atomic rename when `web-api` and `steam`/`root` alternate ownership
 
 Self-heal:
 
@@ -35,9 +35,9 @@ if it is not — see `5fdba44`.
 
 ## Hybrid deposit outbox
 
-1. PHP writes `money_deposits` row (status `pending`) **and** `deposit_requests.json`
-2. Lua processes request, writes `deposit_results.json` (with restore-on-write-fail)
-3. PHP credits wallet, marks row `credited`, removes result from JSON
+1. `web-api` writes a `money_deposits` row (status `pending`) **and** `deposit_requests.json`
+2. Knox Relay Lua processes the request, writes `deposit_results.json` (with restore-on-write-fail)
+3. `web-api` credits the wallet, marks the row `credited`, removes the result from JSON
 
 ## Shared UID (optional hardening)
 

@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-HTTP="${CADDY_HTTP_PORT:-80}"
-HTTPS="${CADDY_HTTPS_PORT:-443}"
-
-echo "[manual] Close these TCP ports in your firewall:"
-echo "  ${HTTP}/tcp (HTTP)  ${HTTPS}/tcp (HTTPS)"
-echo ""
-echo "The admin panel remains available locally at http://localhost:8100."
-echo "See docs/firewall-manual.md for details."
+h="${CADDY_HTTP_PORT:-80}"
+s="${CADDY_HTTPS_PORT:-443}"
+echo "[manual] close TCP $h and $s"
+echo "Panel remains on http://127.0.0.1:8100"
+echo "docs/firewall-manual.md"

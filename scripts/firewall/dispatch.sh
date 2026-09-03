@@ -1,106 +1,67 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# ══════════════════════════════════════════════════════════════════════════════
-# Firewall dispatch — reads .firewall.conf and calls the right backend script
-# Usage: dispatch.sh <action>
-#   action: game-open | game-close | admin-open | admin-close
-# ══════════════════════════════════════════════════════════════════════════════
+# Route make expose/hide/admin-* to the host firewall backend in .firewall.conf.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CONF_FILE="$REPO_ROOT/.firewall.conf"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/../.." && pwd)"
+conf="$root/.firewall.conf"
 
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
+die() { echo "error: $*" >&2; exit 1; }
 
-ACTION="${1:-}"
+action="${1:-}"
+[ -n "$action" ] || die "usage: dispatch.sh game-open|game-close|admin-open|admin-close"
 
-if [ -z "$ACTION" ]; then
-    echo -e "${RED}Usage: dispatch.sh <game-open|game-close|admin-open|admin-close>${NC}" >&2
-    exit 1
-fi
+[ -f "$conf" ] || die ".firewall.conf missing — run make init"
 
-# ── Load config ───────────────────────────────────────────────────────────────
-if [ ! -f "$CONF_FILE" ]; then
-    echo -e "${RED}Error: .firewall.conf not found.${NC}" >&2
-    echo -e "${YELLOW}Run 'make init' first to configure firewall settings.${NC}" >&2
-    exit 1
-fi
+FIREWALL_BACKEND=""
+FIREWALL_ZONE=""
+CADDY_ENABLED=""
+ADMIN_HTTP_PORT=""
+ADMIN_HTTPS_PORT=""
 
-# Parse .firewall.conf as data (KEY=VALUE lines) instead of executing it
 while IFS='=' read -r key value; do
-    # Skip empty lines and comments
     case "$key" in
         ''|\#*) continue ;;
     esac
-
+    value="${value%$'\r'}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ ${#value} -ge 2 ]]; then
+        if [[ ${value:0:1} == '"' && ${value: -1} == '"' ]] || \
+           [[ ${value:0:1} == "'" && ${value: -1} == "'" ]]; then
+            value="${value:1:-1}"
+        fi
+    fi
     case "$key" in
-        FIREWALL_BACKEND|FIREWALL_OS|FIREWALL_ZONE|CADDY_ENABLED|ADMIN_PUBLIC_HOST|ADMIN_HTTP_PORT|ADMIN_HTTPS_PORT)
-            # Trim trailing CR (for Windows-style line endings)
-            value="${value%$'\r'}"
-            # Trim leading and trailing whitespace
-            value="${value#"${value%%[![:space:]]*}"}"
-            value="${value%"${value##*[![:space:]]}"}"
-            # Remove matching surrounding single or double quotes, if present
-            if [[ ${#value} -ge 2 ]]; then
-                if [[ ${value:0:1} == '"' && ${value: -1} == '"' ]] || \
-                   [[ ${value:0:1} == "'" && ${value: -1} == "'" ]]; then
-                    value="${value:1:-1}"
-                fi
-            fi
-            # Assign value without evaluation
-            printf -v "$key" '%s' "$value"
-            ;;
-        *)
-            # Ignore unknown keys
-            ;;
+        FIREWALL_BACKEND) FIREWALL_BACKEND="$value" ;;
+        FIREWALL_ZONE) FIREWALL_ZONE="$value" ;;
+        CADDY_ENABLED) CADDY_ENABLED="$value" ;;
+        ADMIN_HTTP_PORT) ADMIN_HTTP_PORT="$value" ;;
+        ADMIN_HTTPS_PORT) ADMIN_HTTPS_PORT="$value" ;;
     esac
-done < "$CONF_FILE"
+done < "$conf"
 
-BACKEND="${FIREWALL_BACKEND:-manual}"
-
-# ── Validate action ──────────────────────────────────────────────────────────
-case "$ACTION" in
+case "$action" in
     game-open|game-close|admin-open|admin-close) ;;
-    *)
-        echo -e "${RED}Unknown action: ${ACTION}${NC}" >&2
-        echo -e "Valid actions: game-open, game-close, admin-open, admin-close" >&2
-        exit 1
-        ;;
+    *) die "unknown action $action" ;;
 esac
 
-# ── For admin actions, verify Caddy is configured ────────────────────────────
-if [[ "$ACTION" == admin-* ]]; then
-    CADDY_ENABLED="${CADDY_ENABLED:-false}"
-    if [ "$CADDY_ENABLED" != "true" ]; then
-        echo -e "${RED}Error: Caddy is not configured.${NC}" >&2
-        echo "Public admin access requires Caddy. Run 'make init' to set it up." >&2
-        echo "The admin panel is still available locally at http://localhost:8100" >&2
-        exit 1
-    fi
+if [[ "$action" == admin-* && "${CADDY_ENABLED:-false}" != "true" ]]; then
+    die "public admin needs Caddy (make init). Panel stays on http://127.0.0.1:8100"
 fi
 
-# ── Dispatch to backend script ───────────────────────────────────────────────
-BACKEND_SCRIPT="$SCRIPT_DIR/$BACKEND/$ACTION.sh"
-
-if [ ! -f "$BACKEND_SCRIPT" ]; then
-    echo -e "${RED}Error: Backend script not found: scripts/firewall/$BACKEND/$ACTION.sh${NC}" >&2
-    echo -e "${YELLOW}Falling back to manual mode.${NC}" >&2
-    BACKEND_SCRIPT="$SCRIPT_DIR/manual/$ACTION.sh"
+backend="${FIREWALL_BACKEND:-manual}"
+script="$here/$backend/$action.sh"
+if [ ! -f "$script" ]; then
+    echo "no $backend/$action.sh — using manual" >&2
+    script="$here/manual/$action.sh"
 fi
+[ -f "$script" ] || die "no handler for $action"
 
-if [ ! -f "$BACKEND_SCRIPT" ]; then
-    echo -e "${RED}Error: No script found for action '$ACTION' on backend '$BACKEND'.${NC}" >&2
-    exit 1
-fi
-
-# Export variables the backend scripts need
 export FIREWALL_ZONE="${FIREWALL_ZONE:-}"
 export PZ_GAME_PORT="${PZ_GAME_PORT:-16261}"
 export PZ_DIRECT_PORT="${PZ_DIRECT_PORT:-16262}"
-# Admin ports: prefer values from .firewall.conf, fall back to env, then defaults
 export CADDY_HTTP_PORT="${ADMIN_HTTP_PORT:-${CADDY_HTTP_PORT:-80}}"
 export CADDY_HTTPS_PORT="${ADMIN_HTTPS_PORT:-${CADDY_HTTPS_PORT:-443}}"
 
-exec bash "$BACKEND_SCRIPT"
+exec bash "$script"

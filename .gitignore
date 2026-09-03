@@ -8,10 +8,7 @@
 ACCESS.local.txt
 *.local.txt
 
-# PHP / Composer
-*.cache
-
-# Laravel panel (parked; live UI is web/). Local leftovers only.
+# Local leftover of the removed Laravel panel (live UI is web/).
 /app/
 
 # IDE
@@ -43,8 +40,8 @@ backups/*.tar.gz
 !/data/**/.gitkeep
 
 # Those dirs must look *empty* to the container on first boot:
-#   - postgres: initdb refuses to initialize a PGDATA that contains any file,
-#     including dot-prefixed ones, and the db container ends up in a restart loop.
+#   - web-postgres: initdb refuses to initialize a PGDATA that contains any file,
+#     including dot-prefixed ones, and web-db ends up in a restart loop.
 # The Makefile's `ensure-data-dirs` target creates all of them via `mkdir -p`.
 
 # Node (frontend - future)

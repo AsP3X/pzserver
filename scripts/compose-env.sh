@@ -80,8 +80,6 @@ pz_ensure_data_dirs() {
     "${PZ_REPO_ROOT}/data/server/media/texturepacks" \
     "${PZ_REPO_ROOT}/data/backups" \
     "${PZ_REPO_ROOT}/data/map-tiles/html/map_data/base" \
-    "${PZ_REPO_ROOT}/data/postgres" \
-    "${PZ_REPO_ROOT}/data/redis" \
     "${PZ_REPO_ROOT}/data/caddy-data" \
     "${PZ_REPO_ROOT}/data/caddy-config" \
     "${PZ_REPO_ROOT}/data/web-postgres"
@@ -95,7 +93,7 @@ pz_ensure_data_dirs() {
   # can contain hundreds of thousands of files and make deploy look "stuck".
   # Only ensure top-level dirs are traversable/writable; Lua bridge needs recurse.
   local d
-  for d in zomboid server backups map-tiles postgres redis caddy-data caddy-config web-postgres; do
+  for d in zomboid server backups map-tiles caddy-data caddy-config web-postgres; do
     chmod a+rwx "${PZ_REPO_ROOT}/data/${d}" 2>/dev/null || true
   done
   if [[ -d "${PZ_REPO_ROOT}/data/zomboid/Lua" ]]; then
@@ -103,9 +101,9 @@ pz_ensure_data_dirs() {
   fi
 }
 
-# Kept for callers; Postgres is a bind mount under ./data/postgres now.
+# Kept for callers; panel Postgres is a bind mount under ./data/web-postgres.
 pz_ensure_db_volume() {
-  mkdir -p "${PZ_REPO_ROOT}/data/postgres"
+  mkdir -p "${PZ_REPO_ROOT}/data/web-postgres"
 }
 
 # Public edge network is external (often shared with Traefik/NPM/other stacks).
@@ -118,8 +116,8 @@ pz_ensure_networks() {
 }
 
 # Fixed container names used by this stack (must match docker-compose.yml).
-# pz-app and pz-queue no longer exist; they stay so an upgrade from an install
-# that predates c318e99 still has its old containers cleaned up.
+# Names that no longer have compose services stay so an upgrade still
+# removes leftover Laravel containers (app/queue/db/redis).
 PZ_STACK_CONTAINERS=(
   pz-app
   pz-queue

@@ -52,10 +52,10 @@ setup: init
 db-check: ensure-data-dirs
 
 db-init: ensure-data-dirs
-	@echo "Postgres data dir: ./data/postgres (bind mount). Run 'make up' to start."
+	@echo "Postgres data dir: ./data/web-postgres (bind mount). Run 'make up' to start."
 
 db-reset:
-	@echo "WARNING: This will PERMANENTLY delete ./data/postgres."
+	@echo "WARNING: This will PERMANENTLY delete ./data/web-postgres (the panel database)."
 	@echo "Type RESET_DB and press Enter to continue:"
 	@read confirm; \
 	if [ "$$confirm" != "RESET_DB" ]; then \
@@ -63,8 +63,8 @@ db-reset:
 		exit 1; \
 	fi
 	@$(COMPOSE) down
-	@rm -rf data/postgres
-	@mkdir -p data/postgres
+	@rm -rf data/web-postgres
+	@mkdir -p data/web-postgres
 	@echo "Postgres data dir recreated. Run 'make up' to start with an empty DB."
 
 # ── Informational output ────────────────────────────────────────────
@@ -86,7 +86,6 @@ info:
 ensure-data-dirs:
 	@mkdir -p data/zomboid/Lua data/server/media/texturepacks data/backups \
 		data/map-tiles/html/map_data/base \
-		data/postgres data/redis \
 		data/caddy-data data/caddy-config data/web-postgres
 	@if [ ! -f data/map-tiles/html/map_data/base/map_info.json ] && [ -f web/tools/map-tiles/map_info.vanilla.json ]; then \
 		cp web/tools/map-tiles/map_info.vanilla.json data/map-tiles/html/map_data/base/map_info.json; \
@@ -127,8 +126,7 @@ nuke:
 		find data -mindepth 1 -maxdepth 1 ! -name map-tiles -exec rm -rf {} +; \
 	fi
 	@mkdir -p data/zomboid/Lua data/server data/backups data/map-tiles \
-		data/postgres data/redis \
-		data/caddy-data data/caddy-config
+		data/caddy-data data/caddy-config data/web-postgres
 	@rm -f .env .firewall.conf
 	@rm -f caddy/Caddyfile caddy/certs/cert.pem caddy/certs/key.pem
 	@echo "Nuke complete. ./data and config removed."
@@ -331,8 +329,8 @@ arch:
 # ── Database ─────────────────────────────────────────────────────────
 db-backup:
 	@mkdir -p db-backups
-	@echo "Backing up database..."
-	@docker exec pz-db pg_dump -U zomboid -d zomboid --no-owner \
+	@echo "Backing up panel database (web-db)..."
+	@docker exec pz-web-db pg_dump -U knox -d knox --no-owner \
 		> db-backups/backup-$$(date +%Y%m%d-%H%M%S).sql 2>/dev/null \
 		&& echo "Backup saved to db-backups/" \
 		|| echo "No database to backup (first run?)"
@@ -343,7 +341,7 @@ db-restore:
 		echo "No backups found in db-backups/"; \
 	else \
 		echo "Restoring from $$LATEST ..."; \
-		docker exec -i pz-db psql -U zomboid -d zomboid < "$$LATEST"; \
+		docker exec -i pz-web-db psql -U knox -d knox < "$$LATEST"; \
 		echo "Restored."; \
 	fi
 
@@ -527,15 +525,15 @@ help:
 	@echo "                     (ports read from .firewall.conf, set during 'make init')"
 	@echo ""
 	@echo "  Database:"
-	@echo "    db-check       - Check if DB volume exists, create if not"
-	@echo "    db-init        - Create DB volume (empty) if it doesn't exist"
-	@echo "    db-reset       - Reset DB volume (DANGER: deletes data)"
-	@echo "    db-backup      - Backup database to db-backups/"
+	@echo "    db-check       - Ensure ./data/web-postgres exists"
+	@echo "    db-init        - Ensure ./data/web-postgres exists"
+	@echo "    db-reset       - Reset panel DB (DANGER: deletes data/web-postgres)"
+	@echo "    db-backup      - Backup web-db to db-backups/"
 	@echo "    db-restore     - Restore latest backup from db-backups/"
 	@echo ""
-	@echo "  App:"
-	@echo "    migrate        - Run database migrations"
-	@echo "    test           - Run tests in the app container"
+	@echo "  Panel:"
+	@echo "    web-test       - Rust API tests"
+	@echo "    web-check      - clippy + fmt + tsc + eslint"
 	@echo "    rebuild        - Rebuild images from upstream bases, then start"
 	@echo "    rebuild-game   - Rebuild game-server only"
 	@echo "    map-tiles      - Render the isometric basemap locally (hours, ~15 GB)"

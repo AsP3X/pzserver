@@ -186,18 +186,18 @@ listening.
 warning, no error, the `ports:` entry simply has no effect. Confirmed on Docker
 29.6.2.
 
-**Fix.** The service must also join a non-internal network. In `docker-compose.yml`
-the `app` service joins both:
+**Fix.** The service must also join a non-internal network. `web-ui` already
+does this in `docker-compose.web.yml`:
 
 ```yaml
     networks:
       - proxy-network      # non-internal: makes `ports:` actually bind
-      - pzserver-internal  # private: db, redis, RCON
+      - pzserver-internal  # private: nginx → web-api, RCON
 ```
 
-If you are on an older checkout where `app` lists only `pzserver-internal`, add
-`proxy-network` above it, then recreate the container so it picks up the new
-network (a restart is not enough — network membership is set at creation):
+If you are on an older checkout where `web-ui` lists only `pzserver-internal`,
+add `proxy-network` above it, then recreate the container so it picks up the
+new network (a restart is not enough — network membership is set at creation):
 
 ```bash
 make down && make up
@@ -205,13 +205,13 @@ make down && make up
 
 This affected `WEB_PROXY_MODE=local` (the default). `caddy` and `npm` modes were
 unaffected in practice, because Caddy and the NPM alias both put a proxy on
-`proxy-network` in front of the app.
+`proxy-network` in front of `web-ui`.
 
 **The same rule applies to any service you give a `ports:` entry.** Every published
-port in this project is on a non-internal network: `app`, `game-server`, `caddy`
-and `web-ui` join `proxy-network`; `web-db` in `docker-compose.web-dev.yml` joins
-the `pzweb-dev` bridge. Services with no published ports (`queue`, `db`, `redis`,
-`docker-socket-proxy`, `web-api`) stay internal-only on purpose.
+port in this project is on a non-internal network: `web-ui`, `game-server`, and
+`caddy` join `proxy-network`; `web-db` in `docker-compose.web-dev.yml` joins
+the `pzweb-dev` bridge. Services with no published ports (`web-api`,
+`docker-socket-proxy`) stay internal-only on purpose.
 
 To check quickly that a published port really bound:
 
@@ -228,41 +228,37 @@ make init
 
 ## Player map has no basemap / only a grid
 
-> **Currently unavailable.** The player map was a Laravel feature of the `app`
-> container, parked in `c318e99`, and the Rust API has no map routes. The steps
-> below apply only to a stack still running the PHP panel.
+The schematic **vector** pack ships with the UI (`/map/vanilla.json`) and needs
+no generate step. Switch to **Vector (2D)** on the map if isometric is empty.
 
-1. By default the map uses **proxy tiles** (map.projectzomboid.com). If those fail (offline host, blocked CDN, CORS), the basemap may be empty.
-2. Optional: generate **local** tiles from the panel (**Admin → Player map → Generate local tiles**) or:
+For **3D isometric**, this stack has no CDN fallback. You need a local pack:
 
 ```bash
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --force
-# or: docker compose exec app php artisan zomboid:generate-map-tiles --force
+make map-tiles              # hours; needs PZ client texture packs first
+make map-tiles-import       # if you already copied tiles.sqlite into data/map-tiles/
 ```
 
-3. Check logs: `app/storage/logs/map-tiles.log` and `app/storage/logs/pzmap2dzi.log`.
-4. After a successful run you should have **one** file: `data/map-tiles/tiles.sqlite` (not millions of images). Full guide: [map-tiles.md](map-tiles.md).
+After a successful run the live pack is one file on the `pz-map-tiles-sqlite`
+volume (scratch HTML stays under `data/map-tiles/`). Full guide: [map-tiles.md](map-tiles.md).
+
+**Sprite isometric** is a separate pack: `make map-sprites`. See [map-sprites.md](map-sprites.md).
 
 ## Millions of files under `data/map-tiles/` (slow backup / delete)
 
-Older runs left a raw DZI pyramid (`html/map_data/base/layer0_files/`). Pack it into a single SQLite file and remove the loose tree:
-
-```bash
-docker exec -it pz-app php artisan zomboid:generate-map-tiles --pack-only
-# or: docker compose exec app php artisan zomboid:generate-map-tiles --pack-only
-```
-
-Confirm `data/map-tiles/tiles.sqlite` exists and the `layer0_files` directory is gone. New generates pack automatically after render.
+Older runs left a raw DZI pyramid (`html/map_data/base/layer0_files/`). New
+generates pack into `tiles.sqlite` and delete the loose tree. If a leftover
+pyramid is still on disk, run `make map-tiles` (it packs at the end) or copy a
+finished `tiles.sqlite` in and `make map-tiles-import`.
 
 If `rm` of the old tree is still running, let it finish once; afterward you only manage one pack file. Details: [map-tiles.md](map-tiles.md).
 
 ## Map tile generation stuck or failed
 
 1. Ensure the game server has finished SteamCMD install (`data/server/media` exists).
-2. Generation needs Python3 + pzmap2dzi inside the **app** container (bundled in the image).
-3. Prefer idle host time; render can take a long time and uses a lot of RAM/CPU.
-4. Stale lock file after a crash: remove `app/storage/app/map-tiles.generating` if generation is not actually running, then retry.
-5. Re-pack without re-render if the pyramid finished but packing failed: `--pack-only`.
+2. Texture packs must exist at `data/server/media/texturepacks` (or `PZ_TEXTUREPACKS_HOST`). The dedicated server does not ship them — copy from a PZ client.
+3. Prefer idle host time; a full county render takes hours and uses a lot of RAM/CPU.
+4. Watch the job log from the panel (**Configuration → Update map…**) or `make map-tiles` stdout. Regional jobs also write `job.log` next to the pack.
+5. Do not insert rows into `map_tile_jobs` by hand. `status='running'` is a dry-run animation.
 
 ## Cloud Provider Notes
 

@@ -91,7 +91,7 @@ function Show-Help {
     Write-Host "    -NoColor                         Disable coloured output"
     Write-Host ""
     Write-Line "  Service names (for -Logs / -Restart):" "White"
-    Write-Host "    game-server  web-api  web-ui  web-db  db  redis  docker-socket-proxy"
+    Write-Host "    game-server  web-api  web-ui  web-db  docker-socket-proxy"
     Write-Host ""
     Write-Line "  After deploy:" "White"
     Write-Host "    Panel:   http://localhost:$webUiPort  (default WEB_UI_PORT; -Status shows the real one)"

@@ -1,7 +1,7 @@
 # Second web stack — Rust API + Vite UI
 
-The replacement for the Laravel + Inertia stack in `app/`. Both run side by
-side during the port; nothing here modifies the PHP stack or its database.
+The live web stack. It replaced the Laravel + Inertia tree that used to live
+in `app/`. That PHP stack is gone; this is the only panel.
 
 The **KnoxRelay game mod is unchanged**. This stack reads the same JSON exports
 the mod already writes into the shared `Lua/` directory.
@@ -50,12 +50,10 @@ Adding a page is one entry in one array plus one route under the matching layout
 listed and marked `soon` rather than hidden, so the shape of what is coming is
 visible without shipping dead links.
 
-**Built so far:** landing, status, rankings, sign in, register, 404, player
-overview, character, inventory, settings, admin overview.
-
-**Not built yet:** news, obituary, public profiles, the rest of the player area
-(map, vault, wallet, purchases, reports), the shop, and every admin section
-beyond the overview. The old stack still owns all of that.
+The UI covers the public site, player area, shop/vault/wallet, and the admin
+panel. Three admin nav entries are still marked planned (vehicles, shop
+promotions, Discord). Stripe subscriptions from the original plan were never
+built.
 
 ## The inventory
 

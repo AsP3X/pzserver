@@ -12,7 +12,7 @@ When you run `make expose`, `make hide`, `make admin-expose`, or `make admin-hid
 | `16262` | UDP | PZ direct connection | `make expose` — for players to connect |
 | *Caddy HTTP* | TCP | HTTP redirect to HTTPS | `make admin-expose` — for public admin |
 | *Caddy HTTPS* | TCP | Admin panel (HTTPS) | `make admin-expose` — for public admin |
-| `8000` | TCP | App (local only) | **Never expose** — stays on `127.0.0.1` |
+| `8100` | TCP | Panel (local only) | **Never expose** — `web-ui` binds `127.0.0.1:8100` |
 
 > Caddy ports default to 80/443 but can be customized during `make init`. Check `.firewall.conf` or run `make info` to see your configured ports.
 

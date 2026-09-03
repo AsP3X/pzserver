@@ -525,12 +525,8 @@ fi
 echo ""
 echo -e "${BOLD}Generating secrets...${NC}"
 
-DB_PASS=$(generate_secret 18 24)
 RCON_PASS=$(generate_secret 18 16)
 PZ_ADMIN_PASS=$(generate_secret 18 16)
-API_SECRET=$(generate_secret 32 48)
-APP_SECRET=$(openssl rand -base64 32)
-REDIS_PASS=$(generate_secret 18 20)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Generate self-signed certificate (IP mode only)
@@ -629,16 +625,10 @@ sed \
     -e "s|^PZ_MAX_RAM=.*|PZ_MAX_RAM=${PZ_MAX_RAM}|" \
     -e "s|^PZ_RCON_PASSWORD=.*|PZ_RCON_PASSWORD=${RCON_PASS}|" \
     -e "s|^PZ_STEAM_BRANCH=.*|PZ_STEAM_BRANCH=${PZ_STEAM_BRANCH}|" \
-    -e "s|^APP_ENV=.*|APP_ENV=${APP_ENV}|" \
-    -e "s|^APP_KEY=.*|APP_KEY=base64:${APP_SECRET}|" \
-    -e "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" \
-    -e "s|^APP_URL=.*|APP_URL=${APP_URL}|" \
     -e "s|^WEB_PROXY_MODE=.*|WEB_PROXY_MODE=${WEB_PROXY_MODE}|" \
     -e "s|^CADDY_HTTP_PORT=.*|CADDY_HTTP_PORT=${CADDY_HTTP_PORT}|" \
     -e "s|^CADDY_HTTPS_PORT=.*|CADDY_HTTPS_PORT=${CADDY_HTTPS_PORT}|" \
-    -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" \
-    -e "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" \
-    -e "s|^API_KEY=.*|API_KEY=${API_SECRET}|" \
+    -e "s|^WEB_PUBLIC_URL=.*|WEB_PUBLIC_URL=${APP_URL}|" \
     -e "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=${ADMIN_USERNAME}|" \
     -e "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=${ADMIN_EMAIL}|" \
     -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
@@ -653,8 +643,7 @@ sed -i \
     -e "s|^PZ_BACKUPS_HOST=./data/backups|PZ_BACKUPS_HOST=${REPO_ROOT}/data/backups|" \
     -e "s|^PZ_MAP_TILES_HOST=./data/map-tiles|PZ_MAP_TILES_HOST=${REPO_ROOT}/data/map-tiles|" \
     -e "s|^PZ_TEXTUREPACKS_HOST=./data/server/media/texturepacks|PZ_TEXTUREPACKS_HOST=${REPO_ROOT}/data/server/media/texturepacks|" \
-    -e "s|^PZ_POSTGRES_HOST=./data/postgres|PZ_POSTGRES_HOST=${REPO_ROOT}/data/postgres|" \
-    -e "s|^PZ_REDIS_HOST=./data/redis|PZ_REDIS_HOST=${REPO_ROOT}/data/redis|" \
+    -e "s|^PZ_WEB_POSTGRES_HOST=./data/web-postgres|PZ_WEB_POSTGRES_HOST=${REPO_ROOT}/data/web-postgres|" \
     .env
 
 # app/.env was generated here for the Laravel panel. The app tree was removed
@@ -667,8 +656,7 @@ echo "Ensuring host data directories (./data/*)..."
 mkdir -p \
     data/zomboid/Lua data/server/media/texturepacks data/backups \
     data/map-tiles/html/map_data/base \
-    data/postgres data/redis \
-    data/caddy-data data/caddy-config
+    data/caddy-data data/caddy-config data/web-postgres
 if [ ! -f data/map-tiles/html/map_data/base/map_info.json ] && \
    [ -f web/tools/map-tiles/map_info.vanilla.json ]; then
     cp web/tools/map-tiles/map_info.vanilla.json \
@@ -677,7 +665,7 @@ fi
 bash scripts/prepare-map-tiles.sh
 # Containers may run as various UIDs — make host dirs writable.
 # Do NOT chmod -R all of ./data (map-tiles / postgres can be huge and hang setup).
-for _d in zomboid server backups map-tiles postgres redis app-vendor app-node-modules app-build caddy-data caddy-config; do
+for _d in zomboid server backups map-tiles caddy-data caddy-config web-postgres; do
     chmod a+rwx "data/${_d}" 2>/dev/null || true
 done
 chmod -R a+rwX data/zomboid/Lua 2>/dev/null || true
@@ -748,22 +736,6 @@ if [ -f game-version.conf ]; then
     fi
 fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Sync passwords into existing volumes (re-run safe)
-# ══════════════════════════════════════════════════════════════════════════════
-# PostgreSQL: volume retains the password from the first initdb — sync it
-echo "Syncing database password..."
-docker exec pz-db psql -U "${DB_USERNAME:-zomboid}" -d "${DB_DATABASE:-zomboid}" \
-    -c "ALTER USER ${DB_USERNAME:-zomboid} PASSWORD '${DB_PASS}';" >/dev/null 2>&1 || true
-
-# Redis: update requirepass to match new password
-echo "Syncing Redis password..."
-if [ -n "$REDIS_PASS" ]; then
-    # Try authenticating with old password first (may fail on first run — that's OK)
-    docker exec pz-redis redis-cli CONFIG SET requirepass "$REDIS_PASS" >/dev/null 2>&1 || \
-    docker exec pz-redis redis-cli -a "$REDIS_PASS" CONFIG SET requirepass "$REDIS_PASS" >/dev/null 2>&1 || true
-fi
-
 # The Laravel cache clears and zomboid:create-admin used to run here, against the
 # app container parked in c318e99. Neither has a successor to call: there is no
 # config cache to clear, and web-api creates the first administrator itself at
@@ -816,8 +788,6 @@ echo -e "  ${YELLOW}Save this password — it won't be shown again.${NC}"
 else
 echo -e "  ${BOLD}Admin Pass:${NC}    (as entered)"
 fi
-echo ""
-echo -e "  ${BOLD}API Key:${NC}       ${DIM}${API_SECRET}${NC}"
 echo ""
 
 # Game server status — check if SteamCMD failed and restart if needed

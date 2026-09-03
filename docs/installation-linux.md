@@ -1,108 +1,78 @@
-# Linux Installation
+# Linux install
 
-## Requirements
+You need a Linux host (x86_64 or ARM64) with Docker Engine and Compose v2.
+4 GB RAM is a floor; 8 GB is more realistic with the dedicated server running.
 
-You need a Linux server (Ubuntu, Debian, Fedora, etc.) with at least **4 GB RAM** (8 GB recommended). Works on both **x86_64** (AMD/Intel) and **ARM64** (Oracle Cloud free tier, Raspberry Pi 5, AWS Graviton, etc.) — architecture is auto-detected.
+| Tool | Notes |
+|------|--------|
+| Git | clone the repo |
+| Docker Engine | not Docker Desktop, unless you want it |
+| Compose v2 | `docker compose version` |
+| Make | `apt install make` / `dnf install make` |
+| OpenSSL, curl | usually already there |
 
-Install these before you begin:
-
-| # | Dependency | Notes |
-|---|-----------|-------|
-| 1 | **Git** | Pre-installed on most distros. [Install](https://git-scm.com/downloads/linux) |
-| 2 | **Docker Engine** | NOT Docker Desktop. [Install](https://docs.docker.com/engine/install/) |
-| 3 | **Docker Compose v2** | Bundled with Docker Engine via official install script |
-| 4 | **Make** | Usually pre-installed |
-| 5 | **OpenSSL** | Pre-installed on virtually all Linux distros |
-| 6 | **curl** | Pre-installed on most distros |
-
-### Quick Docker install (Ubuntu/Debian)
+Ubuntu/Debian Docker:
 
 ```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
-# Log out and back in after this
+# log out and back in
 ```
 
-### Verify Docker Compose
+## 1. Clone
 
 ```bash
-docker compose version
+git clone https://github.com/AsP3X/pzserver.git
+cd pzserver
 ```
 
-### Install Make (if missing)
-
-```bash
-# Ubuntu/Debian
-sudo apt install make
-
-# Fedora/RHEL
-sudo dnf install make
-```
-
-## Step 1 — Clone the repo
-
-```bash
-git clone https://github.com/YOUR_ORG/zomboid-manager.git
-cd zomboid-manager
-```
-
-## Step 2 — Run the setup wizard
+## 2. Wizard
 
 ```bash
 make init
 ```
 
-This interactive wizard will:
-- Ask you for server settings (name, password, max players, RAM)
-- Create an admin account for the web dashboard
-- Configure HTTPS (domain or self-signed certificate)
-- Auto-detect your firewall (ufw / firewalld / manual)
-- Generate all `.env` config files
-- Create the database volume
-- Build and start all Docker containers
-- Run database migrations
-- Provision your admin account
+That writes `.env`, creates `./data/*`, builds images, and starts
+`game-server`, `web-api`, `web-ui`, and `web-db`. Passwords are generated if
+you press Enter. sqlx migrations run when `web-api` starts.
 
-Just follow the prompts — sensible defaults are provided for everything. Passwords are auto-generated if you press Enter.
+`./deploy.sh` does the same on a fresh checkout, or just starts the stack if
+`.env` already exists.
 
-## Step 3 — Open game ports
+## 3. Game ports
 
-By default the game server ports are **closed**. To let players connect:
+Closed by default. For remote players:
 
 ```bash
-make expose
+make expose    # UDP 16261 and 16262
+make hide      # close them again
 ```
 
-This opens UDP ports 16261-16262 in your firewall. To close them again:
+Forward those UDP ports on the router for internet players.
 
-```bash
-make hide
+## 4. Panel
+
+Always on the host loopback:
+
+```
+http://127.0.0.1:8100
 ```
 
-## Step 4 — Access the admin panel
+Public HTTPS (Caddy):
 
-**Local access** (always available):
-```
-http://localhost:8100
-```
-
-**Remote/public access** via HTTPS:
 ```bash
 make admin-expose
 ```
 
-Log in with the admin credentials you set during setup.
+Log in with the admin user from `make init`.
 
-Optional: local player-map basemap tiles (packed as a single `tiles.sqlite` under `data/map-tiles/`) are documented in [map-tiles.md](map-tiles.md). Proxy tiles work without generation.
+Isometric map packs are optional: [map-tiles.md](map-tiles.md),
+[map-sprites.md](map-sprites.md). The vector schematic works with no generate
+step.
 
-## Step 5 — Connect in-game
+## 5. Join in-game
 
-In Project Zomboid:
-1. Click **Join** from the main menu
-2. Enter your server's public IP and port `16261`
-3. Enter the server password (if you set one)
+Project Zomboid → Join → your public IP, port `16261`. Server password if you
+set one. `make info` prints the public IP when it can.
 
-To find your server's public IP:
-```bash
-make info
-```
+Day-to-day commands: [commands.md](commands.md).

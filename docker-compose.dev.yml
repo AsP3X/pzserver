@@ -1,7 +1,0 @@
-# Optional development overlay — Vite HMR port for the parked Laravel UI.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.amd64.yml -f docker-compose.dev.yml up
-# Uncomment `app` in docker-compose.yml first; the live stack uses web-ui.
-# services:
-#   app:
-#     ports:
-#       - "127.0.0.1:5173:5173"

@@ -1,182 +1,57 @@
-# Windows Installation
+# Windows install
 
-> **Alpha:** Windows support is in alpha. The PowerShell scripts (`make.ps1`, `scripts/setup.ps1`) mirror the Linux Makefile but have not been extensively tested in production. Please report any issues you encounter.
+The PowerShell wrappers (`make.ps1`, `deploy.ps1`) talk to **Linux containers**.
+Windows-container mode is not supported.
 
-The PowerShell wrappers work on Windows, but this project still requires Linux containers.
+- Windows 10/11: Docker Desktop with Linux containers.
+- Windows Server: use a Linux VM (or WSL2) and follow [installation-linux.md](installation-linux.md).
 
-- Windows 10/11: Docker Desktop is the simplest option.
-- Windows Server 2022/2025: Windows-container mode is not supported for this stack. Use a Linux VM or another Linux Docker host.
-- WSL2 remains optional where it is available, but it is not the only path.
+## Docker Desktop (10/11)
 
----
-
-## Option A — Windows 10/11 with Native PowerShell
-
-PowerShell scripts (`make.ps1`, `scripts/setup.ps1`) are included as drop-in replacements for the Linux Makefile. On desktop Windows, the simplest backend is Docker Desktop with Linux containers enabled.
-
-### Requirements
-
-| # | Dependency | Link |
-|---|-----------|------|
-| 1 | **Docker Desktop for Windows** | [Install](https://docs.docker.com/desktop/setup/install/windows-install/) |
-| 2 | **Git for Windows** (includes OpenSSL) | [Install](https://git-scm.com/downloads/win) |
-
-> **Important:** In Docker Desktop Settings > General, make sure **"Use the WSL 2 based engine"** is enabled (this is the default). Docker Desktop runs Linux containers via its own WSL integration — you do NOT need to install WSL separately.
-
-### Steps
-
-**1. Clone the repo**
-
-Open PowerShell:
-```powershell
-git clone https://github.com/YOUR_ORG/zomboid-manager.git
-cd zomboid-manager
-```
-
-**2. Run the setup wizard**
+Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+and [Git for Windows](https://git-scm.com/downloads/win). In Docker Desktop,
+leave **Use the WSL 2 based engine** on.
 
 ```powershell
+git clone https://github.com/AsP3X/pzserver.git
+cd pzserver
 .\make.ps1 init
 ```
 
-Same interactive wizard as Linux — configures everything, generates secrets, creates certs, and starts all Docker containers.
-
-For a first-run-or-start command that does either as needed:
+`.\deploy.ps1` runs the wizard on a fresh checkout, otherwise starts the stack.
 
 ```powershell
-.\deploy.ps1
+.\make.ps1 expose          # UDP 16261/16262 in Windows Firewall
 ```
 
-`.\deploy.ps1 -Help` lists the rest — `-Status`, `-Logs`, `-Restart`,
-`-Rebuild`, `-Down`.
+Panel: http://127.0.0.1:8100  
+Public Caddy: `.\make.ps1 admin-expose`
 
-**3. Open game ports**
+| Command | What it does |
+|---------|----------------|
+| `.\make.ps1 up` / `down` / `restart` | stack |
+| `.\make.ps1 logs` / `ps` / `info` | status |
+| `.\make.ps1 web-test` / `web-check` | panel tests |
+| `.\make.ps1 test-game-server` | Knox Relay Lua + shell tests |
+| `.\make.ps1 expose` / `hide` | game UDP |
+| `.\make.ps1 admin-expose` / `admin-hide` | Caddy TCP |
+| `.\make.ps1 db-backup` / `db-restore` | `web-db` |
+| `.\make.ps1 nuke` | destroy `./data` (**danger**) |
 
-```powershell
-.\make.ps1 expose
-```
+`.\deploy.ps1 -Help` lists the same surface.
 
-This creates Windows Firewall rules automatically.
+Map packs: [map-tiles.md](map-tiles.md), [map-sprites.md](map-sprites.md).
 
-**4. Access the admin panel**
+## Linux VM on Windows Server
 
-- **Local:** http://localhost:8100
-- **Public:** `.\make.ps1 admin-expose`
+Install Docker Engine inside an Ubuntu VM, clone this repo there, then follow
+the Linux guide. Open host firewall / NAT for UDP 16261–16262.
 
-Optional: local player-map basemap tiles (packed as a single `tiles.sqlite` under `data/map-tiles/`) are documented in [map-tiles.md](map-tiles.md). Proxy tiles work without generation.
+## WSL2 (Linux commands on Windows)
 
-### PowerShell command reference
-
-| Command | Description |
-|---------|-------------|
-| `.\make.ps1 up` | Start all services |
-| `.\make.ps1 deploy` | Start services, or run setup if env is missing |
-| `.\make.ps1 down` | Stop all services |
-| `.\make.ps1 restart` | Restart all services |
-| `.\make.ps1 logs` | Follow live logs |
-| `.\make.ps1 ps` | Show running containers |
-| `.\make.ps1 info` | Show URLs, IP, and firewall status |
-| `.\make.ps1 test` | Run the test suite |
-| `.\make.ps1 exec "CMD"` | Run command in app container |
-| `.\make.ps1 expose` | Open game ports (UDP) |
-| `.\make.ps1 hide` | Close game ports (UDP) |
-| `.\make.ps1 admin-expose` | Open admin HTTPS ports |
-| `.\make.ps1 admin-hide` | Close admin HTTPS ports |
-| `.\make.ps1 db-backup` | Backup database |
-| `.\make.ps1 db-restore` | Restore latest backup |
-| `.\make.ps1 nuke` | Destroy ALL data (danger) |
-| `.\make.ps1 help` | Show all commands |
-
-One-command deploy:
-
-| Script | Description |
-|--------|-------------|
-| `.\deploy.ps1` | Runs the wizard on a fresh checkout, otherwise starts the stack |
-| `.\deploy.ps1 -Status` | URLs, web mode, firewall state and the container table |
-| `.\deploy.ps1 -Logs [svc...]` | Follow logs for all services, or the named ones |
-| `.\deploy.ps1 -Rebuild` | Rebuild images from their upstream bases, then start |
-| `.\deploy.ps1 -Help` | The full command surface |
-
----
-
-## Option B — Windows Server with a Linux VM or Linux Docker host
-
-Windows Server cannot run this stack in Windows-container mode. If you want to stay off WSL, run Docker Engine inside a Linux VM on the server.
-
-Typical layout:
-
-1. Create an Ubuntu VM on the Windows Server host (for example with Hyper-V).
-2. Install Docker Engine and Docker Compose inside that VM.
-3. Clone this repo inside the VM.
-4. Follow the Linux guide there: [installation-linux.md](installation-linux.md)
-5. Open Windows Firewall and router/NAT rules on the Windows Server host as needed.
-
-Use this option when you specifically want Windows Server hosting without relying on WSL.
-
----
-
-## Option C — WSL2 (use Linux commands on Windows)
-
-If you prefer the Linux Makefile and bash scripts directly, install WSL2 and run everything inside Ubuntu.
-
-### Steps
-
-**1. Enable WSL2**
-
-Open PowerShell as Administrator:
 ```powershell
 wsl --install -d Ubuntu-24.04
 ```
 
-Reboot when prompted, then open "Ubuntu" from Start Menu to finish setup (pick a username and password).
-
-**2. Install Docker Engine inside WSL** (not Docker Desktop)
-
-Inside the Ubuntu WSL terminal:
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-```
-
-Close and reopen the Ubuntu terminal.
-
-**3. Start Docker daemon**
-
-```bash
-sudo service docker start
-```
-
-To make Docker start automatically, add this to `~/.bashrc`:
-```bash
-[ -z "$(pgrep dockerd)" ] && sudo service docker start >/dev/null 2>&1
-```
-
-**4. Clone and run (same as Linux)**
-
-```bash
-git clone https://github.com/YOUR_ORG/zomboid-manager.git
-cd zomboid-manager
-make init
-```
-
-**5. Open ports in Windows Firewall**
-
-Back in PowerShell (as Admin):
-```powershell
-netsh advfirewall firewall add rule name="PZ Game UDP" dir=in action=allow protocol=UDP localport=16261-16262
-netsh advfirewall firewall add rule name="PZ Admin HTTPS" dir=in action=allow protocol=TCP localport=443
-```
-
-> **Note:** `make expose` / `make admin-expose` manage the Linux firewall inside WSL. You ALSO need the Windows Firewall rules above for external access.
-
-**6. WSL port forwarding (if needed)**
-
-WSL2 uses a virtual network. If external clients can't reach the server, forward ports from Windows to WSL:
-
-```powershell
-netsh interface portproxy add v4tov4 listenport=16261 listenaddress=0.0.0.0 connectport=16261 connectaddress=$(wsl hostname -I)
-```
-
-Repeat for ports 16262, 80, and 443.
-
-> **Tip:** Everything after step 2 happens inside the WSL Ubuntu terminal. Treat it like a regular Linux machine.
+Inside Ubuntu, install Docker Engine (`curl -fsSL https://get.docker.com | sh`),
+then follow [installation-linux.md](installation-linux.md).
