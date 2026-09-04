@@ -310,6 +310,7 @@ test-game-server:
 		luajit game-server/tests/kr-enrol.test.lua && \
 		luajit game-server/tests/kr-report.test.lua && \
 		luajit game-server/tests/kr-friends.test.lua && \
+		luajit game-server/tests/kr-friend-map.test.lua && \
 		luajit game-server/tests/kr-console.test.lua && \
 		luajit game-server/tests/kr-desk.test.lua; \
 	else \

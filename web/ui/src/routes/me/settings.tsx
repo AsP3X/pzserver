@@ -9,7 +9,7 @@ import { api, ApiError, type TwoFactorEnrolment } from '@/lib/api'
 import { useChangePassword, useCurrentUser } from '@/lib/auth'
 import { cn } from '@/lib/cn'
 import { splitError } from '@/lib/form-error'
-import { twoFactorStatusQuery } from '@/lib/queries'
+import { myPrivacyQuery, twoFactorStatusQuery } from '@/lib/queries'
 import { useTranslation } from '@/i18n/use-translation'
 
 const MIN_PASSWORD_LENGTH = 10
@@ -49,9 +49,62 @@ export function SettingsPage() {
       </div>
 
       <div className="max-w-2xl">
+        <MapPrivacyPanel />
+      </div>
+
+      <div className="max-w-2xl">
         <TwoFactorPanel />
       </div>
     </section>
+  )
+}
+
+function MapPrivacyPanel() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const privacy = useQuery(myPrivacyQuery)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: (shareMap: boolean) => api.setPrivacy(shareMap),
+    onSuccess: (next) => {
+      setError(null)
+      queryClient.setQueryData(myPrivacyQuery.queryKey, next)
+      void queryClient.invalidateQueries({ queryKey: ['me', 'friends'] })
+    },
+    onError: (cause) => {
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
+  const settings = privacy.data
+
+  return (
+    <Panel bracketed>
+      <PanelHeader label={t('account.map_privacy')} />
+      <div className="flex flex-col gap-3 p-4">
+        <p className="text-sm text-smoke">{t('account.map_privacy_hint')}</p>
+        {error ? <FormError>{error}</FormError> : null}
+        {privacy.isPending || !settings ? (
+          <Skeleton className="h-10" />
+        ) : (
+          <>
+            <label className="flex items-center gap-2 text-sm text-bone">
+              <input
+                type="checkbox"
+                checked={settings.share_map}
+                disabled={save.isPending || !settings.map_enabled}
+                onChange={(event) => save.mutate(event.target.checked)}
+              />
+              {t('account.share_map')}
+            </label>
+            {!settings.map_enabled ? (
+              <p className="text-xs text-dust">{t('account.share_map_disabled')}</p>
+            ) : null}
+          </>
+        )}
+      </div>
+    </Panel>
   )
 }
 

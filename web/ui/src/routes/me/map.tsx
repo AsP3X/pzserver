@@ -73,6 +73,13 @@ export function MapPage() {
           </div>
           <h1 className="display mt-2 text-2xl text-bone sm:text-3xl">{t('map.title')}</h1>
           <p className="mt-2 max-w-2xl text-sm text-smoke">{t('map.description')}</p>
+          {friends.data && friends.data.map_enabled === false ? (
+            <p className="mt-2 text-xs text-dust">{t('map.friends_disabled')}</p>
+          ) : friendPins.length > 0 ? (
+            <p className="mt-2 text-xs text-dust">
+              {t('map.friends_visible', { count: friendPins.length })}
+            </p>
+          ) : null}
         </div>
         {position ? (
           <Button
@@ -162,6 +169,18 @@ export function MapPage() {
             onPick={setCursor}
             className="min-h-64 flex-1"
           />
+          {friendPins.length > 0 ? (
+            <ul className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-dust">
+              <li className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="size-2" style={{ background: '#8bb04a' }} />
+                {t('map.friends_online')}
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="size-2" style={{ background: '#9ca392' }} />
+                {t('map.friends_offline')}
+              </li>
+            </ul>
+          ) : null}
         </>
       )}
     </section>

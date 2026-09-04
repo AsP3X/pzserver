@@ -19,6 +19,7 @@ description=[*]Optional PvP safe zones with violation logging
 description=[*]Records player-versus-player kills
 description=[*]Provides /account register so a player can link their character to a website account
 description=[*]Provides /report so a player can file a report on another player from inside the game
+description=[*]Optional friend map pins on the in-game map and the website map, which each player or the admin can turn off
 description=[/list]
 description=
 description=[h1]Important[/h1]

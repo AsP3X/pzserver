@@ -1,11 +1,13 @@
 {
-  "mod_version": "1.27",
+  "mod_version": "1.31",
   "features": [
     "force_snapshot",
     "panel_jobs",
     "held_vault",
     "desk_inbox",
-    "case_insensitive_roster"
+    "case_insensitive_roster",
+    "friends",
+    "friend_map"
   ],
   "paused": false
 }

@@ -785,9 +785,16 @@ async fn ticket_desk_loop(state: AppState) {
 async fn friends_desk_loop(state: AppState) {
     let mut ticker = tokio::time::interval(REGISTRATION_INTERVAL);
     let channel = pz_bridge::FriendsChannel::new(&state.config.lua_bridge_path);
-    let online = state.status.current().await.players;
-    crate::services::friends::rebuild_inbox(&state.db, &state.config.lua_bridge_path, &online)
-        .await;
+    let (online, live) = friend_presence(&state).await;
+    crate::services::friends::rebuild_inbox(
+        &state.db,
+        &state.config.lua_bridge_path,
+        &online,
+        &live,
+    )
+    .await;
+
+    let mut since_positions = 0u32;
 
     loop {
         ticker.tick().await;
@@ -800,11 +807,8 @@ async fn friends_desk_loop(state: AppState) {
             }
         };
 
-        if box_.requests.is_empty() {
-            continue;
-        }
-
         let pending = std::mem::take(&mut box_.requests);
+        let had_work = !pending.is_empty();
         let mut leftover = Vec::new();
         let mut touched: HashSet<String> = HashSet::new();
         let mut new_results = Vec::new();
@@ -860,9 +864,11 @@ async fn friends_desk_loop(state: AppState) {
             }
         }
 
-        box_.requests = leftover;
-        if let Err(error) = channel.write_outbox(box_).await {
-            tracing::error!(%error, "could not rewrite the friends outbox");
+        if had_work {
+            box_.requests = leftover;
+            if let Err(error) = channel.write_outbox(box_).await {
+                tracing::error!(%error, "could not rewrite the friends outbox");
+            }
         }
 
         if !new_results.is_empty() {
@@ -881,18 +887,54 @@ async fn friends_desk_loop(state: AppState) {
             }
         }
 
-        if !touched.is_empty() {
-            let names: Vec<&str> = touched.iter().map(String::as_str).collect();
-            let online = state.status.current().await.players;
-            crate::services::friends::refresh_inbox(
-                &state.db,
-                &state.config.lua_bridge_path,
-                &names,
-                &online,
-            )
-            .await;
+        since_positions += 1;
+        if !touched.is_empty() || since_positions >= 3 {
+            since_positions = 0;
+            let (online, live) = friend_presence(&state).await;
+            if !touched.is_empty() {
+                let names: Vec<&str> = touched.iter().map(String::as_str).collect();
+                crate::services::friends::refresh_inbox(
+                    &state.db,
+                    &state.config.lua_bridge_path,
+                    &names,
+                    &online,
+                    &live,
+                )
+                .await;
+            } else {
+                crate::services::friends::rebuild_inbox(
+                    &state.db,
+                    &state.config.lua_bridge_path,
+                    &online,
+                    &live,
+                )
+                .await;
+            }
         }
     }
+}
+
+async fn friend_presence(
+    state: &AppState,
+) -> (Vec<String>, Vec<crate::services::friends::LiveMark>) {
+    let online = state.status.current().await.players;
+    let live = match state.bridge.players_live().await {
+        Ok(Some(read)) => read
+            .data
+            .players
+            .into_iter()
+            .map(|player| crate::services::friends::LiveMark {
+                username: player.username,
+                x: player.x,
+                y: player.y,
+                z: player.z,
+                appearance: player.appearance,
+            })
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(_) => Vec::new(),
+    };
+    (online, live)
 }
 
 /// Record how many players were online, for the population graph.

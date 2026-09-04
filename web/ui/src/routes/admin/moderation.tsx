@@ -22,6 +22,7 @@ import { formatDateTime, formatNumber, formatRelativeTime } from '@/lib/format'
 import { fuzzyMatch } from '@/lib/fuzzy'
 import {
   adminEventsQuery,
+  adminFriendsMapQuery,
   adminPlayersQuery,
   adminRespawnQuery,
   adminSanctionsQuery,
@@ -642,6 +643,8 @@ export function AdminModerationPage() {
         </div>
       )}
 
+      <FriendMapPanel />
+
       <RespawnPanel />
 
       <ConfirmDialog
@@ -658,6 +661,59 @@ export function AdminModerationPage() {
         }}
       />
     </section>
+  )
+}
+
+function FriendMapPanel() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const { data, isPending } = useQuery(adminFriendsMapQuery)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: (mapEnabled: boolean) => api.adminSetFriendsMap(mapEnabled),
+    onSuccess: (next) => {
+      setError(null)
+      queryClient.setQueryData(adminFriendsMapQuery.queryKey, next)
+    },
+    onError: (cause) => {
+      setError(cause instanceof ApiError ? cause.message : t('auth.unexpected_error'))
+    },
+  })
+
+  return (
+    <Panel bracketed className="shrink-0">
+      <PanelHeader
+        label={t('admin.friends_map_title')}
+        action={
+          <span
+            className={cn(
+              'font-mono text-[0.6875rem] tracking-widest uppercase',
+              data?.map_enabled ? 'text-hazard' : 'text-dust',
+            )}
+          >
+            {t(data?.map_enabled ? 'common.enabled' : 'common.disabled')}
+          </span>
+        }
+      />
+      <div className="flex flex-col gap-3 p-4">
+        <p className="text-xs text-dust">{t('admin.friends_map_description')}</p>
+        {error ? <FormError>{error}</FormError> : null}
+        {isPending || !data ? (
+          <Skeleton className="h-10" />
+        ) : (
+          <label className="flex items-center gap-2 text-sm text-bone">
+            <input
+              type="checkbox"
+              checked={data.map_enabled}
+              disabled={save.isPending}
+              onChange={(event) => save.mutate(event.target.checked)}
+            />
+            {t('admin.friends_map_enabled')}
+          </label>
+        )}
+      </div>
+    </Panel>
   )
 }
 

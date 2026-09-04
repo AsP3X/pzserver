@@ -168,6 +168,12 @@ pub struct FriendSnapshot {
     #[serde(default)]
     pub their_share_position: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
 }
 
@@ -279,6 +285,9 @@ mod tests {
                     online: true,
                     share_position: true,
                     their_share_position: true,
+                    x: Some(1000.0),
+                    y: Some(2000.0),
+                    z: Some(0),
                     created_at: Some("now".to_owned()),
                 }],
                 outgoing: vec![],

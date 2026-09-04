@@ -100,7 +100,8 @@ export const SANDBOX_FEATURED_KEYS = [
 const VISIBILITY: readonly SettingOption[] = [
   { value: '1', label: 'admin.config_opt_hidden' },
   { value: '2', label: 'admin.config_opt_friends' },
-  { value: '3', label: 'admin.config_opt_everyone' },
+  { value: '3', label: 'admin.config_opt_friends_nearby' },
+  { value: '4', label: 'admin.config_opt_everyone' },
 ]
 
 export const SERVER_INI_META: Record<string, SettingMeta> = {

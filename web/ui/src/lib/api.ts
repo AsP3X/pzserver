@@ -399,6 +399,16 @@ export interface FriendsView {
   outgoing: FriendCard[]
   friends: FriendCard[]
   blocked: FriendCard[]
+  map_enabled: boolean
+}
+
+export interface FriendPrivacy {
+  share_map: boolean
+  map_enabled: boolean
+}
+
+export interface FriendsMapSettings {
+  map_enabled: boolean
 }
 
 export type FriendRelation =
@@ -1480,6 +1490,16 @@ export const api = {
 
   setFriendShare: (id: string, sharePosition: boolean) =>
     patch<FriendCard>(`/api/v1/me/friends/${id}`, { share_position: sharePosition }),
+
+  myPrivacy: () => request<FriendPrivacy>('/api/v1/me/privacy'),
+
+  setPrivacy: (shareMap: boolean) =>
+    patch<FriendPrivacy>('/api/v1/me/privacy', { share_map: shareMap }),
+
+  adminFriendsMap: () => request<FriendsMapSettings>('/api/v1/admin/friends-map'),
+
+  adminSetFriendsMap: (mapEnabled: boolean) =>
+    patch<FriendsMapSettings>('/api/v1/admin/friends-map', { map_enabled: mapEnabled }),
 
   register: (input: RegisterInput) =>
     post<SessionResponse>('/api/v1/auth/register', input),

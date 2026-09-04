@@ -18,6 +18,7 @@ use crate::services::admin;
 use crate::services::audit;
 use crate::services::automations;
 use crate::services::backups;
+use crate::services::friends;
 use crate::services::reports;
 use crate::services::respawn;
 use crate::services::sanctions;
@@ -35,6 +36,10 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/sanctions", get(sanctions))
         .route("/admin/respawn", get(respawn_view).patch(configure_respawn))
         .route("/admin/respawn/{username}/reset", post(reset_respawn))
+        .route(
+            "/admin/friends-map",
+            get(friends_map_settings).patch(update_friends_map_settings),
+        )
         .route("/admin/players/{username}/access", post(access))
         .route("/admin/players/{username}/teleport", post(teleport))
         .route("/admin/players/{username}/inventory", get(inventory))
@@ -229,6 +234,50 @@ async fn configure_respawn(
     Ok(Json(
         respawn::configure(&state, body.enabled, body.delay_minutes).await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct FriendsMapBody {
+    map_enabled: bool,
+}
+
+async fn friends_map_settings(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<friends::MapSettings>> {
+    Ok(Json(friends::map_settings(&state.db).await?))
+}
+
+async fn update_friends_map_settings(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+    Json(body): Json<FriendsMapBody>,
+) -> ApiResult<Json<friends::MapSettings>> {
+    let settings = friends::set_map_enabled(&state.db, body.map_enabled).await?;
+    let (online, live) = friend_presence(&state).await;
+    friends::rebuild_inbox(&state.db, &state.config.lua_bridge_path, &online, &live).await;
+    Ok(Json(settings))
+}
+
+async fn friend_presence(state: &AppState) -> (Vec<String>, Vec<friends::LiveMark>) {
+    let online = state.status.current().await.players;
+    let live = match state.bridge.players_live().await {
+        Ok(Some(read)) => read
+            .data
+            .players
+            .into_iter()
+            .map(|player| friends::LiveMark {
+                username: player.username,
+                x: player.x,
+                y: player.y,
+                z: player.z,
+                appearance: player.appearance,
+            })
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(_) => Vec::new(),
+    };
+    (online, live)
 }
 
 /// Let one player back in early.

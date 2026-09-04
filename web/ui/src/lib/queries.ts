@@ -354,6 +354,18 @@ export const adminRespawnQuery = queryOptions({
   staleTime: 10_000,
 })
 
+export const myPrivacyQuery = queryOptions({
+  queryKey: ['me', 'privacy'],
+  queryFn: api.myPrivacy,
+  staleTime: 10_000,
+})
+
+export const adminFriendsMapQuery = queryOptions({
+  queryKey: ['admin', 'friends-map'],
+  queryFn: api.adminFriendsMap,
+  staleTime: 10_000,
+})
+
 export const adminDepositsQuery = queryOptions({
   queryKey: ['admin', 'deposits'],
   queryFn: api.adminDeposits,

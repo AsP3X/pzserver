@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
         .route("/me/friends/directory", get(friend_directory))
         .route("/me/friends/{id}", axum::routing::patch(patch_friend))
         .route("/me/friends/{id}/{action}", post(friend_action))
+        .route("/me/privacy", get(my_privacy).patch(update_privacy))
 }
 
 #[derive(Serialize)]
@@ -506,13 +507,38 @@ async fn friend_presence(state: &AppState) -> (Vec<String>, Vec<friends::LiveMar
     (online, live)
 }
 
+async fn my_privacy(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+) -> ApiResult<Json<friends::Privacy>> {
+    Ok(Json(friends::privacy(&state.db, user.id).await?))
+}
+
+#[derive(Deserialize)]
+struct PrivacyPatch {
+    share_map: bool,
+}
+
+async fn update_privacy(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Json(body): Json<PrivacyPatch>,
+) -> ApiResult<Json<friends::Privacy>> {
+    let privacy = friends::set_share_map(&state.db, user.id, body.share_map).await?;
+    let names = friends::friend_usernames(&state.db, user.id).await?;
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    refresh_friends(&state, &refs).await;
+    Ok(Json(privacy))
+}
+
 async fn refresh_friends(state: &AppState, names: &[&str]) {
-    let status = state.status.current().await;
+    let (online, live) = friend_presence(state).await;
     friends::refresh_inbox(
         &state.db,
         &state.config.lua_bridge_path,
         names,
-        &status.players,
+        &online,
+        &live,
     )
     .await;
 }

@@ -297,10 +297,12 @@ mod tests {
             .join("../../../../game-server/tests/contracts/game_state_features.json");
         let body = std::fs::read_to_string(&path).expect("contract");
         let state: WorldExport = serde_json::from_str(&body).expect("parse");
-        assert_eq!(state.mod_version.as_deref(), Some("1.27"));
+        assert_eq!(state.mod_version.as_deref(), Some("1.31"));
         assert!(state.has_feature("panel_jobs"));
         assert!(state.has_feature("held_vault"));
         assert!(state.has_feature("desk_inbox"));
+        assert!(state.has_feature("friends"));
+        assert!(state.has_feature("friend_map"));
     }
 
     #[tokio::test]

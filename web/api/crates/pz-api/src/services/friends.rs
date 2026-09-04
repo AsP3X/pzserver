@@ -5,6 +5,7 @@
 //! sides need a website account (created when they join) before a request
 //! can land.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
@@ -30,6 +31,8 @@ pub struct FriendsView {
     pub outgoing: Vec<FriendCard>,
     pub friends: Vec<FriendCard>,
     pub blocked: Vec<FriendCard>,
+    /// Server-wide switch. When false, nobody's pin is published to friends.
+    pub map_enabled: bool,
 }
 
 /// Someone the picker can search: a website account, or a character the
@@ -98,6 +101,8 @@ pub async fn view(
     online: &[String],
     live: &[LiveMark],
 ) -> Result<FriendsView, sqlx::Error> {
+    let map_enabled = map_enabled(db).await?;
+    let share_maps = share_map_by_name(db).await?;
     let rows = load_edges(db, user_id).await?;
     let mut incoming = Vec::new();
     let mut outgoing = Vec::new();
@@ -107,16 +112,16 @@ pub async fn view(
     for row in rows {
         match row.status.as_str() {
             "pending" if row.requested_by == user_id => {
-                outgoing.push(card(&row, online, live, db, false).await?);
+                outgoing.push(card(&row, online, live, db, false, map_enabled, &share_maps).await?);
             }
             "pending" => {
-                incoming.push(card(&row, online, live, db, false).await?);
+                incoming.push(card(&row, online, live, db, false, map_enabled, &share_maps).await?);
             }
             "accepted" => {
-                friends.push(card(&row, online, live, db, true).await?);
+                friends.push(card(&row, online, live, db, true, map_enabled, &share_maps).await?);
             }
             "blocked" if row.blocked_by == Some(user_id) => {
-                blocked.push(card(&row, online, live, db, false).await?);
+                blocked.push(card(&row, online, live, db, false, map_enabled, &share_maps).await?);
             }
             _ => {}
         }
@@ -127,6 +132,7 @@ pub async fn view(
         outgoing,
         friends,
         blocked,
+        map_enabled,
     })
 }
 
@@ -239,12 +245,13 @@ pub async fn inbox_slice(
     db: &PgPool,
     username: &str,
     online: &[String],
+    live: &[LiveMark],
 ) -> Result<Option<(String, pz_bridge::FriendsPlayerInbox)>, sqlx::Error> {
     let Some(user) = find_user(db, username).await? else {
         return Ok(None);
     };
 
-    let view = view(db, user.id, online, &[]).await?;
+    let view = view(db, user.id, online, live).await?;
     Ok(Some((
         user.username,
         pz_bridge::FriendsPlayerInbox {
@@ -258,16 +265,22 @@ pub async fn inbox_slice(
     )))
 }
 
-pub async fn refresh_inbox(db: &PgPool, lua_dir: &Path, usernames: &[&str], online: &[String]) {
+pub async fn refresh_inbox(
+    db: &PgPool,
+    lua_dir: &Path,
+    usernames: &[&str],
+    online: &[String],
+    live: &[LiveMark],
+) {
     let channel = pz_bridge::FriendsChannel::new(lua_dir);
-    if let Err(error) = write_inbox_slices(db, &channel, usernames, online).await {
+    if let Err(error) = write_inbox_slices(db, &channel, usernames, online, live).await {
         tracing::warn!(%error, "could not refresh the friends inbox");
     }
 }
 
 /// Rewrite every player who has a friendship row. Called on boot so a restart
 /// does not leave Desk looking at a file from before the last accept.
-pub async fn rebuild_inbox(db: &PgPool, lua_dir: &Path, online: &[String]) {
+pub async fn rebuild_inbox(db: &PgPool, lua_dir: &Path, online: &[String], live: &[LiveMark]) {
     let names = match sqlx::query_scalar::<_, String>(
         r#"
         SELECT DISTINCT name FROM (
@@ -295,7 +308,7 @@ pub async fn rebuild_inbox(db: &PgPool, lua_dir: &Path, online: &[String]) {
     };
 
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    refresh_inbox(db, lua_dir, &refs, online).await;
+    refresh_inbox(db, lua_dir, &refs, online, live).await;
 }
 
 async fn write_inbox_slices(
@@ -303,6 +316,7 @@ async fn write_inbox_slices(
     channel: &pz_bridge::FriendsChannel,
     usernames: &[&str],
     online: &[String],
+    live: &[LiveMark],
 ) -> Result<(), pz_bridge::friends::FriendsChannelError> {
     let mut inbox = channel.inbox().await?;
     inbox.version = 1;
@@ -314,7 +328,7 @@ async fn write_inbox_slices(
         if !seen.insert(key) {
             continue;
         }
-        match inbox_slice(db, name, online).await {
+        match inbox_slice(db, name, online, live).await {
             Ok(Some((stored, slice))) => {
                 inbox.players.insert(stored, slice);
             }
@@ -852,13 +866,21 @@ async fn card(
     live: &[LiveMark],
     db: &PgPool,
     include_position: bool,
+    map_enabled: bool,
+    share_maps: &HashMap<String, bool>,
 ) -> Result<FriendCard, sqlx::Error> {
     let is_online = character::is_online(online, &row.other_username);
     let live_mark = live
         .iter()
         .find(|mark| mark.username.eq_ignore_ascii_case(&row.other_username));
 
-    let position = if include_position && row.their_share_position {
+    let they_share_map = share_maps
+        .get(&row.other_username.to_ascii_lowercase())
+        .copied()
+        .unwrap_or(true);
+
+    let position = if include_position && map_enabled && row.their_share_position && they_share_map
+    {
         if let Some(mark) = live_mark {
             Some(FriendPosition {
                 x: mark.x,
@@ -912,8 +934,109 @@ fn snapshot(card: &FriendCard) -> pz_bridge::FriendSnapshot {
         online: card.online,
         share_position: card.share_position,
         their_share_position: card.their_share_position,
+        x: card.position.as_ref().map(|position| position.x),
+        y: card.position.as_ref().map(|position| position.y),
+        z: card.position.as_ref().map(|position| position.z),
         created_at: Some(card.created_at.to_rfc3339()),
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MapSettings {
+    pub map_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Privacy {
+    pub share_map: bool,
+    pub map_enabled: bool,
+}
+
+pub async fn map_settings(db: &PgPool) -> Result<MapSettings, sqlx::Error> {
+    Ok(MapSettings {
+        map_enabled: map_enabled(db).await?,
+    })
+}
+
+pub async fn set_map_enabled(db: &PgPool, enabled: bool) -> Result<MapSettings, sqlx::Error> {
+    sqlx::query("UPDATE friends_settings SET map_enabled = $1, updated_at = now() WHERE id = 1")
+        .bind(enabled)
+        .execute(db)
+        .await?;
+
+    Ok(MapSettings {
+        map_enabled: enabled,
+    })
+}
+
+pub async fn privacy(db: &PgPool, user_id: Uuid) -> Result<Privacy, sqlx::Error> {
+    let share_map = sqlx::query_scalar::<_, bool>("SELECT share_map FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(db)
+        .await?;
+
+    Ok(Privacy {
+        share_map,
+        map_enabled: map_enabled(db).await?,
+    })
+}
+
+pub async fn set_share_map(
+    db: &PgPool,
+    user_id: Uuid,
+    share_map: bool,
+) -> Result<Privacy, sqlx::Error> {
+    sqlx::query("UPDATE users SET share_map = $2, updated_at = now() WHERE id = $1")
+        .bind(user_id)
+        .bind(share_map)
+        .execute(db)
+        .await?;
+
+    privacy(db, user_id).await
+}
+
+/// Usernames this account is friends with, plus its own, for inbox refresh.
+pub async fn friend_usernames(db: &PgPool, user_id: Uuid) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT u.username
+        FROM friendships f
+        JOIN users u ON u.id = CASE WHEN f.user_low = $1 THEN f.user_high ELSE f.user_low END
+        WHERE (f.user_low = $1 OR f.user_high = $1)
+          AND f.status = 'accepted'
+        UNION
+        SELECT username FROM users WHERE id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await
+}
+
+async fn map_enabled(db: &PgPool) -> Result<bool, sqlx::Error> {
+    let enabled =
+        sqlx::query_scalar::<_, bool>("SELECT map_enabled FROM friends_settings WHERE id = 1")
+            .fetch_optional(db)
+            .await?;
+
+    Ok(enabled.unwrap_or(true))
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct ShareMapRow {
+    username: String,
+    share_map: bool,
+}
+
+async fn share_map_by_name(db: &PgPool) -> Result<HashMap<String, bool>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, ShareMapRow>("SELECT username, share_map FROM users")
+        .fetch_all(db)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.username.to_ascii_lowercase(), row.share_map))
+        .collect())
 }
 
 async fn find_user(db: &PgPool, username: &str) -> Result<Option<NamedUser>, sqlx::Error> {
@@ -957,6 +1080,50 @@ mod tests {
         assert_eq!(pair(a, b), (a, b));
         assert_eq!(pair(b, a), (a, b));
         assert_eq!(pair(a, a), (a, a));
+    }
+
+    #[test]
+    fn a_shared_pin_is_written_into_the_game_snapshot() {
+        let card = FriendCard {
+            id: Uuid::from_u128(1),
+            username: "pike".to_owned(),
+            status: "accepted".to_owned(),
+            online: true,
+            share_position: true,
+            their_share_position: true,
+            position: Some(FriendPosition {
+                x: 1000.0,
+                y: 2000.5,
+                z: 1,
+            }),
+            appearance: None,
+            created_at: Utc::now(),
+        };
+
+        let snap = snapshot(&card);
+        assert_eq!(snap.x, Some(1000.0));
+        assert_eq!(snap.y, Some(2000.5));
+        assert_eq!(snap.z, Some(1));
+    }
+
+    #[test]
+    fn a_hidden_pin_is_omitted_from_the_game_snapshot() {
+        let card = FriendCard {
+            id: Uuid::from_u128(1),
+            username: "pike".to_owned(),
+            status: "accepted".to_owned(),
+            online: true,
+            share_position: true,
+            their_share_position: false,
+            position: None,
+            appearance: None,
+            created_at: Utc::now(),
+        };
+
+        let snap = snapshot(&card);
+        assert_eq!(snap.x, None);
+        assert_eq!(snap.y, None);
+        assert_eq!(snap.z, None);
     }
 
     #[test]
