@@ -16,6 +16,48 @@ KR_Beacon = {}
 local LOG = "[KnoxRelay] "
 local FILE = "players_live.json"
 
+local function markOf(player)
+    local username = player:getUsername()
+    if type(username) ~= "string" or username == "" then
+        username = "unknown"
+    end
+
+    local x, y, z = 0, 0, 0
+    local okx, vx = pcall(function() return player:getX() end)
+    local oky, vy = pcall(function() return player:getY() end)
+    local okz, vz = pcall(function() return player:getZ() end)
+    if okx and type(vx) == "number" then
+        x = math.floor(vx * 10) / 10
+    end
+    if oky and type(vy) == "number" then
+        y = math.floor(vy * 10) / 10
+    end
+    if okz and type(vz) == "number" then
+        z = math.floor(vz)
+    end
+
+    local appearance = nil
+    local oka, look = pcall(Look.of, player)
+    if oka then
+        appearance = look
+    end
+
+    local dead = false
+    local ghost = false
+    pcall(function() dead = player:isDead() or false end)
+    pcall(function() ghost = player:isGhostMode() or false end)
+
+    return {
+        username = username,
+        x = x,
+        y = y,
+        z = z,
+        is_dead = dead,
+        is_ghost = ghost,
+        appearance = appearance,
+    }
+end
+
 --- Write the current position of everyone online.
 function KR_Beacon.export()
     local players = Roster.online()
@@ -25,15 +67,10 @@ function KR_Beacon.export()
 
     local marks = {}
     for _, player in ipairs(players) do
-        marks[#marks + 1] = {
-            username = player:getUsername() or "unknown",
-            x = math.floor((player:getX() or 0) * 10) / 10,
-            y = math.floor((player:getY() or 0) * 10) / 10,
-            z = math.floor(player:getZ() or 0),
-            is_dead = player:isDead() or false,
-            is_ghost = player:isGhostMode() or false,
-            appearance = Look.of(player),
-        }
+        local ok, mark = pcall(markOf, player)
+        if ok and type(mark) == "table" then
+            marks[#marks + 1] = mark
+        end
     end
 
     local encoded, body = pcall(Codec.encode, {

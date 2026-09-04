@@ -241,11 +241,11 @@ async fn sync_positions(db: &PgPool, players: &[LivePlayer]) -> Result<(), sqlx:
             continue;
         }
 
-        sqlx::query(
+        let updated = sqlx::query(
             r#"
             UPDATE player_stats
                SET x = $2, y = $3, z = $4
-             WHERE username = $1
+             WHERE lower(username) = lower($1)
             "#,
         )
         .bind(&player.username)
@@ -254,6 +254,25 @@ async fn sync_positions(db: &PgPool, players: &[LivePlayer]) -> Result<(), sqlx:
         .bind(player.z)
         .execute(db)
         .await?;
+
+        if updated.rows_affected() == 0 {
+            sqlx::query(
+                r#"
+                INSERT INTO player_stats (username, x, y, z, last_synced_at)
+                VALUES ($1, $2, $3, $4, now())
+                ON CONFLICT (username) DO UPDATE SET
+                    x = EXCLUDED.x,
+                    y = EXCLUDED.y,
+                    z = EXCLUDED.z
+                "#,
+            )
+            .bind(&player.username)
+            .bind(player.x)
+            .bind(player.y)
+            .bind(player.z)
+            .execute(db)
+            .await?;
+        }
     }
 
     Ok(())

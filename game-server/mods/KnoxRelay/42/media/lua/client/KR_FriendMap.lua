@@ -18,26 +18,40 @@ local function number(value)
     if type(value) == "number" then
         return value
     end
+    if type(value) == "string" then
+        return tonumber(value)
+    end
     return nil
+end
+
+local function addPin(nextPins, entry)
+    if type(entry) ~= "table" or entry.their_share_position == false then
+        return
+    end
+    local x = number(entry.x)
+    local y = number(entry.y)
+    local name = entry.username
+    if x and y and type(name) == "string" and name ~= "" then
+        nextPins[#nextPins + 1] = {
+            username = name,
+            x = x,
+            y = y,
+            z = number(entry.z) or 0,
+            online = entry.online == true,
+        }
+    end
 end
 
 function KR_FriendMap.apply(friends)
     local nextPins = {}
     if type(friends) == "table" then
-        for _, entry in ipairs(friends) do
-            if type(entry) == "table" and entry.their_share_position ~= false then
-                local x = number(entry.x)
-                local y = number(entry.y)
-                local name = entry.username
-                if x and y and type(name) == "string" and name ~= "" then
-                    nextPins[#nextPins + 1] = {
-                        username = name,
-                        x = x,
-                        y = y,
-                        z = number(entry.z) or 0,
-                        online = entry.online == true,
-                    }
-                end
+        if friends[1] ~= nil then
+            for _, entry in ipairs(friends) do
+                addPin(nextPins, entry)
+            end
+        else
+            for _, entry in pairs(friends) do
+                addPin(nextPins, entry)
             end
         end
     end

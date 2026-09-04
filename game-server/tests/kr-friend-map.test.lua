@@ -51,6 +51,17 @@ check("the pin is named", drawn[2] and drawn[2].text == "pike", drawn[2] and dra
 Map.apply(nil)
 check("a missing list clears pins", #Map.pins() == 0)
 
+Map.apply({
+    { username = "pike", their_share_position = true, x = "1111", y = "2222", z = "0", online = true },
+})
+check("string coordinates from the command channel still pin", #Map.pins() == 1)
+check("string coordinates parse", Map.pins()[1] and Map.pins()[1].x == 1111)
+
+Map.apply({
+    pike = { username = "pike", their_share_position = true, x = 50, y = 60, z = 0, online = true },
+})
+check("a keyed friends table still pins", #Map.pins() == 1 and Map.pins()[1].username == "pike")
+
 ISWorldMap = {
     render = function(self)
         self.worldRan = true
