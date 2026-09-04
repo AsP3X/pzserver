@@ -1,5 +1,10 @@
 //! Accounts, passwords and server-side sessions.
 //!
+//! A website row is created when a character joins the dedicated server —
+//! appearing on the whitelist or the live roster is the proof they exist.
+//! `/account register` is how they later set an email and a website password,
+//! or recover a login.
+//!
 //! Sessions are opaque random tokens stored as SHA-256 digests, which makes
 //! them revocable one by one and keeps a database dump from handing anyone a
 //! working login. Passwords are Argon2id.
@@ -29,6 +34,13 @@ const MIN_PASSWORD_LENGTH: usize = 10;
 const MAX_PASSWORD_LENGTH: usize = 200;
 
 const MAX_USERNAME_LENGTH: usize = 50;
+
+/// Stored on accounts created from a join, before a website password exists.
+///
+/// `verify_password` rejects it immediately so a first sign-in falls through
+/// to the game whitelist instead of paying for Argon2 against a discarded
+/// secret. Login with the join password then writes a real hash.
+const UNUSABLE_PASSWORD_HASH: &str = "$unusable$";
 
 /// A user as the rest of the application sees them — no password hash.
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -261,7 +273,7 @@ async fn sync_from_game(
         return Ok(user);
     }
 
-    let email = format!("{}@pz.local", game.username.to_ascii_lowercase());
+    let email = placeholder_email(&game.username);
 
     let user = sqlx::query_as::<_, User>(
         r#"
@@ -279,6 +291,152 @@ async fn sync_from_game(
     .map_err(taken_field)?;
 
     Ok(user)
+}
+
+/// What came of making sure a joined character has a website row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinEnsure {
+    Created,
+    AlreadyPresent,
+    Skipped,
+}
+
+/// Create a website account for a character that has joined the server.
+///
+/// Idempotent: a name that already has a row is left alone, aside from filling
+/// in a missing Steam id so Steam sign-in starts working without a second
+/// command. Invalid names (spaces, punctuation, the mod's `"unknown"` fallback)
+/// are skipped rather than failing the rest of the pass.
+pub async fn ensure_joined_account(
+    db: &PgPool,
+    username: &str,
+    steam_id: Option<&str>,
+) -> Result<JoinEnsure, ApiError> {
+    let username = username.trim();
+    if !joinable_username(username) {
+        return Ok(JoinEnsure::Skipped);
+    }
+
+    let steam_id = real_steam_id(steam_id);
+
+    let existing = sqlx::query_as::<_, User>(
+        "SELECT id, username, email, role, steam_id, created_at FROM users WHERE lower(username) = lower($1)",
+    )
+    .bind(username)
+    .fetch_optional(db)
+    .await?;
+
+    if let Some(user) = existing {
+        attach_steam_id(db, user.id, steam_id).await?;
+        return Ok(JoinEnsure::AlreadyPresent);
+    }
+
+    insert_joined_account(db, username, steam_id).await
+}
+
+async fn insert_joined_account(
+    db: &PgPool,
+    username: &str,
+    steam_id: Option<&str>,
+) -> Result<JoinEnsure, ApiError> {
+    let mut steam_id = steam_id;
+    let mut email = placeholder_email(username);
+
+    loop {
+        match insert_player_row(db, username, steam_id, &email).await {
+            Ok(()) => return Ok(JoinEnsure::Created),
+            Err(error) => {
+                let constraint = db_constraint(&error);
+                match constraint.as_deref() {
+                    Some("users_username_lower_key") => return Ok(JoinEnsure::AlreadyPresent),
+                    Some("users_steam_id_key") if steam_id.is_some() => steam_id = None,
+                    Some("users_email_lower_key") if !email.contains('+') => {
+                        email = unique_placeholder_email(username)?;
+                    }
+                    _ => return Err(ApiError::Database(error)),
+                }
+            }
+        }
+    }
+}
+
+async fn insert_player_row(
+    db: &PgPool,
+    username: &str,
+    steam_id: Option<&str>,
+    email: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO users (username, steam_id, email, password_hash, role)
+        VALUES ($1, $2, $3, $4, 'player')
+        "#,
+    )
+    .bind(username)
+    .bind(steam_id)
+    .bind(email)
+    .bind(UNUSABLE_PASSWORD_HASH)
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+async fn attach_steam_id(
+    db: &PgPool,
+    user_id: Uuid,
+    steam_id: Option<&str>,
+) -> Result<(), ApiError> {
+    let Some(steam_id) = steam_id else {
+        return Ok(());
+    };
+
+    match sqlx::query(
+        "UPDATE users SET steam_id = $2, updated_at = now() WHERE id = $1 AND steam_id IS NULL",
+    )
+    .bind(user_id)
+    .bind(steam_id)
+    .execute(db)
+    .await
+    {
+        Ok(_) => Ok(()),
+        Err(error) if db_constraint(&error).as_deref() == Some("users_steam_id_key") => Ok(()),
+        Err(error) => Err(ApiError::Database(error)),
+    }
+}
+
+fn placeholder_email(username: &str) -> String {
+    format!("{}@pz.local", username.to_ascii_lowercase())
+}
+
+fn unique_placeholder_email(username: &str) -> Result<String, ApiError> {
+    let token = generate_token()?;
+    Ok(format!(
+        "{}+{}@pz.local",
+        username.to_ascii_lowercase(),
+        &token[..8]
+    ))
+}
+
+fn joinable_username(username: &str) -> bool {
+    if username.is_empty() || username.eq_ignore_ascii_case("unknown") {
+        return false;
+    }
+
+    validate_username(username).is_ok()
+}
+
+fn real_steam_id(value: Option<&str>) -> Option<&str> {
+    value
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && *id != "0")
+}
+
+fn db_constraint(error: &sqlx::Error) -> Option<String> {
+    match error {
+        sqlx::Error::Database(inner) => inner.constraint().map(str::to_owned),
+        _ => None,
+    }
 }
 
 /// Issue a session and return the raw token, which is only ever seen here and
@@ -474,7 +632,7 @@ pub async fn prune_sessions(db: &PgPool) -> Result<u64, ApiError> {
 ///
 /// This is the one account whose username is set without an in-game claim:
 /// `ADMIN_USERNAME` pre-links the operator's own character. Everyone else gets
-/// their name from `/account register`.
+/// their name from joining the server, or from `/account register`.
 pub async fn ensure_admin(
     db: &PgPool,
     username: &str,
@@ -531,6 +689,10 @@ fn hash_password(password: &str) -> Result<String, ApiError> {
 }
 
 fn verify_password(password: &str, hash: &str) -> bool {
+    if hash == UNUSABLE_PASSWORD_HASH {
+        return false;
+    }
+
     // Rows copied from the Laravel site are bcrypt (`$2y$` / `$2a$`), not
     // Argon2id. Accept those, and the PZ scheme (bcrypt of md5), so a
     // migrated player is not locked out of their existing password.
@@ -681,6 +843,56 @@ mod tests {
     fn a_corrupt_hash_never_verifies() {
         assert!(!verify_password("anything", "not-a-hash"));
         assert!(!verify_password("anything", ""));
+    }
+
+    #[test]
+    fn an_unusable_join_hash_never_verifies() {
+        assert!(!verify_password("correct-horse", UNUSABLE_PASSWORD_HASH));
+        assert!(!verify_password("", UNUSABLE_PASSWORD_HASH));
+        assert!(!UNUSABLE_PASSWORD_HASH.starts_with("$2"));
+    }
+
+    #[test]
+    fn joined_accounts_use_a_local_placeholder_address() {
+        assert_eq!(placeholder_email("Pike"), "pike@pz.local");
+        assert_eq!(placeholder_email("giorgi_99"), "giorgi_99@pz.local");
+    }
+
+    #[test]
+    fn a_colliding_placeholder_address_adds_a_tag() {
+        let email = unique_placeholder_email("Pike").expect("email");
+
+        assert!(email.starts_with("pike+"));
+        assert!(email.ends_with("@pz.local"));
+        assert_ne!(email, placeholder_email("Pike"));
+        assert!(validate_email(&email).is_ok());
+    }
+
+    #[test]
+    fn only_real_character_names_get_a_joined_account() {
+        assert!(joinable_username("giorgi_99"));
+        assert!(joinable_username("Pike"));
+        assert!(!joinable_username(""));
+        assert!(!joinable_username("unknown"));
+        assert!(!joinable_username("Unknown"));
+        assert!(!joinable_username("has space"));
+        assert!(!joinable_username("drop;table"));
+    }
+
+    #[test]
+    fn steam_ids_of_zero_or_blank_are_not_stored() {
+        assert_eq!(
+            real_steam_id(Some("76561198000000001")),
+            Some("76561198000000001")
+        );
+        assert_eq!(
+            real_steam_id(Some(" 76561198000000001 ")),
+            Some("76561198000000001")
+        );
+        assert_eq!(real_steam_id(Some("0")), None);
+        assert_eq!(real_steam_id(Some("")), None);
+        assert_eq!(real_steam_id(Some("   ")), None);
+        assert_eq!(real_steam_id(None), None);
     }
 
     #[test]

@@ -352,8 +352,8 @@ async fn steam_start(State(state): State<AppState>) -> Redirect {
 /// This never creates an account. Every account here belongs to a character
 /// that has proven itself in game, and a Steam login proves ownership of a
 /// Steam profile, not of a character — so an unrecognised SteamID64 is turned
-/// away rather than signed up. The mod already records `steam_id` for anyone
-/// who has played, so for them this simply works.
+/// away rather than signed up. Joining the server writes `steam_id` onto the
+/// website row, so for them this simply works.
 async fn steam_callback(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -380,8 +380,8 @@ async fn steam_callback(
 
     let Some(user) = user else {
         // Deliberately its own reason: "we do not know this Steam account" is
-        // actionable — go and run /account register — where a generic failure
-        // would just look broken.
+        // actionable — join the server first — where a generic failure would
+        // just look broken.
         return Err(Redirect::to(&format!(
             "{}/login?steam=unknown",
             state.config.public_url

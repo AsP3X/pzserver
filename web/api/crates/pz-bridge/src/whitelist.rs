@@ -4,7 +4,7 @@
 //! The website used to accept those same credentials (Laravel's
 //! `PzAccountAuthenticator`). The Rust login must do the same: a survivor who
 //! can get into the server should be able to get into the site, even if they
-//! never finished `/account register`.
+//! never set a website password.
 
 use std::path::Path;
 

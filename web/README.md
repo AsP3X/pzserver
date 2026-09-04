@@ -71,11 +71,11 @@ mod drains every tick. It only works while they are online — the mod matches
 requests against its roster and drops the rest — so the endpoint refuses when
 they are not, rather than leaving a button that quietly does nothing.
 
-**Accounts can only be created from in game.** There is no sign-up form that
-stands on its own: registration starts with `/account register` on the server,
-which proves the character exists and that the person registering is playing it.
-An account with no character behind it is not a state this schema can represent
-— `users.username` is `NOT NULL`.
+**Accounts are created when a player joins.** There is no public sign-up form:
+appearing on the dedicated server — the whitelist or the live roster — is the
+proof the character exists. `/account register` is how they later set an email
+and a website password, or recover a login. An account with no character behind
+it is not a state this schema can represent — `users.username` is `NOT NULL`.
 
 ## Authentication
 
@@ -144,12 +144,14 @@ is judged by the file's mtime, never by its contents.
 
 ## Registering
 
-1. The player joins the server as the character they want the account for.
-2. In game they run `/account register`.
+1. The player joins the server. A website account is created automatically
+   under that character's name. They can sign in with the password they use
+   to join, or with Steam once the whitelist has recorded their Steam id.
+2. To set an email and a separate website password — or to recover a login —
+   they run `/account register` in game.
 3. The mod reports who ran it; this stack opens a registration and answers
    within five seconds with a six-character code, which the mod shows them.
-4. On the website they enter that code with an email and a password. The
-   account is created already carrying the character's name.
+4. On the website they enter that code with an email and a password.
 
 A code rather than an email address typed in game: whatever goes into the chat
 channel also goes into the server log, where other players and every log reader
@@ -163,8 +165,10 @@ character never has two live codes.
 ### The file contract
 
 Both halves are built. The mod side is `KR_Enrol` plus the chat hook in
-`KR_Console`, added in KnoxRelay 1.10 — a server running an older build of the
-mod has no `/account register` and therefore no way to make an account.
+`KR_Console`, added in KnoxRelay 1.10. Joining no longer depends on that
+command: website accounts are opened from the whitelist and the live roster
+even on an older Knox Relay. `/account register` is still how a player sets
+an email and a website password.
 
 The channel mirrors the mod's own request/result idiom with the direction
 reversed — the mod writes the requests, this stack answers.

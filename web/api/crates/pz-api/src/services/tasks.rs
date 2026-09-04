@@ -1,7 +1,7 @@
 //! Background loops: folding the mod's exports into Postgres, answering
 //! in-game registrations, sampling population, and housekeeping.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
@@ -9,6 +9,7 @@ use pz_bridge::lua::{DEATHS_FILE, Death, LivePlayer, PLAYER_STATS_FILE, StatsPla
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
+use crate::services::auth::{self, JoinEnsure};
 use crate::services::registration::{self, OpenOutcome};
 use crate::state::AppState;
 
@@ -32,6 +33,7 @@ pub fn spawn_all(state: AppState) -> Vec<JoinHandle<()>> {
         tokio::spawn(stats_sync_loop(state.clone())),
         tokio::spawn(deaths_sync_loop(state.clone())),
         tokio::spawn(status_sample_loop(state.clone())),
+        tokio::spawn(account_provision_loop(state.clone())),
         tokio::spawn(account_registration_loop(state.clone())),
         tokio::spawn(ingame_report_loop(state.clone())),
         tokio::spawn(ticket_desk_loop(state.clone())),
@@ -255,6 +257,104 @@ async fn sync_positions(db: &PgPool, players: &[LivePlayer]) -> Result<(), sqlx:
     }
 
     Ok(())
+}
+
+/// Create a website row for anyone who has joined, without waiting for
+/// `/account register`.
+///
+/// The dedicated server does not fire a reliable join event, so this watches
+/// three places the name does show up: the game whitelist (written as they
+/// authenticate), the live roster export, and RCON's player list.
+async fn account_provision_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(REGISTRATION_INTERVAL);
+
+    loop {
+        ticker.tick().await;
+        provision_joined_accounts(&state).await;
+    }
+}
+
+struct SeenPlayer {
+    username: String,
+    steam_id: Option<String>,
+}
+
+fn remember_player(
+    seen: &mut HashMap<String, SeenPlayer>,
+    username: String,
+    steam_id: Option<String>,
+) {
+    if username.is_empty() || username.eq_ignore_ascii_case("unknown") {
+        return;
+    }
+
+    let steam_id = steam_id.and_then(|id| {
+        let trimmed = id.trim();
+        if trimmed.is_empty() || trimmed == "0" {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    });
+
+    let key = username.to_ascii_lowercase();
+    match seen.get_mut(&key) {
+        Some(existing) => {
+            if existing.steam_id.is_none() {
+                existing.steam_id = steam_id;
+            }
+        }
+        None => {
+            seen.insert(key, SeenPlayer { username, steam_id });
+        }
+    }
+}
+
+async fn provision_joined_accounts(state: &AppState) {
+    let mut seen = HashMap::new();
+
+    if let Some(path) = state.config.whitelist_db_path() {
+        for account in pz_bridge::whitelist::list(&path) {
+            remember_player(&mut seen, account.username, account.steam_id);
+        }
+    }
+
+    match state.bridge.players_live().await {
+        Ok(Some(read)) => {
+            for player in read.data.players {
+                remember_player(&mut seen, player.username, None);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::debug!(%error, "live roster unreadable while provisioning accounts")
+        }
+    }
+
+    for name in state.status.current().await.players {
+        remember_player(&mut seen, name, None);
+    }
+
+    for player in seen.into_values() {
+        match auth::ensure_joined_account(&state.db, &player.username, player.steam_id.as_deref())
+            .await
+        {
+            Ok(JoinEnsure::Created) => {
+                tracing::info!(
+                    username = %player.username,
+                    "created website account for a joined player"
+                );
+            }
+            Ok(JoinEnsure::AlreadyPresent | JoinEnsure::Skipped) => {}
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    username = %player.username,
+                    "could not create website account for a joined player"
+                );
+            }
+        }
+    }
 }
 
 /// Answer the `/account register` commands players have run in game.
@@ -880,5 +980,34 @@ async fn sanction_expiry_loop(state: AppState) {
             Ok(lifted) => tracing::info!(lifted, "lifted expired suspensions"),
             Err(error) => tracing::error!(%error, "failed to expire suspensions"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remember_player_keeps_the_first_spelling_and_fills_steam_later() {
+        let mut seen = HashMap::new();
+        remember_player(&mut seen, "Pike".to_owned(), None);
+        remember_player(
+            &mut seen,
+            "pike".to_owned(),
+            Some("76561198000000001".to_owned()),
+        );
+        remember_player(&mut seen, "unknown".to_owned(), Some("1".to_owned()));
+        remember_player(&mut seen, String::new(), Some("1".to_owned()));
+        remember_player(&mut seen, "Rook".to_owned(), Some("0".to_owned()));
+
+        assert_eq!(seen.len(), 2);
+
+        let pike = seen.get("pike").expect("pike");
+        assert_eq!(pike.username, "Pike");
+        assert_eq!(pike.steam_id.as_deref(), Some("76561198000000001"));
+
+        let rook = seen.get("rook").expect("rook");
+        assert_eq!(rook.username, "Rook");
+        assert_eq!(rook.steam_id, None);
     }
 }

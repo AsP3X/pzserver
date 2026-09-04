@@ -2,7 +2,7 @@
 //!
 //! The graph lives here, not in Lua. Knox Relay only queues actions and
 //! projects the roster the panel writes. Identity is the website user: both
-//! sides must have linked a character (`/account register`) before a request
+//! sides need a website account (created when they join) before a request
 //! can land.
 
 use std::path::Path;
@@ -416,9 +416,9 @@ pub async fn apply_from_game(
     friendship_id: Option<&str>,
     share_position: Option<bool>,
 ) -> ApiResult<GameApply> {
-    let me = find_user(db, username).await?.ok_or_else(|| {
-        ApiError::Validation("You need a website account first. Run /account register.".to_owned())
-    })?;
+    let me = find_user(db, username)
+        .await?
+        .ok_or_else(|| ApiError::Validation("You need a website account first.".to_owned()))?;
 
     match action {
         "request" => {
@@ -931,10 +931,7 @@ async fn find_user(db: &PgPool, username: &str) -> Result<Option<NamedUser>, sql
 
 async fn require_user(db: &PgPool, username: &str) -> ApiResult<NamedUser> {
     find_user(db, username).await?.ok_or_else(|| {
-        ApiError::Validation(
-            "That survivor does not have a website account yet. They need to run /account register."
-                .to_owned(),
-        )
+        ApiError::Validation("That survivor does not have a website account yet.".to_owned())
     })
 }
 
@@ -972,8 +969,7 @@ mod tests {
         );
         assert_eq!(
             game_status(&ApiError::Validation(
-                "That survivor does not have a website account yet. They need to run /account register."
-                    .to_owned()
+                "That survivor does not have a website account yet.".to_owned()
             )),
             "not_registered"
         );
@@ -989,7 +985,7 @@ mod tests {
         );
         assert_eq!(
             game_status(&ApiError::Validation(
-                "You need a website account first. Run /account register.".to_owned()
+                "You need a website account first.".to_owned()
             )),
             "unregistered"
         );
