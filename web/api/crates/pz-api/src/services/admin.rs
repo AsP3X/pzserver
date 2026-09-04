@@ -577,15 +577,33 @@ pub async fn teleport(
             "Those coordinates are off the map.".to_owned(),
         ));
     }
-    rcon(
-        state,
-        &format!(
-            "teleport \"{name}\" {},{},{z}",
-            x.round() as i64,
-            y.round() as i64
-        ),
+
+    // `teleport` is player-to-player. Coordinates are `teleportto`, and the
+    // username form is what RCON can run — the no-name form teleports the
+    // executor, which the console does not have.
+    let output = rcon(state, &teleport_to_command(name, x, y, z)).await?;
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("can't find player") || lower.contains("cant find player") {
+        return Err(ApiError::Validation(
+            "That survivor is not in the world.".to_owned(),
+        ));
+    }
+    if !lower.contains("teleported") {
+        return Err(ApiError::Validation(
+            "The game did not teleport them. Try again while they are online.".to_owned(),
+        ));
+    }
+
+    Ok(output)
+}
+
+/// `teleportto "name" x,y,z` as B42's TeleportToCommand parses it.
+fn teleport_to_command(name: &str, x: f64, y: f64, z: i32) -> String {
+    format!(
+        "teleportto \"{name}\" {},{},{z}",
+        x.round() as i64,
+        y.round() as i64
     )
-    .await
 }
 
 pub async fn add_to_whitelist(state: &AppState, username: &str) -> ApiResult<String> {
@@ -1490,5 +1508,18 @@ mod tests {
     #[test]
     fn messages_lose_quotes_and_newlines() {
         assert_eq!(sanitise_message("hello \"world\"\n"), "hello world");
+    }
+
+    #[test]
+    fn coordinate_teleport_uses_teleportto_not_player_teleport() {
+        assert_eq!(
+            teleport_to_command("Pike", 10_000.4, 11_000.6, 0),
+            r#"teleportto "Pike" 10000,11001,0"#
+        );
+        assert_eq!(
+            teleport_to_command("giorgi_99", 1.0, 2.0, 1),
+            r#"teleportto "giorgi_99" 1,2,1"#
+        );
+        assert!(!teleport_to_command("Pike", 100.0, 200.0, 0).starts_with("teleport "));
     }
 }
