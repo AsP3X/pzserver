@@ -4,9 +4,12 @@
 //! `friends_outbox.json`, this stack answers in `friends_results.json` and
 //! projects each player's roster into `friends_inbox.json`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+use crate::lua_json::btree_map_from_lua;
 
 pub const FRIENDS_OUTBOX_FILE: &str = "friends_outbox.json";
 pub const FRIENDS_RESULTS_FILE: &str = "friends_results.json";
@@ -139,8 +142,9 @@ pub struct FriendsInbox {
     pub version: u32,
     #[serde(default)]
     pub updated_at: String,
-    #[serde(default)]
-    pub players: std::collections::BTreeMap<String, FriendsPlayerInbox>,
+    /// Lua writes `[]` when this map is empty.
+    #[serde(default, deserialize_with = "btree_map_from_lua")]
+    pub players: BTreeMap<String, FriendsPlayerInbox>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -272,7 +276,7 @@ mod tests {
         let mut inbox = FriendsInbox {
             version: 1,
             updated_at: "now".to_owned(),
-            players: std::collections::BTreeMap::new(),
+            players: BTreeMap::new(),
         };
         inbox.players.insert(
             "rook".to_owned(),
@@ -301,5 +305,22 @@ mod tests {
 
         assert_eq!(read.players["rook"].unread, 1);
         assert_eq!(read.players["rook"].incoming[0].username, "pike");
+    }
+
+    /// The codec collapses an empty table to `[]`. That file is what the live
+    /// inbox looks like until the panel has written a player into it.
+    #[tokio::test]
+    async fn an_empty_players_array_from_lua_reads_as_no_players() {
+        let (dir, channel) = channel();
+        std::fs::write(
+            dir.path().join(FRIENDS_INBOX_FILE),
+            r#"{"version":1,"updated_at":"2026-09-01T20:17:18","players":[]}"#,
+        )
+        .expect("write");
+
+        let inbox = channel.inbox().await.expect("read");
+
+        assert!(inbox.players.is_empty());
+        assert_eq!(inbox.version, 1);
     }
 }

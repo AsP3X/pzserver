@@ -113,9 +113,9 @@ local function describeHeld(item)
         count = 1,
     }
 
-    if item.getItemContainer then
-        local box = item:getItemContainer()
-        local contents = box and box.getItems and box:getItems()
+    local box = Stash.inner(item)
+    if box then
+        local contents = box.getItems and box:getItems()
         if contents and contents:size() > 0 then
             local cargo = {}
             for index = 0, contents:size() - 1 do
@@ -203,8 +203,9 @@ local function fillContainer(container, cargo)
                     condition = (tonumber(piece.condition_bp) or 100) / 100
                 end
                 wearOn(item, condition)
-                if piece.cargo and item.getItemContainer then
-                    if not fillContainer(item:getItemContainer(), piece.cargo) then
+                if piece.cargo then
+                    local nested = Stash.inner(item)
+                    if nested and not fillContainer(nested, piece.cargo) then
                         return false
                     end
                 end

@@ -20,6 +20,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::lua_json::btree_map_from_lua;
+
 pub const CONFIG_FILE: &str = "respawn_config.json";
 pub const DEATHS_FILE: &str = "respawn_deaths.json";
 pub const RESETS_FILE: &str = "respawn_resets.json";
@@ -67,11 +69,10 @@ struct KicksFile {
 
 /// `{ "deaths": { "<username>": <epoch seconds> } }`.
 ///
-/// An empty table is written by Lua as `{}`, which is indistinguishable from an
-/// empty object here — exactly what we want.
+/// Lua writes `[]` when this map is empty.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct DeathsFile {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "btree_map_from_lua")]
     deaths: BTreeMap<String, i64>,
 }
 
@@ -284,6 +285,14 @@ mod tests {
     #[tokio::test]
     async fn a_missing_deaths_file_is_no_deaths_rather_than_an_error() {
         let (_dir, channel) = channel();
+
+        assert!(channel.deaths().await.expect("deaths").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_empty_deaths_array_from_lua_is_no_deaths() {
+        let (dir, channel) = channel();
+        std::fs::write(dir.path().join(DEATHS_FILE), r#"{"deaths":[]}"#).expect("write");
 
         assert!(channel.deaths().await.expect("deaths").is_empty());
     }

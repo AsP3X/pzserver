@@ -318,7 +318,18 @@ async fn write_inbox_slices(
     online: &[String],
     live: &[LiveMark],
 ) -> Result<(), pz_bridge::friends::FriendsChannelError> {
-    let mut inbox = channel.inbox().await?;
+    let mut inbox = match channel.inbox().await {
+        Ok(inbox) => inbox,
+        Err(pz_bridge::friends::FriendsChannelError::Parse { path, source }) => {
+            tracing::warn!(
+                path = %path.display(),
+                %source,
+                "friends inbox unreadable; rewriting from scratch"
+            );
+            pz_bridge::FriendsInbox::default()
+        }
+        Err(error) => return Err(error),
+    };
     inbox.version = 1;
     inbox.updated_at = Utc::now().to_rfc3339();
 

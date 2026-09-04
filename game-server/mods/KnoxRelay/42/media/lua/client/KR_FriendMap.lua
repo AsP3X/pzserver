@@ -11,7 +11,8 @@ KR_FriendMap = {}
 
 local LOG = "[KnoxRelay] "
 local pins = {}
-local hooked = false
+local worldHooked = false
+local miniHooked = false
 
 local function number(value)
     if type(value) == "number" then
@@ -100,34 +101,31 @@ function KR_FriendMap.paint(mapUI, named)
 end
 
 local function hookRender(classTable, named)
-    if type(classTable) ~= "table" or type(classTable.render) ~= "function" then
-        if type(classTable) == "table" then
-            classTable.render = function(self)
-                KR_FriendMap.paint(self, named)
-            end
-            return true
-        end
+    if type(classTable) ~= "table" then
         return false
     end
 
     local previous = classTable.render
     classTable.render = function(self)
-        previous(self)
+        if type(previous) == "function" then
+            previous(self)
+        end
         KR_FriendMap.paint(self, named)
     end
     return true
 end
 
 function KR_FriendMap.hook()
-    if hooked then
-        return
+    local worldWas = worldHooked
+    local miniWas = miniHooked
+    if not worldHooked then
+        worldHooked = hookRender(ISWorldMap, true)
     end
-
-    local world = hookRender(ISWorldMap, true)
-    local mini = hookRender(ISMiniMapInner, false)
-    if world or mini then
-        hooked = true
-        print(LOG .. "Friend map: hooked world=" .. tostring(world) .. " mini=" .. tostring(mini))
+    if not miniHooked then
+        miniHooked = hookRender(ISMiniMapInner, false)
+    end
+    if (worldHooked and not worldWas) or (miniHooked and not miniWas) then
+        print(LOG .. "Friend map: hooked world=" .. tostring(worldHooked) .. " mini=" .. tostring(miniHooked))
     end
 end
 

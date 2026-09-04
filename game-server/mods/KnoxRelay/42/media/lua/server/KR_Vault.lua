@@ -1,10 +1,10 @@
 --
 -- KR_Vault.lua — converting in-game cash into wallet coins.
 --
--- Laravel queues a deposit in deposit_requests.json; this module strips every
--- Base.Money and Base.MoneyBundle off the player and reports the tally in
--- deposit_results.json. Laravel polls for that result and only then credits
--- the wallet.
+-- The panel queues a deposit in deposit_requests.json; this module strips every
+-- Base.Money and Base.MoneyBundle off the player — including notes sitting in
+-- wallets and other bags — and reports the tally in deposit_results.json.
+-- The panel polls for that result and only then credits the website wallet.
 --
 -- The ordering is items-first, and the result file is the point of no return:
 -- a player is considered charged only once their result has been written. If
@@ -97,47 +97,18 @@ end
 
 --- @return number notes, number bundles held anywhere on the player
 local function tally(player)
-    local notes = 0
-    local bundles = 0
-
-    for _, container in ipairs(Stash.containers(player)) do
-        local contents = container:getItems()
-        if contents then
-            for index = 0, contents:size() - 1 do
-                local item = contents:get(index)
-                if item then
-                    local fullType = item:getFullType()
-                    if fullType == NOTE then
-                        notes = notes + 1
-                    elseif fullType == BUNDLE then
-                        bundles = bundles + 1
-                    end
-                end
-            end
-        end
-    end
-
-    return notes, bundles
+    return Stash.count(player, NOTE), Stash.count(player, BUNDLE)
 end
 
-local function drainType(container, fullType)
-    if not container then
-        return 0
-    end
-
+local function drainType(player, fullType)
     local removed = 0
     while true do
-        local item = container:getFirstType(fullType)
+        local item = Stash.locate(player, fullType)
         if not item then
             break
         end
 
-        if container.DoRemoveItem then
-            container:DoRemoveItem(item)
-        else
-            container:Remove(item)
-        end
-
+        Stash.detach(player, item)
         removed = removed + 1
         if removed > REMOVE_CEILING then
             print(LOG .. "WARNING: hit safety limit removing " .. fullType)
@@ -150,13 +121,8 @@ end
 
 --- @return number notes, number bundles actually taken
 local function confiscate(player)
-    local notes = 0
-    local bundles = 0
-
-    for _, container in ipairs(Stash.containers(player)) do
-        notes = notes + drainType(container, NOTE)
-        bundles = bundles + drainType(container, BUNDLE)
-    end
+    local notes = drainType(player, NOTE)
+    local bundles = drainType(player, BUNDLE)
 
     if isServer() then
         if notes > 0 then

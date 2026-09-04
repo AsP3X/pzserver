@@ -857,7 +857,18 @@ async fn write_inbox_slice(
 ) -> Result<(), pz_bridge::tickets::ReportChannelError> {
     // tickets::ReportChannelError is not re-exported as that path if tickets is private.
     // Use the channel's own error via write_inbox Result.
-    let mut inbox = channel.inbox().await?;
+    let mut inbox = match channel.inbox().await {
+        Ok(inbox) => inbox,
+        Err(pz_bridge::tickets::ReportChannelError::Parse { path, source }) => {
+            tracing::warn!(
+                path = %path.display(),
+                %source,
+                "ticket inbox unreadable; rewriting from scratch"
+            );
+            pz_bridge::TicketInbox::default()
+        }
+        Err(error) => return Err(error),
+    };
     inbox.version = 1;
     inbox.updated_at = Utc::now().to_rfc3339();
 

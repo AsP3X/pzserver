@@ -19,6 +19,7 @@ pub mod inventory;
 pub mod jobs;
 pub mod links;
 pub mod lua;
+mod lua_json;
 pub mod panel_state;
 pub mod player_file;
 pub mod respawn;

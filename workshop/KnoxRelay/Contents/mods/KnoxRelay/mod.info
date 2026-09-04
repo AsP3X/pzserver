@@ -1,6 +1,6 @@
 name=Knox Relay
 id=KnoxRelay
 author=AsP3X
-modversion=1.31
+modversion=1.33
 poster=poster.png
 description=Server-side bridge mod for remote server management. Exports game state, inventory snapshots, player positions, progression, live character vitals and appearance, and processes item delivery and money deposit queues via file-based JSON communication. Provides /account register for linking a character to a website account, /report for filing a player report from inside the game, and a friends list with optional map pins: right-click a survivor to ask, accept from the Knox Desk or the website.

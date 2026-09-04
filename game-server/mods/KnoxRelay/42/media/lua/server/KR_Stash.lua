@@ -41,6 +41,36 @@ function KR_Stash.matches(item, itemType)
     return short ~= nil and item.getType ~= nil and item:getType() == short
 end
 
+--- Nested inventory a bag or wallet holds, or nil.
+---
+--- B42 container items (wallets, backpacks, fanny packs) expose this as
+--- `getInventory()`. `getItemContainer()` is the older name and is what
+--- vehicle parts still use. Money sitting in a wallet is invisible unless
+--- both names are tried.
+function KR_Stash.inner(item)
+    if not item then
+        return nil
+    end
+
+    local bag = type(instanceof) == "function" and instanceof(item, "InventoryContainer")
+    if not bag and item.getCategory and item:getCategory() == "Container" then
+        bag = true
+    end
+
+    if bag and item.getInventory then
+        local nested = item:getInventory()
+        if nested then
+            return nested
+        end
+    end
+
+    if item.getItemContainer then
+        return item:getItemContainer()
+    end
+
+    return nil
+end
+
 --- Every container reachable from the player, breadth of the whole rig.
 --- Containers are identified by their tostring() address so a bag reachable
 --- by two routes is only visited once.
@@ -66,10 +96,7 @@ function KR_Stash.containers(player)
         end
 
         for index = 0, contents:size() - 1 do
-            local item = contents:get(index)
-            if item and item.getItemContainer then
-                descend(item:getItemContainer())
-            end
+            descend(KR_Stash.inner(contents:get(index)))
         end
     end
 
@@ -84,17 +111,12 @@ function KR_Stash.containers(player)
                 if entry and entry.getItem then
                     item = entry:getItem()
                 end
-                if item and item.getItemContainer then
-                    descend(item:getItemContainer())
-                end
+                descend(KR_Stash.inner(item))
             end
         end
     end
 
-    local backpack = player:getClothingItem_Back()
-    if backpack and backpack:getItemContainer() then
-        descend(backpack:getItemContainer())
-    end
+    descend(KR_Stash.inner(player:getClothingItem_Back()))
 
     return found
 end

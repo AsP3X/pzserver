@@ -48,9 +48,35 @@ local function matches(item, itemType)
     return short ~= nil and item.getType ~= nil and item:getType() == short
 end
 
+--- Nested inventory a bag or wallet holds. Same names as KR_Stash.inner:
+--- B42 uses getInventory() on container items; getItemContainer() is older.
+local function inner(item)
+    if not item then
+        return nil
+    end
+
+    local bag = type(instanceof) == "function" and instanceof(item, "InventoryContainer")
+    if not bag and item.getCategory and item:getCategory() == "Container" then
+        bag = true
+    end
+
+    if bag and item.getInventory then
+        local nested = item:getInventory()
+        if nested then
+            return nested
+        end
+    end
+
+    if item.getItemContainer then
+        return item:getItemContainer()
+    end
+
+    return nil
+end
+
 --- Hunt for one instance of `itemType`, widening the search as it goes:
 --- full-type lookup, then the engine's recursive search under both spellings,
---- then a manual pass over the inventory and one level of bags inside it.
+--- then a manual pass over the inventory and bags (including wallets) inside it.
 local function findItem(inventory, itemType)
     if not inventory then
         return nil
@@ -71,32 +97,40 @@ local function findItem(inventory, itemType)
         end
     end
 
-    local contents = inventory:getItems()
-    if not contents then
+    local seen = {}
+
+    local function walk(container)
+        if not container then
+            return nil
+        end
+
+        local address = tostring(container)
+        if seen[address] then
+            return nil
+        end
+        seen[address] = true
+
+        local contents = container:getItems()
+        if not contents then
+            return nil
+        end
+
+        for index = 0, contents:size() - 1 do
+            local item = contents:get(index)
+            if matches(item, itemType) then
+                return item
+            end
+
+            local nested = walk(inner(item))
+            if nested then
+                return nested
+            end
+        end
+
         return nil
     end
 
-    for index = 0, contents:size() - 1 do
-        local item = contents:get(index)
-        if matches(item, itemType) then
-            return item
-        end
-
-        if item and item.getItemContainer then
-            local bag = item:getItemContainer()
-            local inside = bag and bag:getItems()
-            if inside then
-                for nestedIndex = 0, inside:size() - 1 do
-                    local nested = inside:get(nestedIndex)
-                    if matches(nested, itemType) then
-                        return nested
-                    end
-                end
-            end
-        end
-    end
-
-    return nil
+    return walk(inventory)
 end
 
 local function mirrorRemoval(inventory, itemType, count)
@@ -232,8 +266,8 @@ local function fillContainer(container, cargo)
                         condition = (tonumber(piece.condition_bp) or 100) / 100
                     end
                     wearOn(item, condition)
-                    if piece.cargo and item.getItemContainer then
-                        fillContainer(item:getItemContainer(), piece.cargo)
+                    if piece.cargo then
+                        fillContainer(inner(item), piece.cargo)
                     end
                 end
             end
@@ -253,7 +287,7 @@ local function mirrorFillBag(inventory, itemType, fraction, cargo)
     primeSpawned(bag)
     wearOn(bag, fraction)
     if cargo then
-        fillContainer(bag.getItemContainer and bag:getItemContainer(), cargo)
+        fillContainer(inner(bag), cargo)
     end
 end
 

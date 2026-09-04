@@ -3,9 +3,12 @@
 //! Same request/result idiom as registration: the mod writes
 //! `report_requests.json`, this stack answers in `report_results.json`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+use crate::lua_json::btree_map_from_lua;
 
 pub const REPORT_REQUESTS_FILE: &str = "report_requests.json";
 pub const REPORT_RESULTS_FILE: &str = "report_results.json";
@@ -180,8 +183,9 @@ pub struct TicketAction {
 pub struct TicketInbox {
     pub version: u32,
     pub updated_at: String,
-    #[serde(default)]
-    pub players: std::collections::BTreeMap<String, TicketPlayerInbox>,
+    /// Lua writes `[]` when this map is empty.
+    #[serde(default, deserialize_with = "btree_map_from_lua")]
+    pub players: BTreeMap<String, TicketPlayerInbox>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -274,4 +278,30 @@ where
         path: path.to_path_buf(),
         source,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel() -> (tempfile::TempDir, ReportChannel) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let channel = ReportChannel::new(dir.path());
+        (dir, channel)
+    }
+
+    #[tokio::test]
+    async fn an_empty_players_array_from_lua_reads_as_no_players() {
+        let (dir, channel) = channel();
+        std::fs::write(
+            dir.path().join(TICKETS_INBOX_FILE),
+            r#"{"version":1,"updated_at":"2026-09-01T20:17:18","players":[]}"#,
+        )
+        .expect("write");
+
+        let inbox = channel.inbox().await.expect("read");
+
+        assert!(inbox.players.is_empty());
+        assert_eq!(inbox.version, 1);
+    }
 }

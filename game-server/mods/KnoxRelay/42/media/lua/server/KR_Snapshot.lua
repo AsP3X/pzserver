@@ -151,11 +151,9 @@ function KR_Snapshot.capture(player)
                 items[#items + 1] = entry
                 weight = weight + (item:getWeight() or 0)
 
-                if item.getItemContainer then
-                    local nested = item:getItemContainer()
-                    if nested and walk(nested, describeContainer(nested, item, id, node.id)) then
-                        entry.contains = "bag:" .. id
-                    end
+                local nested = Stash.inner(item)
+                if nested and walk(nested, describeContainer(nested, item, id, node.id)) then
+                    entry.contains = "bag:" .. id
                 end
             end
         end
@@ -178,11 +176,7 @@ function KR_Snapshot.capture(player)
     --- the player's own pockets as well, rather than its contents appearing
     --- under a container nothing visibly holds.
     local function walkWorn(item)
-        if not item or not item.getItemContainer then
-            return
-        end
-
-        local nested = item:getItemContainer()
+        local nested = Stash.inner(item)
         if not nested or visited[tostring(nested)] then
             return
         end

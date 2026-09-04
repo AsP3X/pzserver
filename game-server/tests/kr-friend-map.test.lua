@@ -51,6 +51,52 @@ check("the pin is named", drawn[2] and drawn[2].text == "pike", drawn[2] and dra
 Map.apply(nil)
 check("a missing list clears pins", #Map.pins() == 0)
 
+ISWorldMap = {
+    render = function(self)
+        self.worldRan = true
+    end,
+}
+Map.hook()
+local worldUI = {
+    worldRan = false,
+    mapAPI = {
+        worldToUIX = function() return 20 end,
+        worldToUIY = function() return 20 end,
+    },
+    getWidth = function() return 400 end,
+    getHeight = function() return 300 end,
+    drawRect = function() end,
+    drawTextCentre = function() end,
+}
+Map.apply({
+    { username = "pike", their_share_position = true, x = 1000, y = 2000, z = 0, online = true },
+})
+ISWorldMap.render(worldUI)
+check("vanilla world render still runs", worldUI.worldRan == true)
+local wrappedWorld = ISWorldMap.render
+Map.hook()
+check("world is not wrapped twice", ISWorldMap.render == wrappedWorld)
+
+ISMiniMapInner = {
+    render = function(self)
+        self.miniRan = true
+    end,
+}
+Map.hook()
+local miniUI = {
+    miniRan = false,
+    mapAPI = {
+        worldToUIX = function() return 20 end,
+        worldToUIY = function() return 20 end,
+    },
+    getWidth = function() return 400 end,
+    getHeight = function() return 300 end,
+    drawRect = function() end,
+    drawTextCentre = function() end,
+}
+ISMiniMapInner.render(miniUI)
+check("mini-map hooks on a later try", miniUI.miniRan == true)
+
 print("")
 print("Passed: " .. pass .. ", Failed: " .. fail)
 if fail > 0 then os.exit(1) end

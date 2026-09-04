@@ -311,6 +311,8 @@ test-game-server:
 		luajit game-server/tests/kr-report.test.lua && \
 		luajit game-server/tests/kr-friends.test.lua && \
 		luajit game-server/tests/kr-friend-map.test.lua && \
+		luajit game-server/tests/kr-stash.test.lua && \
+		luajit game-server/tests/kr-vault.test.lua && \
 		luajit game-server/tests/kr-console.test.lua && \
 		luajit game-server/tests/kr-desk.test.lua; \
 	else \
