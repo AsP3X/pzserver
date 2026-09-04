@@ -53,6 +53,10 @@ if [ -f "$CONFIGURE_SCRIPT" ] && ! grep -q "configure-server.sh" /home/steam/run
     sed -i '/^start_server$/i bash '"$CONFIGURE_SCRIPT" /home/steam/run_server.sh
     echo "[entrypoint] Patched run_server.sh to run configure-server.sh before start"
 fi
+if ! grep -q ".admin_password.env" /home/steam/run_server.sh 2>/dev/null; then
+    sed -i '/^start_server$/i [ -r /home/steam/Zomboid/Server/.admin_password.env ] \&\& . /home/steam/Zomboid/Server/.admin_password.env' /home/steam/run_server.sh
+    echo "[entrypoint] Patched run_server.sh to apply the panel admin password before start"
+fi
 
 # Heap fix: configure-server installs ProjectZomboid64 wrapper after Steam update.
 # Also inject an extra call before start_server for safety.

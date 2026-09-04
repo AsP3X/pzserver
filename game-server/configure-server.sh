@@ -197,6 +197,21 @@ apply_setting "Password"             "${STATE_VAL:-${PZ_SERVER_PASSWORD:-${SERVE
 STATE_VAL=$(read_config_state "AdminPassword")
 apply_setting "AdminPassword"        "${STATE_VAL:-${PZ_ADMIN_PASSWORD:-${ADMIN_PASSWORD:-admin}}}"  "$INI_FILE"
 
+# Images pass ADMIN_PASSWORD / -adminpassword from compose env. After the
+# panel has saved, the INI is the authority — write a tiny env file the
+# entrypoint sources so a restart does not revert to .env.
+write_admin_password_env() {
+    local value escaped
+    value=$(grep -m1 '^AdminPassword=' "$INI_FILE" | sed 's/^AdminPassword=//' | tr -d '\r')
+    [ -n "$value" ] || return 0
+    escaped=$(printf '%s' "$value" | sed "s/'/'\\\\''/g")
+    umask 077
+    printf "export ADMIN_PASSWORD='%s'\nexport PZ_ADMIN_PASSWORD='%s'\n" "$escaped" "$escaped" \
+        > "${INI_DIR}/.admin_password.env"
+    chmod 600 "${INI_DIR}/.admin_password.env" 2>/dev/null || true
+}
+write_admin_password_env
+
 if [ -r "$CONFIG_STATE_FILE" ]; then
     echo "[configure-server] Applied web UI overrides from .config_state"
 fi

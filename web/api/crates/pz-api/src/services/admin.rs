@@ -28,6 +28,7 @@ const EDITABLE_KEYS: &[&str] = &[
     "ServerWelcomeMessage",
     "MaxPlayers",
     "Password",
+    "AdminPassword",
     "Open",
     "Public",
     "PVP",
@@ -43,7 +44,7 @@ const EDITABLE_KEYS: &[&str] = &[
     "AutoCreateUserInWhiteList",
 ];
 
-const SECRET_KEYS: &[&str] = &["Password", "RCONPassword"];
+const SECRET_KEYS: &[&str] = &["Password", "AdminPassword", "RCONPassword"];
 
 /// Names the game will accept in an RCON command.
 pub fn player_name(raw: &str) -> ApiResult<&str> {
@@ -731,17 +732,7 @@ pub async fn set_game_password(
 
     // The command is built by string interpolation, so a quote in the password
     // would end the argument early and hand the rest to RCON as commands.
-    if password.len() < 6 || password.len() > 64 {
-        return Err(ApiError::Validation(
-            "Password must be between 6 and 64 characters.".to_owned(),
-        ));
-    }
-
-    if password.contains(['"', '\\', '\n', '\r']) {
-        return Err(ApiError::Validation(
-            "Password cannot contain quotes or backslashes.".to_owned(),
-        ));
-    }
+    validate_game_password(password)?;
 
     rcon(state, &format!("changepwd \"{name}\" \"{password}\"")).await
 }
@@ -815,7 +806,7 @@ pub async fn write_config(state: &AppState, updates: BTreeMap<String, String>) -
     }
 
     for key in updates.keys() {
-        if key == "RCONPassword" || key.contains("Password") && key != "Password" {
+        if config_key_blocked(key) {
             return Err(ApiError::Validation(
                 "That setting cannot be changed from here.".to_owned(),
             ));
@@ -825,12 +816,61 @@ pub async fn write_config(state: &AppState, updates: BTreeMap<String, String>) -
         }
     }
 
+    if let Some(password) = updates.get("AdminPassword") {
+        validate_game_password(password)?;
+    }
+
     ServerIni::write_updates(&state.config.server_ini_path, &updates)
         .await
         .map_err(|error| ApiError::Internal(error.to_string()))?;
     persist_config_state(&state.config.server_ini_path, &updates)
         .await
-        .map_err(|error| ApiError::Internal(error.to_string()))
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+
+    if let Some(password) = updates.get("AdminPassword") {
+        let name = in_game_admin_username();
+        if let Err(error) = set_game_password(state, &name, password).await {
+            tracing::warn!(
+                %error,
+                admin = %name,
+                "in-game admin password saved; live account will update on the next game restart"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn config_key_blocked(key: &str) -> bool {
+    key == "RCONPassword"
+}
+
+/// Dedicated-server admin account (`-adminusername`), not the website login.
+fn in_game_admin_username() -> String {
+    in_game_admin_username_from(std::env::var("PZ_ADMIN_USERNAME").ok().as_deref())
+}
+
+fn in_game_admin_username_from(raw: Option<&str>) -> String {
+    raw.map(str::trim)
+        .filter(|value| regex_is_match(PLAYER_NAME, value))
+        .unwrap_or("admin")
+        .to_owned()
+}
+
+fn validate_game_password(password: &str) -> ApiResult<()> {
+    if password.len() < 6 || password.len() > 64 {
+        return Err(ApiError::Validation(
+            "Password must be between 6 and 64 characters.".to_owned(),
+        ));
+    }
+
+    if password.contains(['"', '\\', '\n', '\r']) {
+        return Err(ApiError::Validation(
+            "Password cannot contain quotes or backslashes.".to_owned(),
+        ));
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -1521,5 +1561,30 @@ mod tests {
             r#"teleportto "giorgi_99" 1,2,1"#
         );
         assert!(!teleport_to_command("Pike", 100.0, 200.0, 0).starts_with("teleport "));
+    }
+
+    #[test]
+    fn rcon_password_cannot_be_edited_from_the_panel() {
+        assert!(config_key_blocked("RCONPassword"));
+        assert!(!config_key_blocked("Password"));
+        assert!(!config_key_blocked("AdminPassword"));
+        assert!(!config_key_blocked("MaxPlayers"));
+    }
+
+    #[test]
+    fn game_passwords_reject_quotes_and_short_values() {
+        assert!(validate_game_password("abcdef").is_ok());
+        assert!(validate_game_password("abc").is_err());
+        assert!(validate_game_password("abc\"def").is_err());
+        assert!(validate_game_password("abc\\def").is_err());
+    }
+
+    #[test]
+    fn in_game_admin_defaults_to_admin() {
+        assert_eq!(in_game_admin_username_from(None), "admin");
+        assert_eq!(in_game_admin_username_from(Some("")), "admin");
+        assert_eq!(in_game_admin_username_from(Some(" admin ")), "admin");
+        assert_eq!(in_game_admin_username_from(Some("AsP3X")), "AsP3X");
+        assert_eq!(in_game_admin_username_from(Some("bad name")), "admin");
     }
 }

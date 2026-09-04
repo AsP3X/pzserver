@@ -286,7 +286,7 @@
   "admin.config_source_sandbox": "Sandbox",
   "admin.config_source_server": "Server",
   "admin.config_map_description": "Isometrische Zellen nach einem Spiel-Update oder einem Mod mit neuen Kartenteilen manuell neu zeichnen. Das sind keine server.ini-Schlüssel.",
-  "admin.config_help_AdminPassword": "Für den Admin-Login im Spiel.",
+  "admin.config_help_AdminPassword": "Passwort für das Admin-Konto des Dedicated Servers im Spiel. Die Oberfläche speichert es. Läuft das Spiel, gilt es sofort, sonst beim nächsten Neustart. Leer lassen, um den aktuellen Wert zu behalten.",
   "admin.config_help_AdminSafehouse": "Nur das Team kann Safehouses anlegen.",
   "admin.config_help_AllowCoop": "Mehr als einen lokalen Spieler vom selben Client zulassen.",
   "admin.config_help_AllowDestructionBySledgehammer": "Spieler können Kacheln mit dem Vorschlaghammer abreißen.",

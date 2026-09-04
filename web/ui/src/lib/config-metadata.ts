@@ -66,6 +66,7 @@ export const FEATURED_KEYS = [
   'ServerWelcomeMessage',
   'MaxPlayers',
   'Password',
+  'AdminPassword',
   'Open',
   'Public',
   'PVP',

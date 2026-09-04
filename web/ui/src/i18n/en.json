@@ -286,7 +286,7 @@
   "admin.config_source_sandbox": "Sandbox",
   "admin.config_source_server": "Server",
   "admin.config_map_description": "Manually re-render isometric cells after a game update or a mod that adds map tiles. These are not server.ini keys.",
-  "admin.config_help_AdminPassword": "Used for /setaccesslevel style admin login in-game.",
+  "admin.config_help_AdminPassword": "Password for the dedicated-server admin account in-game. Saved by the panel. Applied immediately if the game is running, otherwise on the next restart. Leave blank to keep the current value.",
   "admin.config_help_AdminSafehouse": "Only staff can create safehouses.",
   "admin.config_help_AllowCoop": "Let more than one local player join from the same client.",
   "admin.config_help_AllowDestructionBySledgehammer": "Players can demolish tiles with a sledgehammer.",

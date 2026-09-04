@@ -124,6 +124,9 @@ CONFIG_STATE="PauseEmpty=false" PZ_PAUSE_ON_EMPTY=true \
 ADMIN_PASSWORD="s3cret-admin" \
     assert_setting "AMD64 ADMIN_PASSWORD is honoured when PZ_ADMIN_PASSWORD is unset" AdminPassword "s3cret-admin"
 
+CONFIG_STATE="AdminPassword=from-panel" PZ_ADMIN_PASSWORD=from-env \
+    assert_setting "web UI AdminPassword survives a restart against PZ_ADMIN_PASSWORD" AdminPassword "from-panel"
+
 RCON_PASSWORD="rcon-pw" \
     assert_setting "AMD64 RCON_PASSWORD is honoured when PZ_RCON_PASSWORD is unset" RCONPassword "rcon-pw"
 

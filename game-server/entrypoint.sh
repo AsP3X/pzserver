@@ -20,6 +20,12 @@ fi
 
 bash /home/steam/configure-server.sh
 
+ADMIN_ENV="/home/steam/Zomboid/Server/.admin_password.env"
+if [ -r "$ADMIN_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$ADMIN_ENV"
+fi
+
 OVERRIDE_FILE="/home/steam/Zomboid/.steam_branch"
 if [ -f "$OVERRIDE_FILE" ]; then
     BRANCH=$(cat "$OVERRIDE_FILE")
