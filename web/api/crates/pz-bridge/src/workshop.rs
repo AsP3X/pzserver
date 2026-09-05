@@ -344,6 +344,39 @@ fn read_modversion(item: &Path, mod_id: &str, game_version: Option<&str>) -> Opt
             return Some(version);
         }
     }
+    read_bridge_version(item, mod_id)
+}
+
+/// `KR_Bridge.VERSION` when `mod.info` has no `modversion=`. Knox Relay
+/// always has one of the two; other mods typically have neither.
+fn read_bridge_version(item: &Path, mod_id: &str) -> Option<String> {
+    for dir in resolve_mod_dirs(item, mod_id) {
+        for rel in [
+            "42/media/lua/server/KR_Bridge.lua",
+            "media/lua/server/KR_Bridge.lua",
+        ] {
+            let path = dir.join(rel);
+            let Ok(body) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if let Some(version) = parse_bridge_version(&body) {
+                return Some(version);
+            }
+        }
+    }
+    None
+}
+
+fn parse_bridge_version(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let line = line.trim().trim_end_matches('\r');
+        let Some(rest) = line.strip_prefix("KR_Bridge.VERSION") else {
+            continue;
+        };
+        let rest = rest.trim().trim_start_matches('=').trim();
+        let rest = rest.trim_matches(|ch| ch == '"' || ch == '\'');
+        return display_mod_version(rest);
+    }
     None
 }
 
@@ -394,7 +427,10 @@ fn ranked_mod_info_paths(item: &Path, mod_id: &str, game: Option<&[u32]>) -> Vec
 /// Directory for this Mods= token. The folder name often matches, but some
 /// Workshop items (Chuckleberry's alert system) ship a different directory
 /// and put the load-list id only inside `mod.info`.
-fn normalize_mod_id(id: &str) -> &str {
+///
+/// B42 `Mods=` tokens are often `\KnoxRelay`; strip the slash so the folder
+/// still matches.
+pub fn normalize_mod_id(id: &str) -> &str {
     id.trim().trim_start_matches(['\\', '/'])
 }
 
@@ -441,8 +477,7 @@ fn dir_declares_mod_id(dir: &Path, mod_id: &str) -> bool {
         let Ok(body) = std::fs::read_to_string(path) else {
             continue;
         };
-        if parse_mod_id(&body)
-            .is_some_and(|id| normalize_mod_id(&id).eq_ignore_ascii_case(mod_id))
+        if parse_mod_id(&body).is_some_and(|id| normalize_mod_id(&id).eq_ignore_ascii_case(mod_id))
         {
             return true;
         }
@@ -568,6 +603,12 @@ pub fn parse_modversion(body: &str) -> Option<String> {
                 .find_map(|token| plausible_mod_version(&token))
         })
         .or_else(|| trailing_version(body).and_then(|value| plausible_mod_version(&value)))
+}
+
+/// A version the Mods Version column may show. Calendar dates (`2024-08-15`)
+/// are `None` — Steam's install day is not a mod version.
+pub fn display_mod_version(value: &str) -> Option<String> {
+    plausible_mod_version(value)
 }
 
 fn plausible_mod_version(value: &str) -> Option<String> {
@@ -1303,6 +1344,45 @@ mod tests {
             parse_modversion("modversion=42-1.4.3"),
             Some("42-1.4.3".to_owned())
         );
+        assert_eq!(display_mod_version("1.35"), Some("1.35".to_owned()));
+        assert_eq!(display_mod_version("2024-08-15"), None);
+        assert_eq!(
+            parse_bridge_version("KR_Bridge.VERSION = \"1.35\"\n"),
+            Some("1.35".to_owned())
+        );
+    }
+
+    #[test]
+    fn inspect_install_reads_knox_version_from_the_lua_bridge_when_modinfo_omits_it() {
+        let root = tempfile::tempdir().expect("scratch workshop root");
+        let mod_dir = root
+            .path()
+            .join("content")
+            .join("108600")
+            .join("3777446787")
+            .join("mods")
+            .join("KnoxRelay");
+        let lua = mod_dir.join("42/media/lua/server");
+        std::fs::create_dir_all(&lua).expect("lua dir");
+        std::fs::write(
+            mod_dir.join("42/mod.info"),
+            "name=Knox Relay\nid=KnoxRelay\n",
+        )
+        .expect("mod.info without modversion");
+        std::fs::write(
+            lua.join("KR_Bridge.lua"),
+            "KR_Bridge = {}\nKR_Bridge.VERSION = \"1.35\"\n",
+        )
+        .expect("bridge");
+
+        let install = inspect_install(
+            Some(root.path()),
+            "3777446787",
+            "KnoxRelay",
+            &WorkshopAcf::default(),
+            Some("42.20.0"),
+        );
+        assert_eq!(install.version.as_deref(), Some("1.35"));
     }
 
     #[test]

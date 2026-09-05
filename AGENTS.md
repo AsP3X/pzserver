@@ -38,7 +38,7 @@ The Desk and other client Lua run on the **game client**, not in the container. 
 
 `%ProgramFiles(x86)%\Steam\steamapps\workshop\content\108600\3777446787\mods\KnoxRelay`
 
-Copy the current source tree into that cache (same files the image seed uses). Then the user must **fully quit** Project Zomboid and relaunch — disconnect/reconnect keeps the old client Lua. Confirm the cache `42/mod.info` is the tree you just shipped.
+Copy the current source tree into that cache (root + `42/` + `common/`, same files the image seed uses). Then the user must **fully quit** Project Zomboid and relaunch — disconnect/reconnect keeps the old client Lua. Confirm the cache `42/mod.info` and `common/mod.info` are the tree you just shipped.
 
 Steam can overwrite this cache with the last **published** Workshop build. Re-seed it after every change until that build is on Steam.
 
@@ -48,12 +48,27 @@ Do **not** bump the version unless the user has explicitly answered **yes** to a
 
 Not bumping the version is **not** permission to leave server or client on old Lua. Deploy both anyway.
 
-The version is two strings that must match each other (and the live `mod_version` after deploy):
+The version is four strings that must match each other (and the live `mod_version` after deploy):
 
 - `modversion=` in `game-server/mods/KnoxRelay/42/mod.info`
+- `modversion=` in `game-server/mods/KnoxRelay/common/mod.info`
+- `modversion=` in `game-server/mods/KnoxRelay/mod.info`
 - `KR_Bridge.VERSION` in `game-server/mods/KnoxRelay/42/media/lua/server/KR_Bridge.lua`
 
-`make workshop-package` / `scripts/workshop-package.sh` refuses to run if those two disagree. That check is not a deploy. Do not run the packager just to “keep staging in sync” after a no.
+`make workshop-package` / `scripts/workshop-package.sh` and `game-server/tests/knox-manifest.test.sh` refuse if they disagree. That check is not a deploy. Do not run the packager just to “keep staging in sync” after a no.
+
+### Knox Relay Version is never blank; other mods may be
+
+PZ’s in-game Mods **Version** row (`ChooseGameInfo.getModVersion`) and the admin Mods Version column only show `modversion=` from the file PZ actually reads: `{mod}/<versionDir>/mod.info` (for us `42/`) then `{mod}/common/mod.info`. A Steam install date is not a version. Mods that never wrote `modversion=` stay blank (`—` on the panel). Do not invent a number for them, and do not fill the column from `timeupdated`.
+
+Knox Relay must always have a version. Keep the four strings above in lockstep. Seed the **whole** tree (root + `42/` + `common/`), not only `42/`. After deploy, all of these report the same X.Y:
+
+- Boot: `[KnoxRelay] Initializing server-side bridge mod vX.Y`
+- `data/zomboid/Lua/game_state.json` → `"mod_version":"X.Y"`
+- Admin Mods row for KnoxRelay
+- In-game Mods detail panel Version row when Knox Relay is selected
+
+The panel reads Knox’s cached `mod.info` first, then live `game_state.json` `mod_version` if the cache read misses. It still never falls back to a calendar date.
 
 ### Always ask before a Workshop release
 

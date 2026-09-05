@@ -80,6 +80,8 @@ When the user updates Knox Relay, the **local dedicated server and the PZ client
 
 **Do not bump** `modversion=` or `KR_Bridge.VERSION` unless the user answered **yes** to the Workshop-release question. After any Knox Relay change: deploy server + client first, then ask with the question dialog: “Prepare the next Knox Relay Workshop release?” Yes → bump, changenote, package, Contents-only sync, deploy again. No → leave the version alone; server and client already have the Lua.
 
+Knox Relay Version is never blank: `modversion=` in `42/`, `common/`, and root `mod.info` must match `KR_Bridge.VERSION`. Other mods with no `modversion=` stay blank — never fill Version from a Steam date. Canonical copy: `AGENTS.md`.
+
 Same-turn server deploy: rebuild and recreate `game-server` (`docker compose -f docker-compose.yml -f docker-compose.amd64.yml up -d --build --force-recreate game-server`). Confirm `Initializing server-side bridge mod vX.Y` and `data/zomboid/Lua/game_state.json` `"mod_version":"X.Y"`.
 
 Same-turn client deploy: copy the source tree into `%ProgramFiles(x86)%\Steam\steamapps\workshop\content\108600\3777446787\mods\KnoxRelay`. The user must fully quit and relaunch PZ.

@@ -1050,6 +1050,7 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
     };
 
     let game_version = state.config.pz_game_version.as_str();
+    let live_knox = live_knox_version(state).await;
     for entry in entries.iter_mut() {
         if entry.workshop_id.is_empty() {
             continue;
@@ -1061,11 +1062,20 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
             &acf,
             Some(game_version),
         );
-        entry.installed_version = install.version.clone().or_else(|| {
-            steam
-                .get(&entry.workshop_id)
-                .and_then(|row| row.version.clone())
-        });
+        let protected = is_protected(state, &entry.workshop_id, &entry.mod_id);
+        // Knox Relay always has a version: cached mod.info / KR_Bridge.lua,
+        // then the live game_state.json the running server just wrote.
+        // Other mods: cached mod.info, then a Steam description Version:
+        // line. Never a calendar date — display_mod_version rejects those.
+        entry.installed_version = install
+            .version
+            .clone()
+            .or_else(|| protected.then(|| live_knox.clone()).flatten())
+            .or_else(|| {
+                steam
+                    .get(&entry.workshop_id)
+                    .and_then(|row| row.version.clone())
+            });
         entry.installed_updated_at = install.time_updated.map(|at| at as i64);
         entry.cached = install.cached;
         entry.update_available = install.update_available(
@@ -1074,6 +1084,11 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
                 .and_then(|row| row.time_updated),
         );
     }
+}
+
+async fn live_knox_version(state: &AppState) -> Option<String> {
+    let read = state.bridge.game_state().await.ok().flatten()?;
+    pz_bridge::workshop::display_mod_version(read.data.mod_version.as_deref()?)
 }
 
 /// Pull one Workshop item through SteamCMD inside the game container.
@@ -1148,6 +1163,7 @@ fn workshop_update_message(output: &str) -> String {
 }
 
 fn is_protected(state: &AppState, workshop_id: &str, mod_id: &str) -> bool {
+    let mod_id = pz_bridge::workshop::normalize_mod_id(mod_id);
     state
         .config
         .bridge_workshop_id

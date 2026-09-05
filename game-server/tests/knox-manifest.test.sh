@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The in-game mod loader (ChooseGameInfo.getModVersion) reads modversion=
-# from the mod-root mod.info. 42/mod.info alone leaves that Version row blank.
+# PZ ChooseGameInfo.getModVersion reads modversion= from versionDir/mod.info
+# (42/) then common/mod.info. Root mod.info is the discovery fallback.
+# All three plus KR_Bridge.VERSION must match so Knox Relay is never blank.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SRC="$ROOT/game-server/mods/KnoxRelay"

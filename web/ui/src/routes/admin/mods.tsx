@@ -692,7 +692,8 @@ export function AdminModsPage() {
 }
 
 /// Anything with a digit except a calendar date. Steam install days are not
-/// versions; `1.35`, `42-1.4.3` and `1.3.14.0-B42UNSTABLE` are.
+/// versions; `1.35`, `42-1.4.3` and `1.3.14.0-B42UNSTABLE` are. Knox Relay
+/// always ships a real version; other mods stay `—` when they never wrote one.
 function isModVersion(value: string): boolean {
   const core = value.trim()
   if (!core || !/\d/.test(core)) {

@@ -45,10 +45,12 @@ running the mod, and the fix has to go through this whole flow again.
 
 ### 2. Bump the version and write a changenote
 
-Only do this step after a **yes**. The version lives in two places and
+Only do this step after a **yes**. The version lives in four places and
 `make workshop-package` refuses to run if they disagree:
 
-- `modversion=` in `game-server/mods/KnoxRelay/42/mod.info` — metadata
+- `modversion=` in `game-server/mods/KnoxRelay/42/mod.info` — B42 Lua tree
+- `modversion=` in `game-server/mods/KnoxRelay/common/mod.info` — PZ Version fallback
+- `modversion=` in `game-server/mods/KnoxRelay/mod.info` — discovery
 - `KR_Bridge.VERSION` in `KR_Bridge.lua` — what a running server reports in
   `game_state.json`, so the panel can tell which bridge features it has
 
@@ -62,9 +64,9 @@ make workshop-package
 ```
 
 Copies the source tree into `workshop/KnoxRelay/Contents/mods/KnoxRelay/`, placing
-`mod.info` and `poster.png` at both the `42/` level and the mod root (the
-dedicated server discovers mods by scanning for a root-level `mod.info`), and
-strips `.DS_Store` files, which PZ rejects on submit.
+`mod.info` and `poster.png` at the `42/` level, the mod root, and `common/` (PZ
+reads Version from `42/` then `common/`), and strips `.DS_Store` files, which PZ
+rejects on submit.
 
 ### 4. Sync into the upload folder — `Contents/` only
 
