@@ -652,6 +652,22 @@ resizeTo(MIN_W, MIN_H)
 check("empty inbox still lays out a list and a body",
     view.list:getHeight() > 0 and view.body:getHeight() > 0 and view.list.count == 0)
 
+-- refit must not call missing methods. Kahlua logs `el:paginate()` on a
+-- button or list even when that call is wrapped in pcall.
+local button = ISButton:new(0, 0, 40, 20, "INBOX", nil, function() end)
+KR_Desk.refit(button)
+check("refit on a button without paginate does not error", true)
+
+check("a scrolling list has no paginate", ISScrollingListBox.paginate == nil)
+KR_Desk.refit(view.list)
+check("refit on a list without paginate does not error", true)
+
+local pagesAfterRefit = view.body.paginated or 0
+KR_Desk.refit(view.body)
+check("refit still paginates a rich text panel",
+    (view.body.paginated or 0) > pagesAfterRefit,
+    "before=" .. tostring(pagesAfterRefit) .. " after=" .. tostring(view.body.paginated))
+
 --------------------------------------------------------------------------
 
 print(string.format("\n%d passed, %d failed", pass, fail))

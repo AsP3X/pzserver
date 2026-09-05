@@ -23,6 +23,13 @@
 -- OnTickEvenPaused before it reaches the pause gate, so it keeps running.
 --
 
+-- A connecting multiplayer client still loads media/lua/server in B42.
+-- This file is the dedicated-server event loop; skip it unless we are the
+-- server (dedicated or listen host).
+if type(isClient) == "function" and type(isServer) == "function" and isClient() and not isServer() then
+    return
+end
+
 local Bridge = require("KR_Bridge")
 local Snapshot = require("KR_Snapshot")
 local Orders = require("KR_Orders")
@@ -310,6 +317,17 @@ local function onServerStarted()
     end
 end
 
+--- Subscribe when the event exists. A missing Events.X is nil; X.Add then
+--- throws and Kahlua logs it even from inside pcall.
+local function hookEvent(name, fn)
+    local event = Events[name]
+    if event and event.Add then
+        event.Add(fn)
+        return true
+    end
+    return false
+end
+
 Events.OnCreatePlayer.Add(onCreatePlayer)
 Events.OnWeaponHitCharacter.Add(Sanctuary.onWeaponHit)
 Events.OnWeaponHitCharacter.Add(Feud.onWeaponHit)
@@ -323,20 +341,18 @@ Events.OnClientCommand.Add(Friends.onClientCommand)
 
 -- Optional: without it a player who disconnects mid-registration leaves an
 -- entry that poll() drops on the answer timeout anyway.
-local disconnectHooked = pcall(function()
-    Events.OnPlayerDisconnect.Add(Enrol.forget)
-    Events.OnPlayerDisconnect.Add(Report.forget)
-    Events.OnPlayerDisconnect.Add(Friends.forget)
-end)
+local disconnectHooked = hookEvent("OnPlayerDisconnect", Enrol.forget)
+hookEvent("OnPlayerDisconnect", Report.forget)
+hookEvent("OnPlayerDisconnect", Friends.forget)
 
 -- No vanilla Lua subscribes to OnTickEvenPaused, so treat it as optional: an
 -- indexing error here would take the whole mod down with it, and everything
 -- else still works without the real-time cadence.
-local tickHooked = pcall(function() Events.OnTickEvenPaused.Add(onTickEvenPaused) end)
+local tickHooked = hookEvent("OnTickEvenPaused", onTickEvenPaused)
 
 -- Optional for the same reason. Without it the heartbeat still carries
 -- everything else; only the recently-learned-recipes panel stays empty.
-local recipeHooked = pcall(function() Events.OnRecipeLearned.Add(onRecipeLearned) end)
+local recipeHooked = hookEvent("OnRecipeLearned", onRecipeLearned)
 
 print(LOG .. "Event hooks registered: OnCreatePlayer, OnWeaponHitCharacter(2), EveryTenMinutes, EveryOneMinute, OnServerStarted, OnClientCommand(4), MoneyDeposit"
     .. (tickHooked and ", OnTickEvenPaused" or "")

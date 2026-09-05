@@ -83,6 +83,17 @@ local function safe(fn, default)
     return default
 end
 
+--- Call `object:method()` only when the method exists. A missing Java method
+--- still dumps a Kahlua stack trace from inside pcall, so `safe()` is not
+--- silent for firearm-only getters on a melee weapon.
+local function callIf(object, method, default)
+    if not object or not object[method] then
+        return default
+    end
+
+    return safe(function() return object[method](object) end, default)
+end
+
 local function round1(value)
     value = tonumber(value) or 0
 
@@ -442,22 +453,24 @@ local function collectWeapon(player)
 
     --- Sharpness is an absolute value against the item's own maximum, so it
     --- only means anything as a proportion of it.
-    if safe(function() return item:hasSharpness() end, false) then
-        local sharpness = safe(function() return item:getSharpness() end, 0)
-        local maximum = safe(function() return item:getMaxSharpness() end, 0)
+    if callIf(item, "hasSharpness", false) then
+        local sharpness = callIf(item, "getSharpness", 0)
+        local maximum = callIf(item, "getMaxSharpness", 0)
 
         if maximum > 0 then
             weapon.sharpness = round1(sharpness / maximum * 100)
         end
     end
 
-    weapon.ammo = safe(function() return item:getCurrentAmmoCount() end)
-    weapon.chamber = safe(function() return item:isRoundChambered() end)
-    weapon.jam = safe(function() return item:isJammed() end)
+    --- Firearm-only. Calling these on an axe logs a Java exception every
+    --- heartbeat even when wrapped in pcall.
+    weapon.ammo = callIf(item, "getCurrentAmmoCount")
+    weapon.chamber = callIf(item, "isRoundChambered")
+    weapon.jam = callIf(item, "isJammed")
 
     --- getAttachmentsProvided, not getAttachments, and it is a list of plain
     --- strings rather than of items.
-    local attachments = safe(function() return item:getAttachmentsProvided() end)
+    local attachments = callIf(item, "getAttachmentsProvided")
     if attachments then
         local fitted = {}
         for index = 0, safe(function() return attachments:size() end, 0) - 1 do

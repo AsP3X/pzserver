@@ -232,6 +232,17 @@ local function fakePlayer(name, opts)
         end,
         getPrimaryHandItem = function()
             if opts.unarmed then return nil end
+            if opts.gun then
+                return {
+                    getName = function() return "M9" end,
+                    getCondition = function() return 8 end,
+                    getConditionMax = function() return 10 end,
+                    getCurrentAmmoCount = function() return 12 end,
+                    isRoundChambered = function() return true end,
+                    isJammed = function() return false end,
+                    getAttachmentsProvided = function() return list({ "Laser" }) end,
+                }
+            end
             return {
                 getName = function() return "Axe" end,
                 getCondition = function() return 7 end,
@@ -239,9 +250,6 @@ local function fakePlayer(name, opts)
                 hasSharpness = function() return true end,
                 getSharpness = function() return 3 end,
                 getMaxSharpness = function() return 5 end,
-                getCurrentAmmoCount = function() return nil end,
-                isRoundChambered = function() return nil end,
-                isJammed = function() return nil end,
                 getAttachmentsProvided = function() return list({ "Scope" }) end,
             }
         end,
@@ -406,6 +414,11 @@ check("sharpness is a proportion of the item's maximum", beat.weapon.sharpness =
     "got " .. tostring(beat.weapon.sharpness))
 check("attachments come from getAttachmentsProvided", beat.weapon.attachments[1] == "Scope")
 check("absent firearm fields are omitted", beat.weapon.ammo == nil and beat.weapon.chamber == nil)
+
+local armed = Vitals.heartbeat(fakePlayer("rook", { gun = true }))
+check("a gun reports ammo count", armed.weapon.ammo == 12, armed.weapon and armed.weapon.ammo)
+check("a gun reports a chambered round", armed.weapon.chamber == true)
+check("a gun reports jam state", armed.weapon.jam == false)
 check("clothing is unwrapped from the worn entry", beat.clothing.items[1].name == "Jacket")
 check("clothing condition is a percent of the garment's own maximum",
     beat.clothing.items[1].condition == 90, "got " .. tostring(beat.clothing.items[1].condition))

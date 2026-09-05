@@ -145,22 +145,27 @@ end
 ---
 --- setWidth/setHeight are plain field writes in ISUIElement — they do not run
 --- onResize — so a scrolling list keeps the scrollbar it sized on creation and
---- a rich text panel keeps line breaks measured against the old width. Every
---- call is guarded because which of these exist varies across builds.
+--- a rich text panel keeps line breaks measured against the old width. Call
+--- only methods that exist: paginate is rich-text-only, and Kahlua still
+--- logs a missing Java method from inside pcall.
 function KR_Desk.refit(el)
     if not el then
         return
     end
 
-    if el.items and el.itemheight then
-        pcall(function() el:setScrollHeight(#el.items * el.itemheight) end)
+    if el.items and el.itemheight and el.setScrollHeight then
+        el:setScrollHeight(#el.items * el.itemheight)
     end
-    pcall(function() el:updateScrollbars() end)
-    pcall(function() el:paginate() end)
+    if el.updateScrollbars then
+        el:updateScrollbars()
+    end
+    if el.paginate then
+        el:paginate()
+    end
 
     -- Shrinking can leave the view scrolled past the end, which reads as an
     -- empty widget until the player scrolls back up.
-    pcall(function()
+    if el.getScrollHeight and el.getYScroll and el.setYScroll then
         local extent = el:getScrollHeight() or 0
         local visible = el:getHeight() or 0
         local top = el:getYScroll() or 0
@@ -170,7 +175,7 @@ function KR_Desk.refit(el)
         elseif top > 0 then
             el:setYScroll(0)
         end
-    end)
+    end
 end
 
 --- Buttons come in three flavours and nothing else.
