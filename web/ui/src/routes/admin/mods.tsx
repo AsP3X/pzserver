@@ -18,7 +18,6 @@ import { Field, FormError, TextAreaField } from '@/components/ui/field'
 import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, ApiError, type ModEntry, type WorkshopLookup } from '@/lib/api'
-import { formatDateFromUnix } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { fuzzyMatch } from '@/lib/fuzzy'
 import { parseModImport } from '@/lib/parse-mod-import'
@@ -41,7 +40,7 @@ type LookupState =
  * the dedicated server will try first.
  */
 export function AdminModsPage() {
-  const { t, intlLocale } = useTranslation()
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { data, isPending, isError, refetch } = useQuery(adminModsQuery)
   const status = useQuery(serverStatusQuery)
@@ -424,7 +423,7 @@ export function AdminModsPage() {
                         <td className="px-3 py-3">
                           <span className="flex flex-col gap-0.5">
                             <span className="font-mono text-xs text-smoke">
-                              {modVersionLabel(entry, t, intlLocale)}
+                              {modVersionLabel(entry, t)}
                             </span>
                             {entry.update_available ? (
                               <span className="font-mono text-[0.625rem] tracking-widest text-hazard uppercase">
@@ -692,20 +691,40 @@ export function AdminModsPage() {
   )
 }
 
-function modVersionLabel(
-  entry: ModEntry,
-  t: TranslationContextValue['t'],
-  locale: string,
-): string {
+/// Dotted numeric versions only (`1.35`, `2.7.6`). Calendar dates and
+/// Steam `timeupdated` stamps are not versions.
+function isModVersion(value: string): boolean {
+  const core = value.trim().replace(/^[vV]/, '')
+  if (!core) {
+    return false
+  }
+  if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(core)) {
+    return false
+  }
+  if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}$/.test(core)) {
+    return false
+  }
+  const parts = core.split('.')
+  if (!parts.every((part) => /^\d+$/.test(part))) {
+    return false
+  }
+  const numbers = parts.map(Number)
+  if (numbers.some((part) => part >= 1900)) {
+    return false
+  }
+  if (numbers.length === 1) {
+    return numbers[0] > 0 && numbers[0] < 1900
+  }
+  return numbers.length >= 2
+}
+
+function modVersionLabel(entry: ModEntry, t: TranslationContextValue['t']): string {
   const version = entry.installed_version?.trim()
-  if (version) {
+  if (version && isModVersion(version)) {
     return version
   }
   if (entry.update_available && !entry.cached) {
     return t('admin.mods_not_cached')
-  }
-  if (entry.installed_updated_at && entry.installed_updated_at > 0) {
-    return formatDateFromUnix(entry.installed_updated_at, locale)
   }
   return '—'
 }

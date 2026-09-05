@@ -530,32 +530,69 @@ fn cmp_version(left: &[u32], right: &[u32]) -> std::cmp::Ordering {
 
 /// `modversion=` first, then a `version=` that is not `versionMin`, then a
 /// `Version:` line of the kind Workshop descriptions use.
+///
+/// Calendar dates (`2024-08-15`, `2024.08.15`) are not versions — the load
+/// list must not show Steam's install day in the Version column.
 pub fn parse_modversion(body: &str) -> Option<String> {
     let mut fallback = None;
     for line in body.lines() {
         let line = line.trim().trim_end_matches('\r');
         if let Some(rest) = line.strip_prefix("modversion=") {
-            let version = rest.trim();
-            if !version.is_empty() {
-                return Some(version.to_owned());
+            if let Some(version) = plausible_mod_version(rest) {
+                return Some(version);
             }
         }
         let lower = line.to_ascii_lowercase();
         if lower.starts_with("version=") && !lower.starts_with("versionmin=") {
-            let version = line[8..].trim();
-            if !version.is_empty() && fallback.is_none() {
-                fallback = Some(version.to_owned());
+            if fallback.is_none() {
+                fallback = plausible_mod_version(line[8..].trim());
             }
         }
     }
-    if fallback.is_some() {
-        return fallback;
+    fallback
+        .or_else(|| {
+            extract_labels(body, "Version")
+                .into_iter()
+                .chain(extract_labels(body, "Mod Version"))
+                .find_map(|token| plausible_mod_version(&token))
+        })
+        .or_else(|| trailing_version(body).and_then(|value| plausible_mod_version(&value)))
+}
+
+fn plausible_mod_version(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || looks_like_calendar_date(trimmed) {
+        return None;
     }
-    extract_labels(body, "Version")
-        .into_iter()
-        .chain(extract_labels(body, "Mod Version"))
-        .next()
-        .or_else(|| trailing_version(body))
+    let core = trimmed.trim_start_matches(['v', 'V']);
+    let parts = parse_dotted_version(core)?;
+    if parts.iter().any(|&part| part >= 1900) {
+        return None;
+    }
+    if parts.len() == 1 && parts[0] == 0 {
+        return None;
+    }
+    Some(trimmed.to_owned())
+}
+
+fn looks_like_calendar_date(value: &str) -> bool {
+    let pieces: Vec<&str> = value.split(['-', '/', '.']).collect();
+    if pieces.len() != 3 {
+        return false;
+    }
+    let Ok(first) = pieces[0].parse::<u32>() else {
+        return false;
+    };
+    let Ok(second) = pieces[1].parse::<u32>() else {
+        return false;
+    };
+    let Ok(third) = pieces[2].parse::<u32>() else {
+        return false;
+    };
+    let year = |n: u32| (1970..=2100).contains(&n);
+    let month = |n: u32| (1..=12).contains(&n);
+    let day = |n: u32| (1..=31).contains(&n);
+    (year(first) && month(second) && day(third)) || (day(first) && month(second) && year(third))
 }
 
 /// Last token of a one-line title like `Neat Crafting 1.6.20`. Needs at least
@@ -1238,6 +1275,19 @@ mod tests {
         assert_eq!(
             parse_modversion("Neat Crafting 1.6.20"),
             Some("1.6.20".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_modversion_rejects_calendar_dates() {
+        assert_eq!(parse_modversion("Version: 2024-08-15"), None);
+        assert_eq!(parse_modversion("Version: 2024.08.15"), None);
+        assert_eq!(parse_modversion("modversion=15.08.2024"), None);
+        assert_eq!(parse_modversion("Updated HUD 2024.08.15"), None);
+        assert_eq!(parse_modversion("modversion=1.35"), Some("1.35".to_owned()));
+        assert_eq!(
+            parse_modversion("modversion=v2.7.6"),
+            Some("v2.7.6".to_owned())
         );
     }
 

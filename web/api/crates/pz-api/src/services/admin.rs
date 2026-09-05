@@ -983,8 +983,8 @@ pub struct ModEntry {
     /// `modversion=` from the cached `mod.info`, when the file has one.
     #[serde(default)]
     pub installed_version: Option<String>,
-    /// SteamCMD `timeupdated` for the copy on disk. Shown when the mod
-    /// never ships a version string.
+    /// SteamCMD `timeupdated` for the copy on disk. Used to detect
+    /// Workshop updates; never shown as a version string.
     #[serde(default)]
     pub installed_updated_at: Option<i64>,
     /// The Workshop tree is on disk under `steamapps/workshop/content/108600`.
