@@ -21,10 +21,20 @@ SRC_42="${SRC_MOD}/42"
 # features a server has.
 INFO_VERSION="$(sed -n 's/^modversion=//p' "${SRC_42}/mod.info" | tr -d '\r')"
 LUA_VERSION="$(sed -n 's/^KR_Bridge\.VERSION *= *"\(.*\)"$/\1/p' "${SRC_42}/media/lua/server/KR_Bridge.lua")"
+ROOT_INFO="${SRC_MOD}/mod.info"
+ROOT_VERSION=""
+if [ -f "${ROOT_INFO}" ]; then
+    ROOT_VERSION="$(sed -n 's/^modversion=//p' "${ROOT_INFO}" | tr -d '\r')"
+fi
 
 if [ "${INFO_VERSION}" != "${LUA_VERSION}" ]; then
-    echo "ERROR: version mismatch — mod.info says '${INFO_VERSION}', KR_Bridge.VERSION says '${LUA_VERSION}'."
+    echo "ERROR: version mismatch — 42/mod.info says '${INFO_VERSION}', KR_Bridge.VERSION says '${LUA_VERSION}'."
     echo "Update both before packaging."
+    exit 1
+fi
+if [ -n "${ROOT_VERSION}" ] && [ "${ROOT_VERSION}" != "${INFO_VERSION}" ]; then
+    echo "ERROR: version mismatch — mod root mod.info says '${ROOT_VERSION}', 42/mod.info says '${INFO_VERSION}'."
+    echo "The in-game mod loader reads the root file. Keep them in lockstep."
     exit 1
 fi
 
@@ -52,15 +62,15 @@ if [ -f "${SRC_42}/poster.png" ]; then
 fi
 
 # Also copy mod.info + poster to the MOD ROOT (parent of 42/).
-# PZ B42 dedicated server discovers mods by scanning for mod.info at the root
-# of the mod directory — without this, ZomboidFileSystem.loadModAndRequired
-# reports "required mod not found".
+# PZ B42 discovers mods by scanning for mod.info at the root of the mod
+# directory, and the in-game mod loader's Version field is getModVersion()
+# from that same file. 42/mod.info alone leaves the Version row blank.
 DST_MOD_ROOT="$(dirname "${DST_MOD}")"
 cp "${SRC_42}/mod.info" "${DST_MOD_ROOT}/mod.info"
 if [ -f "${SRC_42}/poster.png" ]; then
     cp "${SRC_42}/poster.png" "${DST_MOD_ROOT}/poster.png"
 fi
-echo "Copied mod.info + poster.png to mod root (for PZ discovery)"
+echo "Copied mod.info + poster.png to mod root (for PZ discovery and Version)"
 
 # Strip macOS metadata. PZ validates the Contents/ tree on submit and rejects
 # files it does not recognise, so a stray .DS_Store can block an upload.

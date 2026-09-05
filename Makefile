@@ -304,6 +304,7 @@ test:
 # against a throwaway config tree to verify env-var precedence.
 test-game-server:
 	@bash game-server/tests/configure-server.test.sh
+	@bash game-server/tests/knox-manifest.test.sh
 	@bash game-server/tests/steam-update-check.test.sh
 	@if command -v luajit >/dev/null 2>&1; then \
 		luajit game-server/tests/kr-vitals.test.lua && \
