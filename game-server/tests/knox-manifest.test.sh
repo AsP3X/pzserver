@@ -21,9 +21,15 @@ if [ -f "$SRC/42/mod.info" ]; then
 else
     ng "42/ has mod.info" "missing $SRC/42/mod.info"
 fi
+if [ -f "$SRC/common/mod.info" ]; then
+    ok "common/ has mod.info"
+else
+    ng "common/ has mod.info" "missing $SRC/common/mod.info"
+fi
 
 root_v="$(version_of "$SRC/mod.info" 2>/dev/null || true)"
 b42_v="$(version_of "$SRC/42/mod.info" 2>/dev/null || true)"
+common_v="$(version_of "$SRC/common/mod.info" 2>/dev/null || true)"
 lua_v="$(sed -n 's/^KR_Bridge\.VERSION *= *"\(.*\)"$/\1/p' "$SRC/42/media/lua/server/KR_Bridge.lua" | tr -d '\r')"
 
 if [ -n "$root_v" ]; then
@@ -31,10 +37,10 @@ if [ -n "$root_v" ]; then
 else
     ng "root modversion is set" "empty"
 fi
-if [ "$root_v" = "$b42_v" ] && [ "$root_v" = "$lua_v" ]; then
-    ok "root, 42/, and KR_Bridge.VERSION agree ($root_v)"
+if [ "$root_v" = "$b42_v" ] && [ "$root_v" = "$common_v" ] && [ "$root_v" = "$lua_v" ]; then
+    ok "root, 42/, common/, and KR_Bridge.VERSION agree ($root_v)"
 else
-    ng "root, 42/, and KR_Bridge.VERSION agree" "root=$root_v 42=$b42_v lua=$lua_v"
+    ng "root, 42/, common/, and KR_Bridge.VERSION agree" "root=$root_v 42=$b42_v common=$common_v lua=$lua_v"
 fi
 
 echo

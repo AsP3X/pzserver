@@ -691,11 +691,11 @@ export function AdminModsPage() {
   )
 }
 
-/// Dotted numeric versions only (`1.35`, `2.7.6`). Calendar dates and
-/// Steam `timeupdated` stamps are not versions.
+/// Anything with a digit except a calendar date. Steam install days are not
+/// versions; `1.35`, `42-1.4.3` and `1.3.14.0-B42UNSTABLE` are.
 function isModVersion(value: string): boolean {
-  const core = value.trim().replace(/^[vV]/, '')
-  if (!core) {
+  const core = value.trim()
+  if (!core || !/\d/.test(core)) {
     return false
   }
   if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(core)) {
@@ -704,18 +704,7 @@ function isModVersion(value: string): boolean {
   if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}$/.test(core)) {
     return false
   }
-  const parts = core.split('.')
-  if (!parts.every((part) => /^\d+$/.test(part))) {
-    return false
-  }
-  const numbers = parts.map(Number)
-  if (numbers.some((part) => part >= 1900)) {
-    return false
-  }
-  if (numbers.length === 1) {
-    return numbers[0] > 0 && numbers[0] < 1900
-  }
-  return numbers.length >= 2
+  return true
 }
 
 function modVersionLabel(entry: ModEntry, t: TranslationContextValue['t']): string {

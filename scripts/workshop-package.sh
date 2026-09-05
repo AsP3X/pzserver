@@ -72,6 +72,15 @@ if [ -f "${SRC_42}/poster.png" ]; then
 fi
 echo "Copied mod.info + poster.png to mod root (for PZ discovery and Version)"
 
+# PZ reads Version from versionDir/mod.info, then common/mod.info. A folder
+# named only `42` is sometimes skipped in favour of common/.
+mkdir -p "${DST_MOD_ROOT}/common"
+cp "${SRC_42}/mod.info" "${DST_MOD_ROOT}/common/mod.info"
+if [ -f "${SRC_42}/poster.png" ]; then
+    cp "${SRC_42}/poster.png" "${DST_MOD_ROOT}/common/poster.png"
+fi
+echo "Copied mod.info to common/ (in-game Mods Version field)"
+
 # Strip macOS metadata. PZ validates the Contents/ tree on submit and rejects
 # files it does not recognise, so a stray .DS_Store can block an upload.
 find "${DST_MOD_ROOT}" -name '.DS_Store' -delete 2>/dev/null || true

@@ -354,6 +354,10 @@ fn ranked_mod_info_paths(item: &Path, mod_id: &str, game: Option<&[u32]>) -> Vec
         if root_info.is_file() {
             ranked.push((1, Vec::new(), root_info));
         }
+        let common_info = dir.join("common").join("mod.info");
+        if common_info.is_file() {
+            ranked.push((1, Vec::new(), common_info));
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -390,12 +394,17 @@ fn ranked_mod_info_paths(item: &Path, mod_id: &str, game: Option<&[u32]>) -> Vec
 /// Directory for this Mods= token. The folder name often matches, but some
 /// Workshop items (Chuckleberry's alert system) ship a different directory
 /// and put the load-list id only inside `mod.info`.
+fn normalize_mod_id(id: &str) -> &str {
+    id.trim().trim_start_matches(['\\', '/'])
+}
+
 fn resolve_mod_dirs(item: &Path, mod_id: &str) -> Vec<PathBuf> {
     let mods = item.join("mods");
     if !mods.is_dir() {
         return Vec::new();
     }
 
+    let mod_id = normalize_mod_id(mod_id);
     if !mod_id.is_empty() {
         let exact = mods.join(mod_id);
         if exact.is_dir() {
@@ -432,7 +441,9 @@ fn dir_declares_mod_id(dir: &Path, mod_id: &str) -> bool {
         let Ok(body) = std::fs::read_to_string(path) else {
             continue;
         };
-        if parse_mod_id(&body).is_some_and(|id| id.eq_ignore_ascii_case(mod_id)) {
+        if parse_mod_id(&body)
+            .is_some_and(|id| normalize_mod_id(&id).eq_ignore_ascii_case(mod_id))
+        {
             return true;
         }
     }
@@ -564,12 +575,7 @@ fn plausible_mod_version(value: &str) -> Option<String> {
     if trimmed.is_empty() || looks_like_calendar_date(trimmed) {
         return None;
     }
-    let core = trimmed.trim_start_matches(['v', 'V']);
-    let parts = parse_dotted_version(core)?;
-    if parts.iter().any(|&part| part >= 1900) {
-        return None;
-    }
-    if parts.len() == 1 && parts[0] == 0 {
+    if !trimmed.chars().any(|ch| ch.is_ascii_digit()) {
         return None;
     }
     Some(trimmed.to_owned())
@@ -1289,6 +1295,14 @@ mod tests {
             parse_modversion("modversion=v2.7.6"),
             Some("v2.7.6".to_owned())
         );
+        assert_eq!(
+            parse_modversion("modversion=1.3.14.0-B42UNSTABLE"),
+            Some("1.3.14.0-B42UNSTABLE".to_owned())
+        );
+        assert_eq!(
+            parse_modversion("modversion=42-1.4.3"),
+            Some("42-1.4.3".to_owned())
+        );
     }
 
     #[test]
@@ -1323,6 +1337,36 @@ mod tests {
         assert!(
             alert.cached,
             "folder is chuckleberryModdingAlertSystem, id is ChuckleberryFinnAlertSystem"
+        );
+    }
+
+    #[test]
+    fn live_knox_relay_version_is_1_35() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/server/steamapps/workshop");
+        let item = root.join("content/108600/3777446787");
+        if !item.is_dir() {
+            return;
+        }
+        let install = inspect_install(
+            Some(&root),
+            "3777446787",
+            "KnoxRelay",
+            &WorkshopAcf::default(),
+            Some("42.20.0"),
+        );
+        assert_eq!(install.version.as_deref(), Some("1.35"));
+        let slashed = inspect_install(
+            Some(&root),
+            "3777446787",
+            "\\KnoxRelay",
+            &WorkshopAcf::default(),
+            Some("42.20.0"),
+        );
+        assert_eq!(
+            slashed.version.as_deref(),
+            Some("1.35"),
+            "B42 Mods= tokens are prefixed with a backslash"
         );
     }
 }
