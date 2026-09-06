@@ -83,6 +83,18 @@ impl WorkshopInstall {
     }
 }
 
+/// True when both sides have a real version string and they disagree.
+/// A missing Steam `Version:` line is not an update — most mods never write one.
+pub fn versions_diverge(installed: Option<&str>, remote: Option<&str>) -> bool {
+    match (
+        installed.and_then(display_mod_version),
+        remote.and_then(display_mod_version),
+    ) {
+        (Some(installed), Some(remote)) => installed != remote,
+        _ => false,
+    }
+}
+
 /// Digits, or a Steam sharedfiles URL that contains `id=`.
 pub fn parse_workshop_id(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
@@ -1197,6 +1209,16 @@ mod tests {
         let unseen = WorkshopInstall::default();
         assert!(!unseen.update_available(None));
         assert!(!unseen.update_available(Some(1)));
+    }
+
+    #[test]
+    fn versions_diverge_only_when_both_sides_have_a_real_version() {
+        assert!(!versions_diverge(None, None));
+        assert!(!versions_diverge(Some("1.35"), None));
+        assert!(!versions_diverge(None, Some("1.36")));
+        assert!(!versions_diverge(Some("1.35"), Some("1.35")));
+        assert!(versions_diverge(Some("1.35"), Some("1.36")));
+        assert!(!versions_diverge(Some("1.35"), Some("2024-08-15")));
     }
 
     #[test]

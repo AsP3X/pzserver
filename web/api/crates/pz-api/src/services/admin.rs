@@ -994,9 +994,24 @@ pub struct ModEntry {
     /// never been downloaded.
     #[serde(default)]
     pub update_available: bool,
+    /// Parsed Workshop version when Steam's copy disagrees with disk.
+    /// Never a calendar date.
+    #[serde(default)]
+    pub available_version: Option<String>,
 }
 
 pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
+    load_mod_entries(state, false).await
+}
+
+/// Ask Steam again and rewrite `update_available` on every load-list row.
+/// Unlike the ordinary list, a silent Steam miss is an error — the operator
+/// pressed Check and should be told the lookup did not land.
+pub async fn check_mod_updates(state: &AppState) -> ApiResult<Vec<ModEntry>> {
+    load_mod_entries(state, true).await
+}
+
+async fn load_mod_entries(state: &AppState, require_steam: bool) -> ApiResult<Vec<ModEntry>> {
     let intended = read_intended_mod_lists(&state.config.server_ini_path)
         .await
         .map_err(|error| ApiError::Internal(error.to_string()))?;
@@ -1017,15 +1032,20 @@ pub async fn list_mods(state: &AppState) -> ApiResult<Vec<ModEntry>> {
                 installed_updated_at: None,
                 cached: false,
                 update_available: false,
+                available_version: None,
             }
         })
         .collect();
 
-    attach_workshop_versions(state, &mut entries).await;
+    attach_workshop_versions(state, &mut entries, require_steam).await?;
     Ok(entries)
 }
 
-async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
+async fn attach_workshop_versions(
+    state: &AppState,
+    entries: &mut [ModEntry],
+    require_steam: bool,
+) -> ApiResult<()> {
     let workshop_root = state.config.workshop_path.as_deref();
     let acf = workshop_root
         .map(pz_bridge::workshop::read_acf)
@@ -1045,9 +1065,19 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
         Ok(meta) => meta,
         Err(error) => {
             tracing::warn!(%error, "Steam Workshop lookup for mod versions failed");
+            if require_steam {
+                return Err(ApiError::Validation(
+                    "Steam Workshop did not answer. Try again in a moment.".to_owned(),
+                ));
+            }
             BTreeMap::new()
         }
     };
+    if require_steam && !ids.is_empty() && steam.is_empty() {
+        return Err(ApiError::Validation(
+            "Steam Workshop did not return those files. Try again in a moment.".to_owned(),
+        ));
+    }
 
     let game_version = state.config.pz_game_version.as_str();
     let live_knox = live_knox_version(state).await;
@@ -1063,6 +1093,8 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
             Some(game_version),
         );
         let protected = is_protected(state, &entry.workshop_id, &entry.mod_id);
+        let remote = steam.get(&entry.workshop_id);
+        let remote_version = remote.and_then(|row| row.version.clone());
         // Knox Relay always has a version: cached mod.info / KR_Bridge.lua,
         // then the live game_state.json the running server just wrote.
         // Other mods: cached mod.info, then a Steam description Version:
@@ -1070,20 +1102,17 @@ async fn attach_workshop_versions(state: &AppState, entries: &mut [ModEntry]) {
         entry.installed_version = install
             .version
             .clone()
-            .or_else(|| protected.then(|| live_knox.clone()).flatten())
-            .or_else(|| {
-                steam
-                    .get(&entry.workshop_id)
-                    .and_then(|row| row.version.clone())
-            });
+            .or_else(|| protected.then(|| live_knox.clone()).flatten());
+        entry.available_version = remote_version.clone();
         entry.installed_updated_at = install.time_updated.map(|at| at as i64);
         entry.cached = install.cached;
-        entry.update_available = install.update_available(
-            steam
-                .get(&entry.workshop_id)
-                .and_then(|row| row.time_updated),
-        );
+        entry.update_available = install.update_available(remote.and_then(|row| row.time_updated))
+            || pz_bridge::workshop::versions_diverge(
+                entry.installed_version.as_deref(),
+                remote_version.as_deref(),
+            );
     }
+    Ok(())
 }
 
 async fn live_knox_version(state: &AppState) -> Option<String> {

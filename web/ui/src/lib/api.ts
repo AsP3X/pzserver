@@ -749,6 +749,7 @@ export interface ModEntry {
   installed_updated_at?: number | null
   cached?: boolean
   update_available?: boolean
+  available_version?: string | null
 }
 
 export interface WorkshopLookup {
@@ -1637,6 +1638,8 @@ export const api = {
     patch<SandboxConfig>('/api/v1/admin/config/sandbox', { updates }),
 
   adminMods: () => request<ModEntry[]>('/api/v1/admin/mods'),
+
+  adminCheckMods: () => post<ModEntry[]>('/api/v1/admin/mods/check', {}),
 
   adminAddMod: (workshopId: string, modId: string, mapFolder?: string) =>
     post<ModEntry[]>('/api/v1/admin/mods', {

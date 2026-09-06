@@ -6,6 +6,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  RefreshCw,
   RotateCcw,
   Search,
   Shield,
@@ -189,6 +190,19 @@ export function AdminModsPage() {
     onError: () => setUpdating(null),
   })
 
+  const checkUpdates = useMutation({
+    mutationFn: () => api.adminCheckMods(),
+    onSuccess: (entries) => {
+      queryClient.setQueryData(['admin', 'mods'], entries)
+      const newer = entries.filter((entry) => entry.update_available).length
+      setNotice(
+        newer === 0
+          ? t('admin.mods_check_none')
+          : t('admin.mods_check_found', { count: newer }),
+      )
+    },
+  })
+
   const imported = useMutation({
     mutationFn: async () => {
       const parsed = parseModImport(importText)
@@ -248,37 +262,22 @@ export function AdminModsPage() {
 
   const adding = add.isPending || addWithDeps.isPending || checkDeps.isPending
 
+  const actionError = [
+    add.error,
+    addWithDeps.error,
+    checkDeps.error,
+    remove.error,
+    reorder.error,
+    updateMod.error,
+    checkUpdates.error,
+    imported.error,
+    restart.error,
+  ].find(Boolean)
+
   const error =
-    [
-      add.error,
-      addWithDeps.error,
-      checkDeps.error,
-      remove.error,
-      reorder.error,
-      updateMod.error,
-      imported.error,
-      restart.error,
-    ].find(Boolean) instanceof ApiError
-      ? ([
-          add.error,
-          addWithDeps.error,
-          checkDeps.error,
-          remove.error,
-          reorder.error,
-          updateMod.error,
-          imported.error,
-          restart.error,
-        ].find(Boolean) as ApiError).message
-      : [
-            add.error,
-            addWithDeps.error,
-            checkDeps.error,
-            remove.error,
-            reorder.error,
-            updateMod.error,
-            imported.error,
-            restart.error,
-          ].find(Boolean)
+    actionError instanceof ApiError
+      ? actionError.message
+      : actionError
         ? t('auth.unexpected_error')
         : null
 
@@ -298,6 +297,21 @@ export function AdminModsPage() {
           <p className="font-mono text-[0.6875rem] text-dust">
             {t('admin.mods_count', { count: mods.length })}
           </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={checkUpdates.isPending || mods.length === 0}
+            onClick={() => {
+              setNotice(null)
+              checkUpdates.mutate()
+            }}
+          >
+            <RefreshCw
+              aria-hidden="true"
+              className={cn('size-3.5', checkUpdates.isPending && 'animate-spin')}
+            />
+            {checkUpdates.isPending ? t('admin.mods_checking') : t('admin.mods_check')}
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setRestarting(true)}>
             <RotateCcw aria-hidden="true" className="size-3.5" />
             {t('admin.action.restart')}
@@ -427,7 +441,11 @@ export function AdminModsPage() {
                             </span>
                             {entry.update_available ? (
                               <span className="font-mono text-[0.625rem] tracking-widest text-hazard uppercase">
-                                {t('admin.mods_update_available')}
+                                {entry.available_version && isModVersion(entry.available_version)
+                                  ? t('admin.mods_update_available_version', {
+                                      version: entry.available_version,
+                                    })
+                                  : t('admin.mods_update_available')}
                               </span>
                             ) : null}
                           </span>

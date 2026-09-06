@@ -64,6 +64,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/config", get(config).patch(update_config))
         .route("/admin/config/sandbox", get(sandbox).patch(update_sandbox))
         .route("/admin/mods", get(mods).post(add_mod))
+        .route("/admin/mods/check", post(check_mods))
         .route("/admin/mods/lookup", post(lookup_mod))
         .route("/admin/mods/dependencies", post(mod_dependencies))
         .route("/admin/mods/order", axum::routing::put(reorder_mods))
@@ -508,6 +509,13 @@ async fn mods(
     _staff: AdminUser,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(admin::list_mods(&state).await?))
+}
+
+async fn check_mods(
+    State(state): State<AppState>,
+    _staff: AdminUser,
+) -> ApiResult<Json<Vec<admin::ModEntry>>> {
+    Ok(Json(admin::check_mod_updates(&state).await?))
 }
 
 #[derive(Deserialize)]
