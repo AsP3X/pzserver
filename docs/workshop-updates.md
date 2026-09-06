@@ -11,6 +11,9 @@ package, or sync the upload folder on a no.
 
 Saying no does **not** skip putting the new Lua on the dedicated server **and**
 the PZ client. That still happens in the same sitting — see `AGENTS.md`.
+A no still seeds `~/Zomboid/Workshop/KnoxRelay/Contents/` (the copy the client
+loads first). It does not package, bump the version, write a changenote, or
+overwrite `workshop.txt`.
 
 **Version lock (after a yes):** bump `modversion=` and `KR_Bridge.VERSION`
 together, then put the local dedicated server on that same build before you
@@ -26,7 +29,7 @@ Knowing which copy you are looking at prevents most of the confusion here.
 |------|------|------|
 | **Source** | `game-server/mods/KnoxRelay/42/` | The only copy you edit. Tracked in git. |
 | **Staging** | `workshop/KnoxRelay/` | Upload-shaped tree, rebuilt by `make workshop-package`. Tracked in git. |
-| **Upload folder** | `~/Zomboid/Workshop/KnoxRelay/` | What the in-game uploader reads. **Not** in git, and it holds settings the staging copy does not. |
+| **Upload folder** | `~/Zomboid/Workshop/KnoxRelay/` | In-game uploader **and** the copy the local PZ client loads first (`workshop,steam,mods`). Seed `Contents/` on every Lua change; never overwrite `workshop.txt`. |
 | **Live server** | Steam Workshop cache inside the game container (seeded from `/opt/knox-relay` in the image) | What PZ actually executes. Must match source. |
 
 ## Update flow

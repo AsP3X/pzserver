@@ -27,5 +27,13 @@ Events = {}
 local loaded, err = pcall(boot)
 check("a joining client does not load the server event loop", loaded, err)
 
+package.loaded["KR_Bridge"] = nil
+boot = assert(loadfile(MODS .. "KR_Boot.lua"))
+isClient = function() return true end
+isServer = nil
+Events = {}
+loaded, err = pcall(boot)
+check("a joining client still skips when isServer is missing", loaded, err)
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

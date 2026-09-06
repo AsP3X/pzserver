@@ -34,13 +34,22 @@ Do not leave “restart the server later” for the user.
 
 ### Client — every Lua change
 
-The Desk and other client Lua run on the **game client**, not in the container. The client loads item **3777446787** from the Steam workshop cache, not from git and not from the upload folder:
+The Desk and other client Lua run on the **game client**, not in the container. PZ’s default mod folder order is **`workshop,steam,mods`**. That means the copy it actually executes is the in-game **upload folder**, not git and not (by itself) the Steam cache:
 
-`%ProgramFiles(x86)%\Steam\steamapps\workshop\content\108600\3777446787\mods\KnoxRelay`
+`~/Zomboid/Workshop/KnoxRelay/Contents/mods/KnoxRelay`
 
-Copy the current source tree into that cache (root + `42/` + `common/`, same files the image seed uses). Then the user must **fully quit** Project Zomboid and relaunch — disconnect/reconnect keeps the old client Lua. Confirm the cache `42/mod.info` and `common/mod.info` are the tree you just shipped.
+Boot logs show `loading KnoxRelay` from that `Contents/` path. Seeding only the Steam workshop cache looks like a deploy and then the Desk “defaults back” to whatever was last synced into Contents/.
 
-Steam can overwrite this cache with the last **published** Workshop build. Re-seed it after every change until that build is on Steam.
+Same-turn client deploy: `make knox-client` / `scripts/seed-knox-client.sh`. It rsyncs the source tree (root + `42/` + `common/`) into:
+
+1. **Contents/** — the copy PZ loads first. Never overwrite `~/Zomboid/Workshop/KnoxRelay/workshop.txt` (`id=3777446787`).
+2. The Steam workshop cache (`…/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay`) so a join-server `NeedsUpdate` download is not the only tree on disk.
+
+It **removes** leftover `~/Zomboid/mods/KnoxRelay`. That folder is a third copy; it used to shadow Workshop as version 1.0.
+
+Then the user must **fully quit** Project Zomboid and relaunch — disconnect/reconnect keeps the old client Lua. Confirm Contents `42/mod.info` and `common/mod.info` are the tree you just shipped.
+
+Joining a server marks item **3777446787** `NeedsUpdate|DownloadPending` and Steam overwrites the **cache**. Contents/ is still what the client loads first, so keep Contents in lockstep on every Lua change — including after a **no** to Workshop. A “no” still forbids packaging, version bumps, changenotes, and touching `workshop.txt`.
 
 ### Version numbers are release numbers only
 
@@ -77,7 +86,7 @@ After any sitting that changed Knox Relay, **after** server and client are on th
 **“Prepare the next Knox Relay Workshop release?”**
 
 - **Yes** — then bump both version strings, write the changenote, package, sync `Contents/` only, and deploy server **and** client on that new version.
-- **No** — leave `modversion=` and `KR_Bridge.VERSION` unchanged. Do not package, do not touch `~/Zomboid/Workshop/KnoxRelay/` (the upload folder), do not write a changenote. Server and client still already have the new Lua from the steps above.
+- **No** — leave `modversion=` and `KR_Bridge.VERSION` unchanged. Do not package, do not write a changenote, do not overwrite `workshop.txt`. Contents/ was already seeded by the client deploy above (`make knox-client`); that is not a Workshop release.
 
 Never bump first and ask later. Never treat “the UI is done” as permission to cut a release.
 

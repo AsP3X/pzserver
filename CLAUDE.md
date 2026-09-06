@@ -84,7 +84,7 @@ Knox Relay Version is never blank: `modversion=` in `42/`, `common/`, and root `
 
 Same-turn server deploy: rebuild and recreate `game-server` (`docker compose -f docker-compose.yml -f docker-compose.amd64.yml up -d --build --force-recreate game-server`). Confirm `Initializing server-side bridge mod vX.Y` and `data/zomboid/Lua/game_state.json` `"mod_version":"X.Y"`.
 
-Same-turn client deploy: copy the source tree into `%ProgramFiles(x86)%\Steam\steamapps\workshop\content\108600\3777446787\mods\KnoxRelay`. The user must fully quit and relaunch PZ.
+Same-turn client deploy: `make knox-client` (seeds `~/Zomboid/Workshop/KnoxRelay/Contents/` — the copy PZ loads first — and the Steam cache; never `workshop.txt`). The user must fully quit and relaunch PZ. Seeding only the Steam cache leaves the Desk on the last Contents/ tree.
 
 Canonical copy: `AGENTS.md`. Publish flow: `docs/workshop-updates.md`.
 

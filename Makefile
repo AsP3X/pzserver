@@ -37,7 +37,7 @@ CADDY_HTTPS_PORT ?= 443
 
 FW_DISPATCH := bash scripts/firewall/dispatch.sh
 
-.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-heal map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import map-sprites map-sprites-live restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package update-version update \
+.PHONY: up down build rebuild rebuild-game map-tiles map-tiles-region map-tiles-heal map-tiles-detail map-tiles-recompress map-tiles-import map-tiles-maybe-import map-sprites map-sprites-live restart logs ps stop pull migrate test test-game-server exec arch init setup db-check db-init db-reset db-backup db-restore nuke workshop-package knox-client update-version update \
 	admin-expose admin-hide expose hide info \
 	web-up web-down web-build web-logs web-ps web-dev-db web-seed web-test web-check
 
@@ -353,6 +353,11 @@ db-restore:
 # ── Workshop ────────────────────────────────────────────────────────
 workshop-package:
 	bash scripts/workshop-package.sh
+
+# Seed the Knox Relay trees the local PZ client actually loads (Contents/
+# first, then the Steam workshop cache). Never writes workshop.txt.
+knox-client:
+	bash scripts/seed-knox-client.sh
 
 # ── Update from git ─────────────────────────────────────────────────
 # Pulls the latest code, rebuilds, runs migrations, rebuilds frontend

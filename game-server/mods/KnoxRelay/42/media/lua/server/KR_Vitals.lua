@@ -462,11 +462,14 @@ local function collectWeapon(player)
         end
     end
 
-    --- Firearm-only. Calling these on an axe logs a Java exception every
-    --- heartbeat even when wrapped in pcall.
-    weapon.ammo = callIf(item, "getCurrentAmmoCount")
-    weapon.chamber = callIf(item, "isRoundChambered")
-    weapon.jam = callIf(item, "isJammed")
+    --- Firearm-only. HandWeapon still exposes these in Java on a blade;
+    --- calling them logs a Kahlua exception every heartbeat even from pcall
+    --- and even after an object[method] existence check.
+    if callIf(item, "isRanged", false) then
+        weapon.ammo = callIf(item, "getCurrentAmmoCount")
+        weapon.chamber = callIf(item, "isRoundChambered")
+        weapon.jam = callIf(item, "isJammed")
+    end
 
     --- getAttachmentsProvided, not getAttachments, and it is a list of plain
     --- strings rather than of items.

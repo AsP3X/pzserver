@@ -25,8 +25,17 @@
 
 -- A connecting multiplayer client still loads media/lua/server in B42.
 -- This file is the dedicated-server event loop; skip it unless we are the
--- server (dedicated or listen host).
-if type(isClient) == "function" and type(isServer) == "function" and isClient() and not isServer() then
+-- server (dedicated or listen host). isServer() is missing on some client
+-- loads — treat a true isClient() without a true isServer() as a joiner.
+local function engineFlag(fn)
+    if type(fn) ~= "function" then
+        return false
+    end
+    local ok, value = pcall(fn)
+    return ok and value == true
+end
+
+if engineFlag(isClient) and not engineFlag(isServer) then
     return
 end
 
@@ -317,27 +326,39 @@ local function onServerStarted()
     end
 end
 
---- Subscribe when the event exists. A missing Events.X is nil; X.Add then
---- throws and Kahlua logs it even from inside pcall.
+--- Subscribe when the event exists. A missing Events.X is Java null; X.Add
+--- then throws and Kahlua logs it even from inside pcall, so never index
+--- .Add until the value is a real object.
 local function hookEvent(name, fn)
-    local event = Events[name]
-    if event and event.Add then
-        event.Add(fn)
-        return true
+    if Events == nil or name == nil or fn == nil then
+        return false
     end
-    return false
+    local event = Events[name]
+    if event == nil then
+        return false
+    end
+    local asString = tostring(event)
+    if asString == "null" or asString == "nil" then
+        return false
+    end
+    local adder = event.Add
+    if adder == nil then
+        return false
+    end
+    adder(fn)
+    return true
 end
 
-Events.OnCreatePlayer.Add(onCreatePlayer)
-Events.OnWeaponHitCharacter.Add(Sanctuary.onWeaponHit)
-Events.OnWeaponHitCharacter.Add(Feud.onWeaponHit)
-Events.EveryTenMinutes.Add(onEveryTenMinutes)
-Events.EveryOneMinute.Add(onEveryOneMinute)
-Events.OnServerStarted.Add(onServerStarted)
-Events.OnClientCommand.Add(Enrol.onClientCommand)
-Events.OnClientCommand.Add(Report.onClientCommand)
-Events.OnClientCommand.Add(Tickets.onClientCommand)
-Events.OnClientCommand.Add(Friends.onClientCommand)
+hookEvent("OnCreatePlayer", onCreatePlayer)
+hookEvent("OnWeaponHitCharacter", Sanctuary.onWeaponHit)
+hookEvent("OnWeaponHitCharacter", Feud.onWeaponHit)
+hookEvent("EveryTenMinutes", onEveryTenMinutes)
+hookEvent("EveryOneMinute", onEveryOneMinute)
+hookEvent("OnServerStarted", onServerStarted)
+hookEvent("OnClientCommand", Enrol.onClientCommand)
+hookEvent("OnClientCommand", Report.onClientCommand)
+hookEvent("OnClientCommand", Tickets.onClientCommand)
+hookEvent("OnClientCommand", Friends.onClientCommand)
 
 -- Optional: without it a player who disconnects mid-registration leaves an
 -- entry that poll() drops on the answer timeout anyway.
