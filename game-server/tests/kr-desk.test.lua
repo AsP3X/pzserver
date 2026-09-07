@@ -5,7 +5,7 @@
 -- size is written in tests (or on a screen too small to hold the default).
 -- The old shell wired
 --
---     self.resizeWidget.resizeFunction = KnoxDeskWindow.applySize
+--     self.resizeWidget.resizeFunction = KnoxRelayDesk.applySize
 --
 -- assuming ISResizeWidget calls it as (self, w, h). It does not, so a drag ran
 -- a signature the widget never passes, and separately the reply box and the
@@ -292,11 +292,11 @@ KR_Desk.show()
 local win = KR_Desk.instance()
 check("desk opened", win ~= nil)
 check("desk title shows the loaded Lua version",
-    win and win.title == "KNOX DESK  1.39",
+    win and win.title == "KNOX DESK  1.40",
     "title=" .. tostring(win and win.title))
 check("desk is not player-resizable", win and win.resizable == false)
 check("desk is an ISPanel, not the vanilla inventory window",
-    win and win.Type == "KnoxDeskWindow" and win.titlebarbkg == nil,
+    win and win.Type == "KnoxRelayDesk" and win.titlebarbkg == nil,
     "type=" .. tostring(win and win.Type))
 check("desk does not spawn vanilla inventory chrome",
     ISCollapsableWindow.createChildrenCalls == 0,
@@ -307,7 +307,7 @@ check("vanilla pin control was never created", win and win.pinButton == nil)
 check("close control stays so the desk can be dismissed", win and win.closeButton and win.closeButton:getIsVisible())
 check("vanilla title-bar textures are off", win and win.drawFrame == false)
 check("pinning does not invent a collapse chevron", (function()
-    KnoxDeskWindow.pin(win)
+    KnoxRelayDesk.pin(win)
     return win.collapseButton == nil
 end)())
 win.drawFrame = true

@@ -510,6 +510,24 @@ mark_knox_workshop_current() {
     ' "$acf" > "$tmp" && mv "$tmp" "$acf"
     echo "[configure-server] Marked Knox Relay Workshop item ${id} current (timeupdated=${latest_ts}) so PZ will not reinstall the published copy over the seeded Lua"
 }
+
+# Second mod id in the same Workshop item. An old client Contents tree does
+# not contain it, so Steam still loads it and it can point the Desk at the
+# Steam Knox Relay copy. Always replace; the loader has no version of its own.
+KR_LOADER_STAGED_DIR="${KR_LOADER_STAGED_DIR:-/opt/knox-relay-loader}"
+KR_LOADER_CACHE_DIR="${WORKSHOP_CACHE_ROOT}/${KR_WORKSHOP_ID}/mods/KnoxRelayLoader"
+if [ -d "$KR_LOADER_STAGED_DIR" ]; then
+    if [ -d "${WORKSHOP_CACHE_ROOT}/${KR_WORKSHOP_ID}/mods" ]; then
+        rm -rf "$KR_LOADER_CACHE_DIR"
+        cp -r "$KR_LOADER_STAGED_DIR" "$KR_LOADER_CACHE_DIR"
+        echo "[configure-server] Seeded Knox Relay Loader into the Workshop cache"
+    else
+        rm -rf "${ZOMBOID_MODS_DIR}/KnoxRelayLoader"
+        cp -r "$KR_LOADER_STAGED_DIR" "${ZOMBOID_MODS_DIR}/KnoxRelayLoader"
+        echo "[configure-server] Seeded Knox Relay Loader into Zomboid/mods"
+    fi
+fi
+
 mark_knox_workshop_current
 
 # Surface PZ Build 42 mod manifests so the server can discover them.

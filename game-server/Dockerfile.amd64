@@ -28,5 +28,6 @@ COPY mods/KnoxRelay /home/steam/Zomboid/mods/KnoxRelay
 # volume mounts. Stage a second copy outside it so configure-server.sh can seed
 # the live mods directory on every boot.
 COPY mods/KnoxRelay /opt/knox-relay
+COPY mods/KnoxRelayLoader /opt/knox-relay-loader
 
 ENTRYPOINT ["/bin/bash", "/home/steam/amd64-entrypoint.sh"]

@@ -9,8 +9,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${ROOT}/game-server/mods/KnoxRelay"
+LOADER_SRC="${ROOT}/game-server/mods/KnoxRelayLoader"
 if [ ! -d "${SRC}/42/media/lua" ]; then
     echo "ERROR: missing Knox Relay source at ${SRC}" >&2
+    exit 1
+fi
+if [ ! -f "${LOADER_SRC}/42/media/lua/client/KR_Steam.lua" ]; then
+    echo "ERROR: missing Knox Relay Loader at ${LOADER_SRC}" >&2
     exit 1
 fi
 
@@ -25,19 +30,23 @@ steam_app_candidates=(
 
 UPLOAD_ROOT="${HOME}/Zomboid/Workshop/KnoxRelay"
 UPLOAD="${UPLOAD_ROOT}/Contents/mods/KnoxRelay"
+UPLOAD_LOADER="${UPLOAD_ROOT}/Contents/mods/KnoxRelayLoader"
 LEFTOVER="${HOME}/Zomboid/mods/KnoxRelay"
+LEFTOVER_LOADER="${HOME}/Zomboid/mods/KnoxRelayLoader"
 
 seed() {
     local dest="$1"
+    local src="${2:-${SRC}}"
     mkdir -p "${dest}"
-    rsync -a --delete --exclude '.DS_Store' "${SRC}/" "${dest}/"
+    rsync -a --delete --exclude '.DS_Store' --exclude '.knox-dev' "${src}/" "${dest}/"
     echo "Seeded ${dest}"
 }
 
 seeded=0
 for app in "${steam_app_candidates[@]}"; do
     if [ -d "${app}" ]; then
-        seed "${app}/${ITEM_ID}/mods/KnoxRelay"
+        seed "${app}/${ITEM_ID}/mods/KnoxRelay" "${SRC}"
+        seed "${app}/${ITEM_ID}/mods/KnoxRelayLoader" "${LOADER_SRC}"
         seeded=$((seeded + 1))
     fi
 done
@@ -49,7 +58,12 @@ fi
 # including after a join-server workshop update. Do not require workshop.txt
 # — that file only holds the Steam item id for the in-game uploader.
 mkdir -p "${UPLOAD}"
-seed "${UPLOAD}"
+seed "${UPLOAD}" "${SRC}"
+# Marks this Contents tree as the one under test so KnoxRelayLoader does
+# not replace unpublished Lua with the Steam copy. Never write this marker
+# into the Steam cache or the Workshop package.
+printf 'dev\n' > "${UPLOAD}/.knox-dev"
+seed "${UPLOAD_LOADER}" "${LOADER_SRC}"
 if [ ! -f "${UPLOAD_ROOT}/workshop.txt" ]; then
     echo "WARNING: ${UPLOAD_ROOT}/workshop.txt missing; Contents was still seeded" >&2
 fi
@@ -57,6 +71,10 @@ fi
 if [ -e "${LEFTOVER}" ]; then
     rm -rf "${LEFTOVER}"
     echo "Removed leftover ${LEFTOVER} (third KnoxRelay copy; PZ scans it last)"
+fi
+if [ -e "${LEFTOVER_LOADER}" ]; then
+    rm -rf "${LEFTOVER_LOADER}"
+    echo "Removed leftover ${LEFTOVER_LOADER}"
 fi
 
 echo

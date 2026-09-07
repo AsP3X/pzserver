@@ -58,10 +58,31 @@ end
 
 local hud = nil
 
+local function pruneHud()
+    pcall(function()
+        if not UIManager or not UIManager.getUI then
+            return
+        end
+        local ui = UIManager.getUI()
+        if not ui or type(ui.size) ~= "function" then
+            return
+        end
+        for index = ui:size() - 1, 0, -1 do
+            local el = ui:get(index)
+            if el and el.Type == "KnoxHudButton" and type(el.removeFromUIManager) == "function" then
+                el:removeFromUIManager()
+            end
+        end
+    end)
+    hud = nil
+end
+
 local function ensureHud()
     if hud then
         return
     end
+
+    pruneHud()
 
     local ok, err = pcall(function()
         hud = KnoxHudButton:new(0, 0, 56, 32)

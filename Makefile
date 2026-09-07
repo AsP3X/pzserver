@@ -316,6 +316,7 @@ test-game-server:
 		luajit game-server/tests/kr-vault.test.lua && \
 		luajit game-server/tests/kr-console.test.lua && \
 		luajit game-server/tests/kr-desk.test.lua && \
+		luajit game-server/tests/kr-steam.test.lua && \
 		luajit game-server/tests/kr-boot.test.lua; \
 	else \
 		echo "SKIP: Lua suites need luajit (PZ runs Lua 5.1) — brew install luajit"; \

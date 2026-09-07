@@ -93,6 +93,29 @@ echo "Copied mod.info to common/ (in-game Mods Version field)"
 # files it does not recognise, so a stray .DS_Store can block an upload.
 find "${DST_MOD_ROOT}" -name '.DS_Store' -delete 2>/dev/null || true
 
+# Second mod id inside the same Workshop item. Old Contents trees only have
+# KnoxRelay, so Steam still loads this one and it can switch the Desk onto
+# the Steam copy. Keep the folder name and id in lockstep.
+SRC_LOADER="${REPO_ROOT}/game-server/mods/KnoxRelayLoader"
+DST_LOADER_ROOT="${REPO_ROOT}/workshop/KnoxRelay/Contents/mods/KnoxRelayLoader"
+if [ ! -f "${SRC_LOADER}/42/media/lua/client/KR_Steam.lua" ]; then
+    echo "ERROR: missing Knox Relay Loader at ${SRC_LOADER}"
+    exit 1
+fi
+rm -rf "${DST_LOADER_ROOT}"
+mkdir -p "${DST_LOADER_ROOT}/42/media/lua/client" "${DST_LOADER_ROOT}/common"
+cp "${SRC_LOADER}/42/media/lua/client/KR_Steam.lua" "${DST_LOADER_ROOT}/42/media/lua/client/KR_Steam.lua"
+cp "${SRC_LOADER}/42/mod.info" "${DST_LOADER_ROOT}/42/mod.info"
+cp "${SRC_LOADER}/mod.info" "${DST_LOADER_ROOT}/mod.info"
+cp "${SRC_LOADER}/common/mod.info" "${DST_LOADER_ROOT}/common/mod.info"
+if [ -f "${SRC_42}/poster.png" ]; then
+    cp "${SRC_42}/poster.png" "${DST_LOADER_ROOT}/poster.png"
+    cp "${SRC_42}/poster.png" "${DST_LOADER_ROOT}/42/poster.png"
+    cp "${SRC_42}/poster.png" "${DST_LOADER_ROOT}/common/poster.png"
+fi
+find "${DST_LOADER_ROOT}" -name '.DS_Store' -delete 2>/dev/null || true
+echo "Packaged KnoxRelayLoader (Steam copy wins over a leftover upload folder)"
+
 # The in-game uploader reads these two from the item root; without them the
 # item does not appear in the Workshop submit screen.
 ITEM_ROOT="${REPO_ROOT}/workshop/KnoxRelay"
@@ -106,7 +129,7 @@ done
 echo ""
 echo "=== Package Summary ==="
 echo "Files packaged:"
-find "${DST_MOD_ROOT}" -type f | sort | while read -r f; do
+find "${REPO_ROOT}/workshop/KnoxRelay/Contents/mods" -type f | sort | while read -r f; do
     echo "  ${f#${REPO_ROOT}/}"
 done
 echo ""

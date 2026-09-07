@@ -1,0 +1,7 @@
+name=Knox Relay Loader
+id=KnoxRelayLoader
+author=AsP3X
+poster=poster.png
+require=KnoxRelay
+loadModAfter=KnoxRelay
+description=Keeps the Knox Desk on the Steam Workshop copy of Knox Relay. Required. Do not disable.

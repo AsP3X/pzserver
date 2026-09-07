@@ -51,6 +51,8 @@ Then the user must **fully quit** Project Zomboid and relaunch — disconnect/re
 
 Joining a server marks item **3777446787** `NeedsUpdate|DownloadPending` and Steam overwrites the **cache**. Contents/ is still what the client loads first, so keep Contents in lockstep on every Lua change — including after a **no** to Workshop. A “no” still forbids packaging, version bumps, changenotes, and touching `workshop.txt`.
 
+`KnoxRelayLoader` is a second mod **inside the same Workshop item**. An old Contents tree only has `KnoxRelay`, so Steam still loads the loader and it reloads Knox Relay client Lua from the Steam cache. Players do not delete folders. After a Workshop release that contains the loader, `Mods=` must list `KnoxRelay;KnoxRelayLoader` (one Workshop id). Do not add the loader to `Mods=` until that item is on Steam — older packages do not contain it, and joiners would be told the mod is missing. `make knox-client` writes `.knox-dev` into Contents so unpublished Lua is not replaced.
+
 ### Version numbers are release numbers only
 
 Do **not** bump the version unless the user has explicitly answered **yes** to a Workshop release question (below). Local-only fixes keep the last released version string. Do not invent 1.22 because you edited a file.

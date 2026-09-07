@@ -17,7 +17,7 @@ KR_Desk = KR_Desk or {}
 
 -- Keep in step with modversion= and KR_Bridge.VERSION. A joining client
 -- loads this file before server Lua, so the title cannot wait on KR_Bridge.
-KR_Desk.VERSION = "1.39"
+KR_Desk.VERSION = "1.40"
 
 local LOG = "[KnoxRelay] "
 local pages = {}
@@ -378,9 +378,9 @@ end
 -- ISPanel, not ISCollapsableWindow. The collapsable window *is* the old
 -- inventory UI (Panel_TitleBar, pin, collapse, resize grips). Hiding those
 -- after the fact never stuck across a Lua reset.
-KnoxDeskWindow = ISPanel:derive("KnoxDeskWindow")
+KnoxRelayDesk = ISPanel:derive("KnoxRelayDesk")
 
-function KnoxDeskWindow:new(x, y, width, height)
+function KnoxRelayDesk:new(x, y, width, height)
     local o = ISPanel:new(x, y, width, height)
     setmetatable(o, self)
     self.__index = self
@@ -395,25 +395,25 @@ function KnoxDeskWindow:new(x, y, width, height)
     return o
 end
 
-function KnoxDeskWindow:initialise()
+function KnoxRelayDesk:initialise()
     self.background = false
     self.resizable = false
     self.drawFrame = false
     ISPanel.initialise(self)
 end
 
-function KnoxDeskWindow:setTitle(title)
+function KnoxRelayDesk:setTitle(title)
     self.title = title
 end
 
-function KnoxDeskWindow:pin()
+function KnoxRelayDesk:pin()
 end
 
-function KnoxDeskWindow:titleBarHeight()
+function KnoxRelayDesk:titleBarHeight()
     return TITLE_H
 end
 
-function KnoxDeskWindow:createChildren()
+function KnoxRelayDesk:createChildren()
     self.background = false
     self.resizable = false
     self.drawFrame = false
@@ -452,7 +452,7 @@ function KnoxDeskWindow:createChildren()
     self:rebuildRail()
 end
 
-function KnoxDeskWindow:hideResizeGrip()
+function KnoxRelayDesk:hideResizeGrip()
     self.resizable = false
     local function hideGrip(grip)
         if not grip then
@@ -471,7 +471,7 @@ end
 
 --- Title-bar drag only. moveWithMouse on the whole panel would steal clicks
 --- from the rail and the page.
-function KnoxDeskWindow:onMouseDown(x, y)
+function KnoxRelayDesk:onMouseDown(x, y)
     if not self:getIsVisible() then
         return
     end
@@ -483,7 +483,7 @@ function KnoxDeskWindow:onMouseDown(x, y)
     end
 end
 
-function KnoxDeskWindow:onMouseMove(dx, dy)
+function KnoxRelayDesk:onMouseMove(dx, dy)
     if self.moving then
         self:setX((self.x or 0) + (dx or 0))
         self:setY((self.y or 0) + (dy or 0))
@@ -491,27 +491,27 @@ function KnoxDeskWindow:onMouseMove(dx, dy)
     end
 end
 
-function KnoxDeskWindow:onMouseMoveOutside(dx, dy)
+function KnoxRelayDesk:onMouseMoveOutside(dx, dy)
     if self.moving then
         self:setX((self.x or 0) + (dx or 0))
         self:setY((self.y or 0) + (dy or 0))
     end
 end
 
-function KnoxDeskWindow:onMouseUp(_x, _y)
+function KnoxRelayDesk:onMouseUp(_x, _y)
     self.moving = false
 end
 
-function KnoxDeskWindow:onMouseUpOutside(_x, _y)
+function KnoxRelayDesk:onMouseUpOutside(_x, _y)
     self.moving = false
 end
 
-function KnoxDeskWindow:render()
+function KnoxRelayDesk:render()
 end
 
 --- B42 writes the last dragged size into layout.ini and restores it on
 --- addToUIManager. Ignore width/height; the desk is not player-sized.
-function KnoxDeskWindow:RestoreLayout(_name, layout)
+function KnoxRelayDesk:RestoreLayout(_name, layout)
     if type(layout) == "table" then
         local x = tonumber(layout.x)
         local y = tonumber(layout.y)
@@ -524,7 +524,7 @@ function KnoxDeskWindow:RestoreLayout(_name, layout)
     self:placeChrome()
 end
 
-function KnoxDeskWindow:SaveLayout(_name, layout)
+function KnoxRelayDesk:SaveLayout(_name, layout)
     if type(layout) ~= "table" then
         return
     end
@@ -537,7 +537,7 @@ end
 
 --- Snap the frame to WIDTH x HEIGHT (or the shrunk openGeometry on a
 --- small screen). Tests set `_layoutUnlocked` so they can still sweep sizes.
-function KnoxDeskWindow:applyLockedSize()
+function KnoxRelayDesk:applyLockedSize()
     if self._layoutUnlocked then
         return false
     end
@@ -583,7 +583,7 @@ end
 --- This never writes the window's own width or height. The old version called
 --- clampSize() here, so a prerender could push back against the resize widget
 --- mid-drag and the frame stuttered.
-function KnoxDeskWindow:placeChrome()
+function KnoxRelayDesk:placeChrome()
     local w = self:getWidth()
     local h = self:getHeight()
 
@@ -631,7 +631,7 @@ function KnoxDeskWindow:placeChrome()
 end
 
 --- Fit the nav buttons to the rail, shrinking rows before letting them spill.
-function KnoxDeskWindow:layoutRail()
+function KnoxRelayDesk:layoutRail()
     if not self.rail or not self.railButtons then
         return
     end
@@ -664,7 +664,7 @@ function KnoxDeskWindow:layoutRail()
     end
 end
 
-function KnoxDeskWindow:prerender()
+function KnoxRelayDesk:prerender()
     self.background = false
     self.resizable = false
     self.drawFrame = false
@@ -696,7 +696,7 @@ function KnoxDeskWindow:prerender()
     end
 end
 
-function KnoxDeskWindow:rebuildRail()
+function KnoxRelayDesk:rebuildRail()
     if not self.rail then
         return
     end
@@ -721,18 +721,18 @@ function KnoxDeskWindow:rebuildRail()
     self:layoutRail()
 end
 
-function KnoxDeskWindow:layoutPage()
+function KnoxRelayDesk:layoutPage()
     if mounted and type(mounted.layout) == "function" and self.host then
         pcall(mounted.layout, mounted, self.host)
     end
 end
 
-function KnoxDeskWindow:onResize()
+function KnoxRelayDesk:onResize()
     self:placeChrome()
     self:layoutPage()
 end
 
-function KnoxDeskWindow:close()
+function KnoxRelayDesk:close()
     KR_Desk.hide()
 end
 
@@ -758,10 +758,41 @@ local function unmountCurrent()
     end
 end
 
+local function pruneUiType(typeName)
+    pcall(function()
+        if not UIManager or not UIManager.getUI then
+            return
+        end
+        local ui = UIManager.getUI()
+        if not ui or type(ui.size) ~= "function" then
+            return
+        end
+        for index = ui:size() - 1, 0, -1 do
+            local el = ui:get(index)
+            if el and el.Type == typeName and type(el.removeFromUIManager) == "function" then
+                el:removeFromUIManager()
+            end
+        end
+    end)
+end
+
 function KR_Desk.show(pageId)
+    -- A leftover ISCollapsableWindow from an older Contents tree keeps the
+    -- Java class name KnoxDeskWindow. Drop it and open the ISPanel desk.
+    if instance and instance.Type ~= "KnoxRelayDesk" then
+        pcall(function()
+            instance:removeFromUIManager()
+        end)
+        instance = nil
+    end
+    pruneUiType("KnoxDeskWindow")
+    if not instance then
+        pruneUiType("KnoxRelayDesk")
+    end
+
     if not instance then
         local x, y, w, h = openGeometry()
-        instance = KnoxDeskWindow:new(x, y, w, h)
+        instance = KnoxRelayDesk:new(x, y, w, h)
         instance:setTitle("KNOX DESK  " .. deskVersion())
         instance:initialise()
         instance:addToUIManager()

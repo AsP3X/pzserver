@@ -46,6 +46,25 @@ else
        "root=$root_v 42=$b42_v common=$common_v lua=$lua_v desk=$desk_v"
 fi
 
+LOADER="$ROOT/game-server/mods/KnoxRelayLoader"
+if [ -f "$LOADER/42/media/lua/client/KR_Steam.lua" ]; then
+    ok "KnoxRelayLoader client Lua is present"
+else
+    ng "KnoxRelayLoader client Lua is present" "missing KR_Steam.lua"
+fi
+loader_id="$(sed -n 's/^id=//p' "$LOADER/mod.info" 2>/dev/null | tr -d '\r' | head -1)"
+if [ "$loader_id" = "KnoxRelayLoader" ]; then
+    ok "KnoxRelayLoader id is KnoxRelayLoader"
+else
+    ng "KnoxRelayLoader id is KnoxRelayLoader" "id=${loader_id:-<empty>}"
+fi
+if grep -q '^modversion=' "$LOADER/mod.info" 2>/dev/null; then
+    ng "KnoxRelayLoader has no modversion (not in the Knox Relay lockstep)" \
+       "loader should stay unversioned so a bump cannot desync it"
+else
+    ok "KnoxRelayLoader has no modversion (not in the Knox Relay lockstep)"
+fi
+
 echo
 echo "knox-manifest: ${pass} passed, ${fail} failed"
 [ "$fail" -eq 0 ]

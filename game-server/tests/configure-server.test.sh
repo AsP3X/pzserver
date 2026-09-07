@@ -607,6 +607,31 @@ EOF
 }
 assert_knox_acf_is_marked_current
 
+assert_loader_is_seeded_into_workshop_cache() {
+    local home cfg staged_dir loader_dir cached
+    home="$(mktemp -d)"
+    cfg="$(mktemp -d)"
+    staged_dir="$(mktemp -d)"
+    loader_dir="$(mktemp -d)"
+    install_marker "$home/pzserver"
+    write_mod_info "$staged_dir" "1.39"
+    write_mod_info \
+        "$home/pzserver/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay" "1.39"
+    mkdir -p "$loader_dir/42/media/lua/client"
+    printf 'name=Knox Relay Loader\nid=KnoxRelayLoader\n' > "$loader_dir/mod.info"
+    printf '%s\n' '-- loader' > "$loader_dir/42/media/lua/client/KR_Steam.lua"
+    KR_STAGED_DIR="$staged_dir" KR_LOADER_STAGED_DIR="$loader_dir" WORKSHOP_IDS=3777446787 \
+        run_configure "$home" "$cfg" /dev/null >/dev/null
+    cached="$home/pzserver/steamapps/workshop/content/108600/3777446787/mods/KnoxRelayLoader/42/media/lua/client/KR_Steam.lua"
+    if [ -f "$cached" ]; then
+        ok "Knox Relay Loader is seeded into the Workshop cache next to Knox Relay"
+    else
+        ng "Knox Relay Loader is seeded into the Workshop cache next to Knox Relay" "missing $cached"
+    fi
+    rm -rf "$home" "$cfg" "$staged_dir" "$loader_dir"
+}
+assert_loader_is_seeded_into_workshop_cache
+
 echo "----------------------------------------"
 echo "Passed: ${pass}, Failed: ${fail}"
 [ "$fail" -eq 0 ]

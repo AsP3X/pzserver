@@ -143,6 +143,9 @@ Two things lag behind the restart:
   next export, which happens on the mod's normal tick.
 - Clients need `DoLuaChecksum=false` (already set by `configure-server.sh`) to
   connect while their cached Lua differs from the server's.
+- After a release that includes `KnoxRelayLoader`, set `Mods=KnoxRelay;KnoxRelayLoader`
+  (still one `WorkshopItems=3777446787`). Not before: older Workshop packages do
+  not contain the loader and joiners would be missing a required mod.
 
 ## Checklist
 
