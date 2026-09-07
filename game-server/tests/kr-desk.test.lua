@@ -221,9 +221,13 @@ function ISRichTextPanel:getYScroll() return self.yScroll end
 function ISRichTextPanel:setYScroll(v) self.yScroll = v end
 
 ISCollapsableWindow = ISPanel:derive("ISCollapsableWindow")
+ISCollapsableWindow.createChildrenCalls = 0
 function ISCollapsableWindow:initialise() ISPanel.initialise(self) end
 function ISCollapsableWindow:createChildren()
-    -- The real window builds these; the shell must not depend on their layout.
+    -- The real window builds these. The desk must not call this: spawning
+    -- them and then hiding them is how the vanilla inventory chrome came
+    -- back after a Lua reset.
+    ISCollapsableWindow.createChildrenCalls = ISCollapsableWindow.createChildrenCalls + 1
     self.resizeWidget = ISUIElement:new(0, 0, 10, 10)
     self.resizeWidget2 = ISUIElement:new(0, 0, 10, 10)
     self.closeButton = ISButton:new(0, 0, 16, 16, "", nil, function() end)
@@ -288,18 +292,27 @@ KR_Desk.show()
 local win = KR_Desk.instance()
 check("desk opened", win ~= nil)
 check("desk title shows the loaded Lua version",
-    win and win.title == "KNOX DESK  9.99",
+    win and win.title == "KNOX DESK  1.38",
     "title=" .. tostring(win and win.title))
 check("desk is not player-resizable", win and win.resizable == false)
-check("resize grip is hidden", win and (not win.resizeWidget or not win.resizeWidget:getIsVisible()))
-check("vanilla collapse control is hidden", win and win.collapseButton and not win.collapseButton:getIsVisible())
-check("vanilla pin control is hidden", win and win.pinButton and not win.pinButton:getIsVisible())
+check("desk does not spawn vanilla inventory chrome",
+    ISCollapsableWindow.createChildrenCalls == 0,
+    "createChildren calls=" .. tostring(ISCollapsableWindow.createChildrenCalls))
+check("resize grip was never created", win and win.resizeWidget == nil)
+check("vanilla collapse control was never created", win and win.collapseButton == nil)
+check("vanilla pin control was never created", win and win.pinButton == nil)
 check("close control stays so the desk can be dismissed", win and win.closeButton and win.closeButton:getIsVisible())
 check("vanilla title-bar textures are off", win and win.drawFrame == false)
-check("pinning does not bring the collapse chevron back", (function()
+check("pinning does not invent a collapse chevron", (function()
     KnoxDeskWindow.pin(win)
-    return win.collapseButton and not win.collapseButton:getIsVisible()
+    return win.collapseButton == nil or not win.collapseButton:getIsVisible()
 end)())
+win.drawFrame = true
+win.background = true
+win.resizable = true
+win:prerender()
+check("prerender keeps vanilla inventory chrome off after a Lua reset",
+    win.drawFrame == false and win.background == false and win.resizable == false)
 win.vanillaRender = false
 win:render()
 check("desk render does not paint the vanilla inventory frame", win.vanillaRender ~= true)
@@ -706,11 +719,14 @@ end
 KR_Desk.refit(grip)
 check("refit does not paginate a resize grip", true)
 
+win.resizeWidget = grip
 function win.resizeWidget.paginate()
     error("paginate must not run when hiding the resize grip")
 end
 win:hideResizeGrip()
 check("hiding the resize grip does not paginate it", true)
+check("a leftover resize grip is moved off-screen rather than probed",
+    win.resizeWidget:getIsVisible() == false and win.resizeWidget:getX() == -40)
 
 --------------------------------------------------------------------------
 

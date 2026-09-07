@@ -361,7 +361,7 @@ EOF
 
     PATH="$bin:$PATH" STEAMCMD_ARGS_FILE="$args" FEX_LOG="$fexlog" \
         PZ_STEAM_HOME="$home" PZ_CONFIG_DIR="$cfg" SERVER_NAME="ZomboidServer" \
-        PZ_INSTALL_DIR="$home/pzserver" PZ_WORKSHOP_IDS="3777446787" \
+        PZ_INSTALL_DIR="$home/pzserver" PZ_WORKSHOP_IDS="1234567890" \
         bash "$CONFIGURE" >/dev/null
 
     if grep -q 'steamcmd.sh' "$fexlog" && grep -q 'workshop_download_item' "$fexlog"; then
@@ -525,6 +525,87 @@ assert_seeding "the staged copy seeds when no Workshop copy is installed" \
     1.7 "" 1.7
 assert_seeding "version comparison is numeric, not lexical (1.10 beats 1.9)" \
     1.10 1.9 1.10
+
+assert_readonly_knox_is_left_alone() {
+    local home cfg staged_dir live actual
+    home="$(mktemp -d)"
+    cfg="$(mktemp -d)"
+    staged_dir="$(mktemp -d)"
+    install_marker "$home/pzserver"
+    write_mod_info "$staged_dir" "1.9"
+    live="$home/pzserver/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay"
+    write_mod_info "$live" "1.5"
+    cp "$live/42/mod.info" "$live/mod.info"
+    chmod a-w "$live" "$live/42"
+
+    KR_STAGED_DIR="$staged_dir" WORKSHOP_IDS=3777446787 \
+        run_configure "$home" "$cfg" /dev/null >/dev/null
+
+    actual="$(sed -n 's/^modversion=//p' "$live/42/mod.info" 2>/dev/null | head -1)"
+    if [ "$actual" = "1.5" ]; then
+        ok "a read-only Knox Relay mount is not replaced by the image seed"
+    else
+        ng "a read-only Knox Relay mount is not replaced by the image seed" \
+           "got ${actual:-<nothing>}"
+    fi
+    chmod -R u+w "$home" "$cfg" "$staged_dir" 2>/dev/null || true
+    rm -rf "$home" "$cfg" "$staged_dir"
+}
+assert_readonly_knox_is_left_alone
+
+assert_knox_acf_is_marked_current() {
+    local home cfg staged_dir acf installed_ts
+    home="$(mktemp -d)"
+    cfg="$(mktemp -d)"
+    staged_dir="$(mktemp -d)"
+    install_marker "$home/pzserver"
+    write_mod_info "$staged_dir" "1.7"
+    write_mod_info \
+        "$home/pzserver/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay" "1.5"
+    mkdir -p "$home/pzserver/steamapps/workshop"
+    acf="$home/pzserver/steamapps/workshop/appworkshop_108600.acf"
+    cat > "$acf" <<'EOF'
+"AppWorkshop"
+{
+	"NeedsUpdate"		"1"
+	"NeedsDownload"		"1"
+	"WorkshopItemsInstalled"
+	{
+		"3777446787"
+		{
+			"size"		"1"
+			"timeupdated"		"111"
+			"manifest"		"222"
+		}
+	}
+	"WorkshopItemDetails"
+	{
+		"3777446787"
+		{
+			"manifest"		"333"
+			"timeupdated"		"444"
+			"latest_timeupdated"		"555"
+			"latest_manifest"		"666"
+		}
+	}
+}
+EOF
+
+    KR_STAGED_DIR="$staged_dir" WORKSHOP_IDS=3777446787 \
+        run_configure "$home" "$cfg" /dev/null >/dev/null
+
+    installed_ts="$(awk '/"WorkshopItemsInstalled"/{i=1} /"WorkshopItemDetails"/{i=0} i && /"timeupdated"/{gsub(/"/,"",$2); print $2; exit}' "$acf")"
+    installed_mf="$(awk '/"WorkshopItemsInstalled"/{i=1} /"WorkshopItemDetails"/{i=0} i && /"manifest"/{gsub(/"/,"",$2); print $2; exit}' "$acf")"
+    needs="$(awk '/"NeedsUpdate"/{gsub(/"/,"",$2); print $2; exit}' "$acf")"
+    if [ "$installed_ts" = "555" ] && [ "$installed_mf" = "666" ] && [ "$needs" = "0" ]; then
+        ok "Knox Relay Workshop ACF is marked current so PZ will not reinstall"
+    else
+        ng "Knox Relay Workshop ACF is marked current so PZ will not reinstall" \
+           "timeupdated=$installed_ts manifest=$installed_mf NeedsUpdate=$needs"
+    fi
+    rm -rf "$home" "$cfg" "$staged_dir"
+}
+assert_knox_acf_is_marked_current
 
 echo "----------------------------------------"
 echo "Passed: ${pass}, Failed: ${fail}"

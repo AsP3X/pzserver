@@ -21,6 +21,7 @@ SRC_42="${SRC_MOD}/42"
 # features a server has.
 INFO_VERSION="$(sed -n 's/^modversion=//p' "${SRC_42}/mod.info" | tr -d '\r')"
 LUA_VERSION="$(sed -n 's/^KR_Bridge\.VERSION *= *"\(.*\)"$/\1/p' "${SRC_42}/media/lua/server/KR_Bridge.lua")"
+DESK_VERSION="$(sed -n 's/^KR_Desk\.VERSION *= *"\(.*\)"$/\1/p' "${SRC_42}/media/lua/client/KR_Desk.lua")"
 ROOT_INFO="${SRC_MOD}/mod.info"
 COMMON_INFO="${SRC_MOD}/common/mod.info"
 if [ ! -f "${ROOT_INFO}" ]; then
@@ -34,9 +35,9 @@ fi
 ROOT_VERSION="$(sed -n 's/^modversion=//p' "${ROOT_INFO}" | tr -d '\r')"
 COMMON_VERSION="$(sed -n 's/^modversion=//p' "${COMMON_INFO}" | tr -d '\r')"
 
-if [ "${INFO_VERSION}" != "${LUA_VERSION}" ]; then
-    echo "ERROR: version mismatch — 42/mod.info says '${INFO_VERSION}', KR_Bridge.VERSION says '${LUA_VERSION}'."
-    echo "Update both before packaging."
+if [ "${INFO_VERSION}" != "${LUA_VERSION}" ] || [ "${INFO_VERSION}" != "${DESK_VERSION}" ]; then
+    echo "ERROR: version mismatch — 42/mod.info says '${INFO_VERSION}', KR_Bridge.VERSION says '${LUA_VERSION}', KR_Desk.VERSION says '${DESK_VERSION}'."
+    echo "Update all three before packaging."
     exit 1
 fi
 if [ "${ROOT_VERSION}" != "${INFO_VERSION}" ] || [ "${COMMON_VERSION}" != "${INFO_VERSION}" ]; then

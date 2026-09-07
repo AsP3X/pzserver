@@ -20,7 +20,7 @@ When the user updates Knox Relay (Lua, `mod.info`, Workshop prep, publish, or "t
 
 ### Server — every Lua change
 
-PZ loads Workshop item **3777446787** from the Steam cache inside the game container, not from git. A restart runs SteamCMD and can replace a newer local copy with whatever Steam last published. The image seed (`COPY` to `/opt/knox-relay`, then `configure-server.sh` into the cache) is how the local server gets a build that is not yet on Steam — or how it keeps a just-published build if SteamCMD is stale. That seed only exists if you **rebuild the game-server image**. `docker compose restart` / `make restart` does not rebuild the image.
+PZ loads Workshop item **3777446787** from the Steam cache inside the game container, not from git. A restart runs SteamCMD and can replace a newer local copy with whatever Steam last published. The image seed (`COPY` to `/opt/knox-relay`, then `configure-server.sh` into the cache) writes the git Lua over that download. After seeding, `configure-server.sh` copies `latest_timeupdated` / `latest_manifest` into `WorkshopItemsInstalled` in `appworkshop_108600.acf` so PZ’s own Workshop check (`timeUpdated doesn't match` → delete folder → reinstall) does not throw the seeded Lua away and boot the last published Desk. That seed only exists if you **rebuild the game-server image**. `docker compose restart` / `make restart` does not rebuild the image.
 
 1. Rebuild the game-server image and **recreate** the container:
    `docker compose -f docker-compose.yml -f docker-compose.amd64.yml up -d --build --force-recreate game-server`
@@ -57,12 +57,13 @@ Do **not** bump the version unless the user has explicitly answered **yes** to a
 
 Not bumping the version is **not** permission to leave server or client on old Lua. Deploy both anyway.
 
-The version is four strings that must match each other (and the live `mod_version` after deploy):
+The version is five strings that must match each other (and the live `mod_version` after deploy):
 
 - `modversion=` in `game-server/mods/KnoxRelay/42/mod.info`
 - `modversion=` in `game-server/mods/KnoxRelay/common/mod.info`
 - `modversion=` in `game-server/mods/KnoxRelay/mod.info`
 - `KR_Bridge.VERSION` in `game-server/mods/KnoxRelay/42/media/lua/server/KR_Bridge.lua`
+- `KR_Desk.VERSION` in `game-server/mods/KnoxRelay/42/media/lua/client/KR_Desk.lua`
 
 `make workshop-package` / `scripts/workshop-package.sh` and `game-server/tests/knox-manifest.test.sh` refuse if they disagree. That check is not a deploy. Do not run the packager just to “keep staging in sync” after a no.
 
@@ -70,7 +71,7 @@ The version is four strings that must match each other (and the live `mod_versio
 
 PZ’s in-game Mods **Version** row (`ChooseGameInfo.getModVersion`) and the admin Mods Version column only show `modversion=` from the file PZ actually reads: `{mod}/<versionDir>/mod.info` (for us `42/`) then `{mod}/common/mod.info`. A Steam install date is not a version. Mods that never wrote `modversion=` stay blank (`—` on the panel). Do not invent a number for them, and do not fill the column from `timeupdated`.
 
-Knox Relay must always have a version. Keep the four strings above in lockstep. Seed the **whole** tree (root + `42/` + `common/`), not only `42/`. After deploy, all of these report the same X.Y:
+Knox Relay must always have a version. Keep the five strings above in lockstep. Seed the **whole** tree (root + `42/` + `common/`), not only `42/`. After deploy, all of these report the same X.Y:
 
 - Boot: `[KnoxRelay] Initializing server-side bridge mod vX.Y`
 - `data/zomboid/Lua/game_state.json` → `"mod_version":"X.Y"`
@@ -85,14 +86,14 @@ After any sitting that changed Knox Relay, **after** server and client are on th
 
 **“Prepare the next Knox Relay Workshop release?”**
 
-- **Yes** — then bump both version strings, write the changenote, package, sync `Contents/` only, and deploy server **and** client on that new version.
-- **No** — leave `modversion=` and `KR_Bridge.VERSION` unchanged. Do not package, do not write a changenote, do not overwrite `workshop.txt`. Contents/ was already seeded by the client deploy above (`make knox-client`); that is not a Workshop release.
+- **Yes** — then bump the lockstep version strings, write the changenote, package, sync `Contents/` only, and deploy server **and** client on that new version.
+- **No** — leave `modversion=`, `KR_Bridge.VERSION`, and `KR_Desk.VERSION` unchanged. Do not package, do not write a changenote, do not overwrite `workshop.txt`. Contents/ was already seeded by the client deploy above (`make knox-client`); that is not a Workshop release.
 
 Never bump first and ask later. Never treat “the UI is done” as permission to cut a release.
 
 ### Workshop prep (only after Yes)
 
-1. Bump both version strings together. Write `"changenote"` in `workshop/workshop_upload.vdf`.
+1. Bump the lockstep version strings together. Write `"changenote"` in `workshop/workshop_upload.vdf`.
 2. `make workshop-package`, then sync **`Contents/` only** into `~/Zomboid/Workshop/KnoxRelay/Contents/`. Never overwrite the upload folder's `workshop.txt` (`id=3777446787`).
 3. Deploy server and client on that new version (same recreate + client cache seed + confirm as above).
 4. After the user publishes on Steam: Steam change notes, the server, and the client must report that same X.Y. If Steam shows 1.13 and `game_state.json` shows anything else — or the other way around — the job is not done.

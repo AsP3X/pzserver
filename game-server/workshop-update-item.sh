@@ -34,7 +34,38 @@ fi
 PZ_INSTALL_DIR="${PZ_INSTALL_DIR:-${PZ_STEAM_HOME:-/home/steam}/ZomboidDedicatedServer}"
 
 PZ_WORKSHOP_APP_ID="108600"
+KR_WORKSHOP_ID="${PZ_BRIDGE_WORKSHOP_ID:-3777446787}"
 WORKSHOP_CACHE_ROOT="${PZ_INSTALL_DIR}/steamapps/workshop/content/${PZ_WORKSHOP_APP_ID}"
+
+print_modversion() {
+    local root="$1" info version=""
+    for info in \
+        "$root/mods"/*/42/mod.info \
+        "$root/mods"/*/mod.info \
+        "$root/42/mod.info" \
+        "$root/mod.info"
+    do
+        [ -f "$info" ] || continue
+        version="$(sed -n 's/^modversion=//p' "$info" | head -1 | tr -d '\r')"
+        if [ -n "$version" ]; then
+            echo "$version"
+            return
+        fi
+    done
+}
+
+# Knox Relay is the git/image copy. Steam would replace it with the last
+# published Workshop build — the old Desk UI after a restart.
+if [ "$WID" = "$KR_WORKSHOP_ID" ]; then
+    VERSION="$(print_modversion "${WORKSHOP_CACHE_ROOT}/${WID}")"
+    if [ -z "$VERSION" ]; then
+        VERSION="$(print_modversion /opt/knox-relay)"
+    fi
+    echo "STATUS=ok"
+    echo "VERSION=${VERSION:-}"
+    echo "Knox Relay is supplied by the image seed; Steam was not asked."
+    exit 0
+fi
 
 STEAMCMD_BIN=""
 for candidate in \

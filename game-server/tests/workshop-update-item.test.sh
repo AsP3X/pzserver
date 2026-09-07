@@ -36,17 +36,17 @@ EOF
 chmod +x "$bin/steamcmd.sh"
 
 args="$(mktemp)"
-mod_dir="$install/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay"
+mod_dir="$install/steamapps/workshop/content/108600/1234567890/mods/SomeMod"
 mkdir -p "$mod_dir/42"
-printf 'name=Knox Relay\nid=KnoxRelay\nmodversion=1.24\n' > "$mod_dir/42/mod.info"
+printf 'name=Some Mod\nid=SomeMod\nmodversion=1.24\n' > "$mod_dir/42/mod.info"
 
 out="$(
     PATH="$bin:$PATH" \
     STEAMCMD_ARGS_FILE="$args" \
-    STEAMCMD_FAKE_ID=3777446787 \
+    STEAMCMD_FAKE_ID=1234567890 \
     PZ_INSTALL_DIR="$install" \
     PZ_STEAMCMD_BIN="$bin/steamcmd.sh" \
-    bash "$UPDATE" 3777446787 2>&1
+    bash "$UPDATE" 1234567890 2>&1
 )" || rc=$?
 rc="${rc:-0}"
 
@@ -68,11 +68,35 @@ else
     ng "surfaces 42/mod.info to the mod root" "missing $mod_dir/mod.info"
 fi
 
-if tr '\n' ' ' < "$args" | grep -q '+workshop_download_item 108600 3777446787'; then
+if tr '\n' ' ' < "$args" | grep -q '+workshop_download_item 108600 1234567890'; then
     ok "SteamCMD is asked for this Workshop item only"
 else
     ng "SteamCMD is asked for this Workshop item only" "$(tr '\n' ' ' < "$args")"
 fi
+
+knox_args="$(mktemp)"
+knox_dir="$install/steamapps/workshop/content/108600/3777446787/mods/KnoxRelay"
+mkdir -p "$knox_dir/42"
+printf 'name=Knox Relay\nid=KnoxRelay\nmodversion=1.37\n' > "$knox_dir/42/mod.info"
+: > "$knox_args"
+out="$(
+    PATH="$bin:$PATH" \
+    STEAMCMD_ARGS_FILE="$knox_args" \
+    PZ_INSTALL_DIR="$install" \
+    PZ_STEAMCMD_BIN="$bin/steamcmd.sh" \
+    bash "$UPDATE" 3777446787 2>&1
+)" || knox_rc=$?
+knox_rc="${knox_rc:-0}"
+if [ "$knox_rc" -eq 0 ] && printf '%s' "$out" | grep -q 'STATUS=ok' \
+    && printf '%s' "$out" | grep -q 'VERSION=1.37' \
+    && ! grep -q workshop_download_item "$knox_args"
+then
+    ok "Knox Relay update reports the mounted version and does not ask Steam"
+else
+    ng "Knox Relay update reports the mounted version and does not ask Steam" \
+       "rc=$knox_rc out=$out args=$(tr '\n' ' ' < "$knox_args")"
+fi
+rm -f "$knox_args"
 
 rm -rf "$home" "$bin" "$args"
 

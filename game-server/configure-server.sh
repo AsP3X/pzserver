@@ -273,6 +273,7 @@ fi
 # The cost is a SteamCMD round trip on every start, which PZ_SKIP_WORKSHOP_SYNC
 # exists to opt out of when boot time matters more than freshness.
 PZ_WORKSHOP_APP_ID="108600"
+KR_WORKSHOP_ID="${PZ_BRIDGE_WORKSHOP_ID:-3777446787}"
 WORKSHOP_CACHE_ROOT="${PZ_INSTALL_DIR}/steamapps/workshop/content/${PZ_WORKSHOP_APP_ID}"
 
 # Re-read the final WorkshopItems= so we cover every restore path above.
@@ -420,9 +421,8 @@ KR_STAGED_DIR="${KR_STAGED_DIR:-/opt/knox-relay}"
 #
 # So the cache copy is the target when there is one, and the symlink planted
 # below follows it. Zomboid/mods is the target only when this is not a Workshop
-# mod at all. On AMD64 a later SteamCMD sync overwrites the cache again, which
-# is correct: Steam wins whenever it can actually run.
-KR_CACHE_DIR="${WORKSHOP_CACHE_ROOT}/${PZ_BRIDGE_WORKSHOP_ID:-3777446787}/mods/KnoxRelay"
+# mod at all.
+KR_CACHE_DIR="${WORKSHOP_CACHE_ROOT}/${KR_WORKSHOP_ID}/mods/KnoxRelay"
 if [ -d "$KR_CACHE_DIR" ]; then
     KR_LIVE_DIR="$KR_CACHE_DIR"
     KR_LIVE_LABEL="the Workshop cache"
@@ -447,11 +447,20 @@ if [ -d "$KR_STAGED_DIR" ]; then
     live_version="$(mod_version_of "$KR_LIVE_DIR")"
     newest="$(printf '%s\n%s\n' "$live_version" "$staged_version" | sort -V | tail -1)"
 
-    # Same version still seeds: SteamCMD has just restored the Workshop copy,
-    # which will not have unpublished local Lua (holds, desk fixes, …). A
-    # strictly older image never overwrites a newer Workshop build.
-    if [ -z "$live_version" ] \
+    knox_dest_writable=0
+    mkdir -p "$KR_LIVE_DIR" 2>/dev/null || true
+    if mkdir "${KR_LIVE_DIR}/.knox-seed-write" 2>/dev/null; then
+        rmdir "${KR_LIVE_DIR}/.knox-seed-write" 2>/dev/null || true
+        knox_dest_writable=1
+    fi
+
+    if [ "$knox_dest_writable" -ne 1 ]; then
+        echo "[configure-server] Knox Relay at ${KR_LIVE_LABEL} is mounted read-only from source" \
+             "(${live_version:-${staged_version:-?}}); Steam cannot replace it"
+    elif [ -z "$live_version" ] \
         || [ "$newest" = "$staged_version" ]; then
+        # Same version still seeds when the dest is a real directory: a
+        # Workshop extract will not have unpublished local Lua.
         rm -rf "$KR_LIVE_DIR"
         cp -r "$KR_STAGED_DIR" "$KR_LIVE_DIR"
         echo "[configure-server] Seeded Knox Relay ${staged_version:-?} from the image into" \
@@ -461,6 +470,47 @@ if [ -d "$KR_STAGED_DIR" ]; then
              "(image stages ${staged_version:-nothing})"
     fi
 fi
+
+# PZ GameServerWorkshopItems compares WorkshopItemsInstalled.timeupdated to
+# Steam. A mismatch deletes the cache and reinstalls the last published
+# copy — the old Desk UI after a long-uptime restart. After seeding, copy
+# latest_* into Installed so CheckItemState returns Ready and leaves our Lua.
+mark_knox_workshop_current() {
+    local acf="${PZ_INSTALL_DIR}/steamapps/workshop/appworkshop_${PZ_WORKSHOP_APP_ID}.acf"
+    local id="$KR_WORKSHOP_ID"
+    local latest_ts latest_mf tmp
+    [ -f "$acf" ] || return 0
+
+    latest_ts=$(sed -n 's/.*"latest_timeupdated"[[:space:]]*"\([0-9][0-9]*\)".*/\1/p' "$acf" | head -1)
+    latest_mf=$(sed -n 's/.*"latest_manifest"[[:space:]]*"\([0-9][0-9]*\)".*/\1/p' "$acf" | head -1)
+    if [ -z "$latest_ts" ]; then
+        return 0
+    fi
+
+    tmp="$(mktemp "${acf}.XXXXXX")"
+    awk -v id="$id" -v ts="$latest_ts" -v mf="$latest_mf" '
+    BEGIN { inst=0; item=0 }
+    /"NeedsUpdate"/ { sub(/"[0-9]+"/, "\"0\"") }
+    /"NeedsDownload"/ { sub(/"[0-9]+"/, "\"0\"") }
+    /"WorkshopItemsInstalled"/ { inst=1 }
+    /"WorkshopItemDetails"/ { inst=0; item=0 }
+    inst && index($0, "\"" id "\"") { item=1 }
+    item && inst && /"timeupdated"/ {
+        sub(/"[0-9]+"/, "\"" ts "\"")
+        print
+        next
+    }
+    item && inst && mf != "" && /"manifest"/ {
+        sub(/"[0-9]+"/, "\"" mf "\"")
+        item=0
+        print
+        next
+    }
+    { print }
+    ' "$acf" > "$tmp" && mv "$tmp" "$acf"
+    echo "[configure-server] Marked Knox Relay Workshop item ${id} current (timeupdated=${latest_ts}) so PZ will not reinstall the published copy over the seeded Lua"
+}
+mark_knox_workshop_current
 
 # Surface PZ Build 42 mod manifests so the server can discover them.
 # PZ B42 dedicated server scans `<workshop_id>/mods/<id>/mod.info` (root-level),

@@ -45,10 +45,13 @@ if [ "${seeded}" -eq 0 ]; then
     echo "WARNING: no Steam workshop cache found; skipped Steam seed" >&2
 fi
 
-if [ -f "${UPLOAD_ROOT}/workshop.txt" ]; then
-    seed "${UPLOAD}"
-else
-    echo "WARNING: ${UPLOAD_ROOT}/workshop.txt missing; skipped upload Contents seed" >&2
+# Always seed Contents/. PZ loads this tree first (workshop,steam,mods),
+# including after a join-server workshop update. Do not require workshop.txt
+# — that file only holds the Steam item id for the in-game uploader.
+mkdir -p "${UPLOAD}"
+seed "${UPLOAD}"
+if [ ! -f "${UPLOAD_ROOT}/workshop.txt" ]; then
+    echo "WARNING: ${UPLOAD_ROOT}/workshop.txt missing; Contents was still seeded" >&2
 fi
 
 if [ -e "${LEFTOVER}" ]; then
