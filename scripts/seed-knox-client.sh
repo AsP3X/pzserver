@@ -58,4 +58,6 @@ fi
 
 echo
 echo "PZ loads Knox Relay from Contents/ first (workshop,steam,mods)."
+echo "A Steam download of 3777446787 does not replace Contents/; this seed does."
 echo "Fully quit Project Zomboid and relaunch — disconnect/reconnect keeps old Lua."
+echo "In-game the Desk title must read 'KNOX DESK  X.Y' for the seeded version."

@@ -22,6 +22,19 @@ local instance = nil
 local activeId = nil
 local mounted = nil
 
+--- Same string as KR_Bridge.VERSION once server Lua has loaded. A joining
+--- client still loads KR_Bridge.lua; Boot is what we skip.
+local function deskVersion()
+    if type(KR_Bridge) == "table" and KR_Bridge.VERSION then
+        return tostring(KR_Bridge.VERSION)
+    end
+    return "?"
+end
+
+function KR_Desk.version()
+    return deskVersion()
+end
+
 KR_Desk.Color = {
     void   = { r = 0.027, g = 0.031, b = 0.024, a = 1 },
     ash    = { r = 0.047, g = 0.059, b = 0.047, a = 1 },
@@ -145,21 +158,24 @@ end
 ---
 --- setWidth/setHeight are plain field writes in ISUIElement — they do not run
 --- onResize — so a scrolling list keeps the scrollbar it sized on creation and
---- a rich text panel keeps line breaks measured against the old width. Call
---- only methods that exist: paginate is rich-text-only, and Kahlua still
---- logs a missing Java method from inside pcall.
+--- a rich text panel keeps line breaks measured against the old width.
+---
+--- Do not probe `el.paginate` / `el.updateScrollbars` on arbitrary widgets.
+--- Kahlua treats a missing Java method as truthy and still dumps a stack
+--- from inside pcall, which aborted createChildren and left the vanilla
+--- collapsable-window chrome (the "old UI") with no rail.
 function KR_Desk.refit(el)
     if not el then
         return
     end
 
-    if el.items and el.itemheight and el.setScrollHeight then
+    if el.items and el.itemheight and type(el.setScrollHeight) == "function" then
         el:setScrollHeight(#el.items * el.itemheight)
     end
-    if el.updateScrollbars then
+    if el.items and type(el.updateScrollbars) == "function" then
         el:updateScrollbars()
     end
-    if el.paginate then
+    if el.Type == "ISRichTextPanel" and type(el.paginate) == "function" then
         el:paginate()
     end
 
@@ -360,12 +376,19 @@ function KnoxDeskWindow:initialise()
     -- already false.
     self.pin = true
     self.resizable = false
+    self.isCollapsed = false
+    -- Parent render paints Panel_TitleBar / Panel_StatusBar when this is true.
+    -- We draw the new desk ourselves in prerender.
+    self.drawFrame = false
+    self.background = false
     -- Floor only. The live size is WIDTH x HEIGHT, or MIN_* on a tiny screen.
     -- Pinning minimumWidth to WIDTH fought openGeometry() on 800px displays.
     self.minimumWidth = MIN_W
     self.minimumHeight = MIN_H
     ISCollapsableWindow.initialise(self)
     self.resizable = false
+    self.drawFrame = false
+    self.background = false
 end
 
 function KnoxDeskWindow:createChildren()
@@ -388,9 +411,42 @@ function KnoxDeskWindow:createChildren()
     self:addChild(self.host)
 
     self.railButtons = {}
-    self:hideResizeGrip()
+    -- Never let grip hiding abort the rail: a thrown Java method here used
+    -- to leave the vanilla window with no pages.
+    pcall(function() self:hideVanillaChrome() end)
     self:placeChrome()
     self:rebuildRail()
+end
+
+--- Strip the B42 inventory-window widgets. pin() otherwise shows the
+--- collapse chevron, and parent render paints Panel_TitleBar over the desk.
+function KnoxDeskWindow:hideVanillaChrome()
+    self.drawFrame = false
+    self.background = false
+    self.resizable = false
+    self.pin = true
+    self.isCollapsed = false
+    pcall(function() self:clearMaxDrawHeight() end)
+    self:hideResizeGrip()
+
+    local function hide(el)
+        if not el then
+            return
+        end
+        el:setVisible(false)
+    end
+    hide(self.collapseButton)
+    hide(self.pinButton)
+    hide(self.infoButton)
+
+    if self.closeButton then
+        self.closeButton:setVisible(true)
+        self.closeButton.backgroundColor = KR_Desk.Color.clear
+        self.closeButton.borderColor = KR_Desk.Color.clear
+        if self.closeButton.backgroundColorMouseOver then
+            self.closeButton.backgroundColorMouseOver.a = 0.2
+        end
+    end
 end
 
 function KnoxDeskWindow:hideResizeGrip()
@@ -401,8 +457,13 @@ function KnoxDeskWindow:hideResizeGrip()
         end
         grip:setVisible(false)
         pcall(function() grip:setCapture(false) end)
-        -- Invisible grips still eat clicks on some B42 builds.
-        KR_Desk.box(grip, -40, -40, 1, 1)
+        -- Invisible grips still eat clicks on some B42 builds. Move them
+        -- off-screen without refit(): resize widgets are not lists or
+        -- rich text, and probing paginate on them throws in Kahlua.
+        if type(grip.setX) == "function" then grip:setX(-40) end
+        if type(grip.setY) == "function" then grip:setY(-40) end
+        if type(grip.setWidth) == "function" then grip:setWidth(1) end
+        if type(grip.setHeight) == "function" then grip:setHeight(1) end
     end
     hideGrip(self.resizeWidget)
     hideGrip(self.resizeWidget2)
@@ -411,7 +472,40 @@ end
 --- Vanilla still calls this after a layout.ini restore. Stay locked.
 function KnoxDeskWindow:setResizable(_value)
     self.resizable = false
-    self:hideResizeGrip()
+    self:hideVanillaChrome()
+end
+
+--- Do not let vanilla pin/collapse bring back the old title-bar widgets.
+---
+--- The instance also stores a boolean `pin` (vanilla layout.ini). That field
+--- shadows this method, so always call KnoxDeskWindow.pin(self), never self:pin().
+local function keepPinned(self)
+    self.pin = true
+    self.isCollapsed = false
+    pcall(function() self:clearMaxDrawHeight() end)
+    if self.collapseButton then
+        self.collapseButton:setVisible(false)
+    end
+    if self.pinButton then
+        self.pinButton:setVisible(false)
+    end
+end
+
+function KnoxDeskWindow:pin()
+    keepPinned(self)
+end
+
+function KnoxDeskWindow:collapse()
+    keepPinned(self)
+end
+
+function KnoxDeskWindow:setDrawFrame(_visible)
+    self.drawFrame = false
+    self.background = false
+end
+
+--- Parent render draws Panel_StatusBar and the grey inventory border.
+function KnoxDeskWindow:render()
 end
 
 --- B42 writes the last dragged size into layout.ini and restores it on
@@ -425,8 +519,7 @@ function KnoxDeskWindow:RestoreLayout(_name, layout)
             self:setY(y)
         end
         if tostring(layout.pin) == "true" then
-            self.pin = true
-            pcall(function() self:pin() end)
+            keepPinned(self)
         end
     end
     self:applyLockedSize()
@@ -666,20 +759,20 @@ function KR_Desk.show(pageId)
     if not instance then
         local x, y, w, h = openGeometry()
         instance = KnoxDeskWindow:new(x, y, w, h)
-        instance:setTitle("KNOX DESK")
+        instance:setTitle("KNOX DESK  " .. deskVersion())
         instance:initialise()
         instance:addToUIManager()
         instance:setVisible(true)
-        instance.pin = true
-        pcall(function() instance:pin() end)
+        keepPinned(instance)
     else
         instance:setVisible(true)
         instance:addToUIManager()
     end
+    instance:setTitle("KNOX DESK  " .. deskVersion())
     -- RestoreLayout runs during addToUIManager and can write a saved drag
     -- size over the constructor. Snap after that, then size the hole.
     instance:applyLockedSize()
-    instance:hideResizeGrip()
+    instance:hideVanillaChrome()
     instance:placeChrome()
 
     pageId = pageId or activeId or defaultPageId()
@@ -733,4 +826,13 @@ function KR_Desk.refresh()
     end
 end
 
-print(LOG .. "Desk shell loaded")
+do
+    local src = "?"
+    pcall(function()
+        local info = debug.getinfo(1, "S")
+        if info and info.source then
+            src = tostring(info.source)
+        end
+    end)
+    print(LOG .. "Desk shell loaded v" .. deskVersion() .. " from " .. src)
+end

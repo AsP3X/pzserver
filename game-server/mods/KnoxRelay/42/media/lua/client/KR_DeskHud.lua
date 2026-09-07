@@ -84,4 +84,12 @@ Events.OnGameStart.Add(function()
     ensureHud()
 end)
 
-print(LOG .. "Desk HUD loaded")
+do
+    local version = "?"
+    if type(KR_Bridge) == "table" and KR_Bridge.VERSION then
+        version = tostring(KR_Bridge.VERSION)
+    elseif KR_Desk and KR_Desk.version then
+        version = KR_Desk.version()
+    end
+    print(LOG .. "Desk HUD loaded v" .. version)
+end

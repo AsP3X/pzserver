@@ -226,17 +226,31 @@ function ISCollapsableWindow:createChildren()
     -- The real window builds these; the shell must not depend on their layout.
     self.resizeWidget = ISUIElement:new(0, 0, 10, 10)
     self.resizeWidget2 = ISUIElement:new(0, 0, 10, 10)
+    self.closeButton = ISButton:new(0, 0, 16, 16, "", nil, function() end)
+    self.collapseButton = ISButton:new(0, 0, 16, 16, "", nil, function() end)
+    self.pinButton = ISButton:new(0, 0, 16, 16, "", nil, function() end)
+    self.infoButton = ISButton:new(0, 0, 16, 16, "", nil, function() end)
+    self.collapseButton:setVisible(true)
+    self.pinButton:setVisible(false)
+    self.closeButton:setVisible(true)
+    self.infoButton:setVisible(false)
 end
 function ISCollapsableWindow:titleBarHeight() return 16 end
 function ISCollapsableWindow:resizeWidgetHeight() return 8 end
 function ISCollapsableWindow:setTitle(t) self.title = t end
-function ISCollapsableWindow:pin() end
+function ISCollapsableWindow:pin()
+    self.pin = true
+    if self.collapseButton then self.collapseButton:setVisible(true) end
+    if self.pinButton then self.pinButton:setVisible(false) end
+end
 function ISCollapsableWindow:onResize() end
+function ISCollapsableWindow:render() self.vanillaRender = true end
 
 --------------------------------------------------------------------------
 -- Load the mod
 --------------------------------------------------------------------------
 
+KR_Bridge = { VERSION = "9.99" }
 assert(loadfile(CLIENT .. "KR_Desk.lua"))()
 assert(loadfile(CLIENT .. "KR_DeskReports.lua"))()
 
@@ -273,8 +287,22 @@ end
 KR_Desk.show()
 local win = KR_Desk.instance()
 check("desk opened", win ~= nil)
+check("desk title shows the loaded Lua version",
+    win and win.title == "KNOX DESK  9.99",
+    "title=" .. tostring(win and win.title))
 check("desk is not player-resizable", win and win.resizable == false)
 check("resize grip is hidden", win and (not win.resizeWidget or not win.resizeWidget:getIsVisible()))
+check("vanilla collapse control is hidden", win and win.collapseButton and not win.collapseButton:getIsVisible())
+check("vanilla pin control is hidden", win and win.pinButton and not win.pinButton:getIsVisible())
+check("close control stays so the desk can be dismissed", win and win.closeButton and win.closeButton:getIsVisible())
+check("vanilla title-bar textures are off", win and win.drawFrame == false)
+check("pinning does not bring the collapse chevron back", (function()
+    KnoxDeskWindow.pin(win)
+    return win.collapseButton and not win.collapseButton:getIsVisible()
+end)())
+win.vanillaRender = false
+win:render()
+check("desk render does not paint the vanilla inventory frame", win.vanillaRender ~= true)
 check("open desk is the locked 900x580 frame",
     win and win:getWidth() == KR_Desk.WIDTH and win:getHeight() == KR_Desk.HEIGHT,
     win and string.format("%dx%d", win:getWidth(), win:getHeight()))
@@ -667,6 +695,22 @@ KR_Desk.refit(view.body)
 check("refit still paginates a rich text panel",
     (view.body.paginated or 0) > pagesAfterRefit,
     "before=" .. tostring(pagesAfterRefit) .. " after=" .. tostring(view.body.paginated))
+
+-- A Java resize grip can expose a truthy paginate that throws. Calling it
+-- from hideResizeGrip used to abort createChildren and leave the vanilla
+-- window chrome with no rail — the "old UI" after a Workshop download.
+local grip = ISUIElement:new(0, 0, 10, 10)
+function grip:paginate()
+    error("paginate must not run on a resize grip")
+end
+KR_Desk.refit(grip)
+check("refit does not paginate a resize grip", true)
+
+function win.resizeWidget.paginate()
+    error("paginate must not run when hiding the resize grip")
+end
+win:hideResizeGrip()
+check("hiding the resize grip does not paginate it", true)
 
 --------------------------------------------------------------------------
 
