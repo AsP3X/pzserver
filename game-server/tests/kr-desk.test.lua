@@ -292,9 +292,12 @@ KR_Desk.show()
 local win = KR_Desk.instance()
 check("desk opened", win ~= nil)
 check("desk title shows the loaded Lua version",
-    win and win.title == "KNOX DESK  1.38",
+    win and win.title == "KNOX DESK  1.39",
     "title=" .. tostring(win and win.title))
 check("desk is not player-resizable", win and win.resizable == false)
+check("desk is an ISPanel, not the vanilla inventory window",
+    win and win.Type == "KnoxDeskWindow" and win.titlebarbkg == nil,
+    "type=" .. tostring(win and win.Type))
 check("desk does not spawn vanilla inventory chrome",
     ISCollapsableWindow.createChildrenCalls == 0,
     "createChildren calls=" .. tostring(ISCollapsableWindow.createChildrenCalls))
@@ -305,7 +308,7 @@ check("close control stays so the desk can be dismissed", win and win.closeButto
 check("vanilla title-bar textures are off", win and win.drawFrame == false)
 check("pinning does not invent a collapse chevron", (function()
     KnoxDeskWindow.pin(win)
-    return win.collapseButton == nil or not win.collapseButton:getIsVisible()
+    return win.collapseButton == nil
 end)())
 win.drawFrame = true
 win.background = true
