@@ -20,6 +20,8 @@ pub struct AppState {
     /// Failed-login counter. In-process, so each replica limits independently;
     /// with one API container that is the whole picture.
     pub login_limiter: Arc<AttemptLimiter>,
+    /// Failed registration-code guesses. Same window as login; keyed per code.
+    pub register_limiter: Arc<AttemptLimiter>,
     /// Longer-timeout client for start/stop/restart. Status polling keeps the
     /// short one inside `StatusService`.
     pub docker: DockerClient,
@@ -77,6 +79,10 @@ impl AppState {
             config.login_max_attempts,
             config.login_window,
         ));
+        let register_limiter = Arc::new(AttemptLimiter::new(
+            config.login_max_attempts,
+            config.login_window,
+        ));
 
         // Probed once, at start-up. The mode on a bind mount does not change
         // under us, and re-probing per request would put a filesystem write
@@ -96,6 +102,7 @@ impl AppState {
             config,
             status,
             login_limiter,
+            register_limiter,
             docker,
             bridge,
             item_catalog,

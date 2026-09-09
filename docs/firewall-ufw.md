@@ -71,6 +71,15 @@ sudo ufw delete allow 16262/udp
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 
+# Never publish admin tools. NPM listens on 81, Portainer on 9443;
+# both were found reachable on the public IP of pz.corespace.de.
+sudo ufw deny 81/tcp
+sudo ufw deny 9443/tcp
+sudo ufw deny 8080/tcp
+sudo ufw deny 2375/tcp
+sudo ufw deny 27015/tcp
+sudo ufw deny 5432/tcp
+
 # Close Caddy web ports
 sudo ufw delete allow 80/tcp
 sudo ufw delete allow 443/tcp

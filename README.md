@@ -22,6 +22,7 @@ Ports used:
 | **16261–16262** | UDP | Game (forward these for remote players) |
 | **8100** | TCP | Admin panel (localhost by default) |
 | **80 / 443** | TCP | Optional public HTTPS via Caddy |
+| **81 / 9443 / 8080** | TCP | **Never publish** — NPM admin, Portainer, internal web-ui |
 
 ---
 

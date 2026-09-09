@@ -36,6 +36,15 @@ pub enum SteamError {
 
     #[error("steam returned an id that is not a SteamID64")]
     BadIdentity,
+
+    /// The assertion was signed for a different `return_to` than this site.
+    ///
+    /// OpenID 2.0 `check_authentication` confirms the signature, not that we
+    /// were the intended audience. Without this check a captured assertion
+    /// issued to another relying party (or to `localhost`) would log someone
+    /// in here.
+    #[error("the sign-in was not issued for this site")]
+    ReturnToMismatch,
 }
 
 /// Where to send the browser to start a Steam login.
@@ -101,8 +110,17 @@ impl SteamClient {
     }
 
     /// Ask Steam whether it really signed this assertion, and for whom.
-    pub async fn verify(&self, params: &BTreeMap<String, String>) -> Result<String, SteamError> {
-        verify(&self.http, params).await
+    ///
+    /// `expected_return_to` is the callback URL this site sent as
+    /// `openid.return_to`. It is not taken from the request: that value is
+    /// attacker-controlled until Steam has signed it, and even then it names
+    /// the audience, which we have to compare ourselves.
+    pub async fn verify(
+        &self,
+        params: &BTreeMap<String, String>,
+        expected_return_to: &str,
+    ) -> Result<String, SteamError> {
+        verify(&self.http, params, expected_return_to).await
     }
 }
 
@@ -114,9 +132,14 @@ impl SteamClient {
 async fn verify(
     client: &reqwest::Client,
     params: &BTreeMap<String, String>,
+    expected_return_to: &str,
 ) -> Result<String, SteamError> {
     if params.get("openid.mode").map(String::as_str) != Some("id_res") {
         return Err(SteamError::NotAnAssertion);
+    }
+
+    if !return_to_matches(params.get("openid.return_to"), expected_return_to) {
+        return Err(SteamError::ReturnToMismatch);
     }
 
     // Encoded by hand rather than with reqwest's `form`, which needs the
@@ -166,6 +189,23 @@ fn is_valid(body: &str) -> bool {
 }
 
 /// Pull the SteamID64 out of a claimed identity URL.
+/// Whether `openid.return_to` names this site's callback.
+///
+/// Exact match is what we send and what Steam echoes. A trailing query is
+/// allowed because the spec lets the RP add state there; anything else —
+/// another host, another path, a prefix trick — is a different audience.
+fn return_to_matches(actual: Option<&String>, expected: &str) -> bool {
+    let Some(actual) = actual.map(String::as_str) else {
+        return false;
+    };
+
+    if expected.is_empty() {
+        return false;
+    }
+
+    actual == expected || actual.starts_with(&format!("{expected}?"))
+}
+
 fn steam_id_from(claimed_id: &str) -> Option<String> {
     let id = claimed_id.strip_prefix(CLAIMED_ID_PREFIX)?;
 
@@ -230,6 +270,35 @@ mod tests {
                 "{hostile} must not be accepted"
             );
         }
+    }
+
+    #[test]
+    fn return_to_must_be_this_site() {
+        let expected = "https://pz.corespace.de/api/v1/auth/steam/callback";
+
+        assert!(return_to_matches(Some(&expected.to_owned()), expected,));
+        assert!(return_to_matches(
+            Some(&format!("{expected}?state=abc")),
+            expected,
+        ));
+
+        for hostile in [
+            "",
+            "http://localhost:5174/api/v1/auth/steam/callback",
+            "https://pz.corespace.de.evil.example/api/v1/auth/steam/callback",
+            "https://evil.example/api/v1/auth/steam/callback",
+            "https://pz.corespace.de/api/v1/auth/steam/callback/extra",
+            "https://pz.corespace.de/api/v1/auth/steam",
+            "https://evil.example/?next=https://pz.corespace.de/api/v1/auth/steam/callback",
+        ] {
+            assert!(
+                !return_to_matches(Some(&hostile.to_owned()), expected),
+                "{hostile} must not count as this site"
+            );
+        }
+
+        assert!(!return_to_matches(None, expected));
+        assert!(!return_to_matches(Some(&expected.to_owned()), ""));
     }
 
     #[test]

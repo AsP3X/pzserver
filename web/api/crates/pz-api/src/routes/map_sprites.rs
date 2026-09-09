@@ -32,11 +32,17 @@ async fn meta(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 async fn sprites_bin(State(state): State<AppState>) -> Response {
-    blob(state.map_sprites.sprites_bin().await, "application/octet-stream")
+    blob(
+        state.map_sprites.sprites_bin().await,
+        "application/octet-stream",
+    )
 }
 
 async fn roofs_bin(State(state): State<AppState>) -> Response {
-    blob(state.map_sprites.roofs_bin().await, "application/octet-stream")
+    blob(
+        state.map_sprites.roofs_bin().await,
+        "application/octet-stream",
+    )
 }
 
 async fn sprites(State(state): State<AppState>) -> impl IntoResponse {

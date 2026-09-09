@@ -109,8 +109,9 @@ accounts exist, and both failure modes return the same message.
 Failed logins are throttled per name (8 per 15 minutes by default), lower-cased
 so that varying the capitalisation is not a way to buy another eight attempts
 against one account. The counter is per account rather than per network address
-because the API only ever sees nginx's; add per-address limiting at the edge
-alongside it.
+because the API only ever sees nginx's. nginx in `web-ui` now applies a
+per-address limit on login, register and the 2FA challenge using
+`X-Forwarded-For` from the private proxy hop.
 
 The first administrator is created on boot from `ADMIN_USERNAME` /
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` — the same variables the PHP stack's entrypoint

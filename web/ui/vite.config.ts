@@ -26,8 +26,8 @@ export default defineConfig({
     },
   },
   build: {
-    // Source maps are worth the bytes on a site this size; stack traces from
-    // production bug reports are otherwise unreadable.
-    sourcemap: true,
+    // Do not ship source maps. The production site was serving the full
+    // admin UI map as a public static file.
+    sourcemap: false,
   },
 })

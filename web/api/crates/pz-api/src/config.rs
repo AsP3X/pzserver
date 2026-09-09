@@ -113,13 +113,7 @@ impl Config {
         let server_name = string("PZ_SERVER_NAME", "ZomboidServer");
         let cors_origins = list("WEB_CORS_ORIGINS", "http://localhost:5174");
 
-        let public_url = optional("WEB_PUBLIC_URL")
-            .or_else(|| cors_origins.first().cloned())
-            .unwrap_or_else(|| "http://localhost:5174".to_owned())
-            // A trailing slash would produce `//auth/steam/callback`, which
-            // Steam compares literally against the realm and rejects.
-            .trim_end_matches('/')
-            .to_owned();
+        let public_url = pick_public_url(optional("WEB_PUBLIC_URL"), &cors_origins);
 
         let server_ini_path = optional("PZ_SERVER_INI_PATH")
             .map(PathBuf::from)
@@ -204,6 +198,16 @@ impl Config {
     /// The dedicated server's whitelist SQLite file, if it is on disk.
     pub fn whitelist_db_path(&self) -> Option<std::path::PathBuf> {
         pz_bridge::whitelist::resolve_db_path(&self.data_path, &self.server_name)
+    }
+
+    /// True when Steam OpenID and absolute redirects would point at this box.
+    ///
+    /// A production deploy that leaves `WEB_PUBLIC_URL` empty inherits the
+    /// compose CORS default (`http://localhost:5174`) and sends Steam logins
+    /// there. Callers log this; they do not refuse to boot, because a local
+    /// panel on 127.0.0.1 is a legitimate `WEB_PROXY_MODE=local` setup.
+    pub fn public_url_is_loopback(&self) -> bool {
+        is_loopback_origin(&self.public_url)
     }
 }
 
@@ -295,4 +299,98 @@ fn list(name: &'static str, default: &str) -> Vec<String> {
         .filter(|entry| !entry.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// Public origin used for Steam OpenID and absolute redirects.
+///
+/// Prefer an explicit `WEB_PUBLIC_URL`. If that is missing, skip loopback
+/// CORS origins so a leftover `http://localhost:5174` in the allowlist cannot
+/// silently become the live realm. Only fall back to a loopback origin when
+/// nothing else was configured — that is the local-dev case.
+fn pick_public_url(explicit: Option<String>, cors_origins: &[String]) -> String {
+    explicit
+        .or_else(|| {
+            cors_origins
+                .iter()
+                .find(|origin| !is_loopback_origin(origin))
+                .cloned()
+        })
+        .or_else(|| cors_origins.first().cloned())
+        .unwrap_or_else(|| "http://localhost:5174".to_owned())
+        // A trailing slash would produce `//auth/steam/callback`, which
+        // Steam compares literally against the realm and rejects.
+        .trim_end_matches('/')
+        .to_owned()
+}
+
+fn is_loopback_origin(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let hostport = rest.split('/').next().unwrap_or(rest);
+    let host = if let Some(inner) = hostport.strip_prefix('[') {
+        inner.split(']').next().unwrap_or(inner)
+    } else {
+        hostport.split(':').next().unwrap_or(hostport)
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_loopback_origin, pick_public_url};
+
+    #[test]
+    fn loopback_hosts_are_detected() {
+        for url in [
+            "http://localhost:5174",
+            "http://127.0.0.1:8100",
+            "http://[::1]:8100",
+            "https://localhost",
+        ] {
+            assert!(is_loopback_origin(url), "{url}");
+        }
+
+        for url in [
+            "https://pz.corespace.de",
+            "https://pz.corespace.de:443",
+            "http://example.com",
+        ] {
+            assert!(!is_loopback_origin(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn explicit_public_url_wins() {
+        assert_eq!(
+            pick_public_url(
+                Some("https://pz.corespace.de/".to_owned()),
+                &["http://localhost:5174".to_owned()],
+            ),
+            "https://pz.corespace.de"
+        );
+    }
+
+    #[test]
+    fn a_public_cors_origin_is_preferred_over_loopback() {
+        assert_eq!(
+            pick_public_url(
+                None,
+                &[
+                    "http://localhost:5174".to_owned(),
+                    "https://pz.corespace.de".to_owned(),
+                ],
+            ),
+            "https://pz.corespace.de"
+        );
+    }
+
+    #[test]
+    fn loopback_is_the_last_resort_for_local_dev() {
+        assert_eq!(
+            pick_public_url(None, &["http://localhost:5174".to_owned()]),
+            "http://localhost:5174"
+        );
+    }
 }

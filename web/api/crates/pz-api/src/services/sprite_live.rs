@@ -42,10 +42,7 @@ pub async fn refresh_if_stale(state: &AppState) {
 async fn run_overlay(state: &AppState) -> Result<(), String> {
     let proxy = state.config.docker_proxy_url.trim_end_matches('/');
     let client = http_client(INSPECT);
-    let save_in_container = format!(
-        "/saves/{}",
-        state.config.pz_save_game.replace('\\', "/")
-    );
+    let save_in_container = format!("/saves/{}", state.config.pz_save_game.replace('\\', "/"));
     let body = serde_json::json!({
         "Image": state.config.map_tiles_image,
         "Entrypoint": ["python", "/tools/map_sprites/live_overlay.py"],

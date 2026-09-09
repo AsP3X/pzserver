@@ -35,6 +35,12 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
     tracing::info!(bind = %config.bind, "starting pz-api");
+    if config.public_url_is_loopback() {
+        tracing::error!(
+            public_url = %config.public_url,
+            "WEB_PUBLIC_URL is a loopback address; Steam OpenID will send players to localhost. Set WEB_PUBLIC_URL (and WEB_CORS_ORIGINS) to the public https origin."
+        );
+    }
 
     let db = db::connect(&config.database_url, config.database_max_connections).await?;
     db::migrate(&db).await?;

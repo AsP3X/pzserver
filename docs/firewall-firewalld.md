@@ -34,6 +34,8 @@ The ports opened depend on what you chose during `make init` (default: 80/tcp + 
 
 This opens the Caddy reverse proxy ports so remote users can access the admin panel over HTTPS. The web-ui container stays bound to `127.0.0.1:8100` — port 8100 is **never** exposed directly.
 
+Never publish Nginx Proxy Manager (`81/tcp`), Portainer (`9443/tcp`), the web-ui container port (`8080/tcp`), Docker (`2375/tcp`), RCON (`27015/tcp`), or Postgres (`5432/tcp`). Bind those listeners to `127.0.0.1` or drop them at the firewall. They are not the public site.
+
 **Requires Caddy to be configured** — run `make init` and choose a domain or IP during setup.
 
 ## Manual Commands

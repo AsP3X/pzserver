@@ -13,6 +13,12 @@ When you run `make expose`, `make hide`, `make admin-expose`, or `make admin-hid
 | *Caddy HTTP* | TCP | HTTP redirect to HTTPS | `make admin-expose` — for public admin |
 | *Caddy HTTPS* | TCP | Admin panel (HTTPS) | `make admin-expose` — for public admin |
 | `8100` | TCP | Panel (local only) | **Never expose** — `web-ui` binds `127.0.0.1:8100` |
+| `81` | TCP | Nginx Proxy Manager admin | **Never expose** — bind to `127.0.0.1` or block at the firewall |
+| `9443` | TCP | Portainer HTTPS UI | **Never expose** — Docker admin; bind to localhost |
+| `8080` | TCP | web-ui inside Docker | **Never expose** — NPM talks to it on the docker network |
+| `2375` / `2376` | TCP | Docker API | **Never expose** |
+| `27015` | TCP | PZ RCON | **Never expose** — internal only |
+| `5432` | TCP | Postgres | **Never expose** |
 
 > Caddy ports default to 80/443 but can be customized during `make init`. Check `.firewall.conf` or run `make info` to see your configured ports.
 

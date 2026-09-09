@@ -128,9 +128,9 @@ impl MapSprites {
 
     /// Compact live save overlay. Missing file is a cold start, not an error.
     pub fn live_bin(&self) -> Option<Vec<u8>> {
-        std::fs::read(&self.live_path).ok().filter(|bytes| {
-            bytes.len() >= 12 && bytes.starts_with(b"LIVE")
-        })
+        std::fs::read(&self.live_path)
+            .ok()
+            .filter(|bytes| bytes.len() >= 12 && bytes.starts_with(b"LIVE"))
     }
 
     pub fn live_revision(&self) -> Option<u32> {
@@ -154,9 +154,8 @@ impl MapSprites {
         };
         let blob = tokio::task::spawn_blocking(move || -> rusqlite::Result<Vec<u8>> {
             let con = inner.checkout().lock().expect("sprite map mutex poisoned");
-            let mut stmt = con.prepare(
-                "SELECT id, page, x, y, w, h, ox, oy FROM sprites ORDER BY id",
-            )?;
+            let mut stmt =
+                con.prepare("SELECT id, page, x, y, w, h, ox, oy FROM sprites ORDER BY id")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -264,7 +263,10 @@ impl MapSprites {
     }
 
     pub async fn overview(&self) -> ApiResult<Option<Vec<u8>>> {
-        match self.blob("SELECT data FROM overview WHERE id = ?1", 1).await {
+        match self
+            .blob("SELECT data FROM overview WHERE id = ?1", 1)
+            .await
+        {
             Ok(bytes) => Ok(bytes),
             Err(_) => Ok(None),
         }

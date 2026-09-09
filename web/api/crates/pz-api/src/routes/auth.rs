@@ -87,7 +87,29 @@ async fn register(
     headers: HeaderMap,
     Json(body): Json<RegisterRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    let user = registration::complete(&state.db, &body.code, &body.email, &body.password).await?;
+    // Same window as login, keyed by the code so repeating a guess burns the
+    // budget for that string. Unique-code spraying is throttled at nginx by
+    // client address; this layer still holds when several replicas sit behind
+    // one proxy IP.
+    let attempted = format!("reg:{}", body.code.trim().to_uppercase());
+    if !state.register_limiter.is_allowed(&attempted) {
+        tracing::warn!("registration rate limited");
+        return Err(ApiError::TooManyRequests);
+    }
+
+    let user =
+        match registration::complete(&state.db, &body.code, &body.email, &body.password).await {
+            Ok(user) => {
+                state.register_limiter.clear(&attempted);
+                user
+            }
+            Err(error) => {
+                if matches!(error, ApiError::Conflict { .. } | ApiError::Validation(_)) {
+                    state.register_limiter.record_failure(&attempted);
+                }
+                return Err(error);
+            }
+        };
 
     tracing::info!(username = %user.username, "account registered");
 
@@ -366,7 +388,7 @@ async fn steam_callback(
     };
 
     let steam_id = pz_bridge::SteamClient::new()
-        .verify(&params)
+        .verify(&params, &steam_return_to(&state))
         .await
         .map_err(|error| failed(&error.to_string()))?;
 

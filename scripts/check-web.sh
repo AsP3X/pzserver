@@ -26,8 +26,32 @@ bad() { echo "  BAD $*"; }
 skip() { echo "  --  $*"; }
 
 echo "=== 1) Env mode ==="
-grep -E '^(WEB_PROXY_MODE|WEB_UI_PORT|WEB_PUBLIC_URL|PZ_SERVER_NAME|ADMIN_USERNAME|WEB_DB_PASSWORD)=' .env 2>/dev/null ||
+grep -E '^(WEB_PROXY_MODE|WEB_UI_PORT|WEB_PUBLIC_URL|WEB_CORS_ORIGINS|PZ_SERVER_NAME|ADMIN_USERNAME|WEB_DB_PASSWORD)=' .env 2>/dev/null ||
   bad "root .env missing keys"
+
+public_url="$(grep -E '^WEB_PUBLIC_URL=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"'"'" || true)"
+cors_origins="$(grep -E '^WEB_CORS_ORIGINS=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"'"'" || true)"
+if [ "$WEB_PROXY_MODE" = "npm" ] || [ "$WEB_PROXY_MODE" = "caddy" ]; then
+  case "$public_url" in
+    ""|http://localhost*|https://localhost*|http://127.0.0.1*|https://127.0.0.1*)
+      bad "WEB_PUBLIC_URL must be the public https origin in ${WEB_PROXY_MODE} mode (Steam OpenID uses it; empty falls back to localhost)"
+      ;;
+    http://*)
+      bad "WEB_PUBLIC_URL is http — set https://… so Steam and cookies stay on TLS"
+      ;;
+    https://*)
+      ok "WEB_PUBLIC_URL is ${public_url}"
+      ;;
+    *)
+      bad "WEB_PUBLIC_URL does not look like an origin: ${public_url}"
+      ;;
+  esac
+  case "$cors_origins" in
+    *localhost*|*127.0.0.1*)
+      bad "WEB_CORS_ORIGINS still lists localhost — production should be the public origin only"
+      ;;
+  esac
+fi
 
 echo ""
 echo "=== 2) Containers ==="

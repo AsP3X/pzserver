@@ -8,6 +8,12 @@
 #   Forward port:     8080
 #   Websockets:       ON
 #   SSL:              Let's Encrypt on the PUBLIC side only
+#   Force SSL:        ON   ← HTTP must redirect to HTTPS (HSTS is not enough)
+#   HTTP/2:           ON
+#
+# Bind NPM's own admin UI (host :81) and Portainer (:9443) to 127.0.0.1.
+# They are not the public site. Leave them on 0.0.0.0 and anyone can reach
+# the reverse-proxy admin and the Docker admin.
 #
 # Caddy is not started (no profile "caddy"). Nothing binds host :80/:443.
 #
