@@ -17,6 +17,10 @@ pub const SESSION_COOKIE: &str = "knox_session";
 /// Roles that may use `/admin`. Matches the UI's `ADMIN_ROLES`.
 const ADMIN_ROLES: &[&str] = &["admin", "super_admin", "moderator"];
 
+/// Roles that may wipe, run raw RCON, edit `server.ini`, or mint coins.
+/// Moderators stay on kick/ban/reports; they do not own the machine.
+const OPERATOR_ROLES: &[&str] = &["admin", "super_admin"];
+
 /// A signed-in user. Extracting this rejects the request with 401 when there
 /// is no valid session, so a handler that takes it is a handler that requires
 /// one.
@@ -24,6 +28,9 @@ pub struct AuthUser(pub User);
 
 /// A staff member. 401 when nobody is signed in, 403 when they are not staff.
 pub struct AdminUser(pub User);
+
+/// An operator. Same 401/403 shape as [`AdminUser`], but moderators are out.
+pub struct OperatorUser(pub User);
 
 impl FromRequestParts<AppState> for AdminUser {
     type Rejection = ApiError;
@@ -35,6 +42,23 @@ impl FromRequestParts<AppState> for AdminUser {
         let AuthUser(user) = AuthUser::from_request_parts(parts, state).await?;
 
         if !ADMIN_ROLES.contains(&user.role.as_str()) {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(Self(user))
+    }
+}
+
+impl FromRequestParts<AppState> for OperatorUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let AuthUser(user) = AuthUser::from_request_parts(parts, state).await?;
+
+        if !OPERATOR_ROLES.contains(&user.role.as_str()) {
             return Err(ApiError::Forbidden);
         }
 
@@ -78,7 +102,8 @@ impl FromRequestParts<AppState> for MaybeAuthUser {
 /// Build the cookie that carries a session token.
 ///
 /// `SameSite=Lax` is the CSRF defence: the browser will not attach this cookie
-/// to a cross-site POST, and every state-changing endpoint here is a POST.
+/// to a cross-site POST, PATCH, PUT or DELETE. Top-level GET navigations still
+/// send it, which is why nothing state-changing is a GET.
 ///
 /// The expiry comes from the session row rather than from a separate constant,
 /// so the cookie and the database can never disagree about when it ends.

@@ -18,6 +18,8 @@ import {
   serverStatusQuery,
   statsSummaryQuery,
 } from '@/lib/queries'
+import { useCurrentUser } from '@/lib/auth'
+import { canOperate } from '@/lib/navigation'
 import { useTranslation } from '@/i18n/use-translation'
 
 /**
@@ -26,6 +28,7 @@ import { useTranslation } from '@/i18n/use-translation'
  */
 export function AdminOverviewPage() {
   const { t, intlLocale } = useTranslation()
+  const { user } = useCurrentUser()
   const { data: status, isPending: statusPending } = useQuery(serverStatusQuery)
   const { data: stats } = useQuery(statsSummaryQuery)
   const { data: history } = useQuery(serverHistoryQuery)
@@ -136,7 +139,7 @@ export function AdminOverviewPage() {
           </Panel>
         </div>
 
-        <ServerControls />
+        {canOperate(user?.role) ? <ServerControls /> : null}
 
         <Panel className="mt-6 border-dashed p-5">
           <p className="text-sm text-smoke">{t('admin.under_construction')}</p>

@@ -127,4 +127,13 @@ mod tests {
     fn an_unknown_source_is_rejected() {
         assert!(wallet_source("typo").is_err());
     }
+
+    #[test]
+    fn a_credit_cannot_be_an_arbitrary_i64() {
+        assert!(coins(1, "Amount").is_ok());
+        assert!(coins(MAX_COINS, "Amount").is_ok());
+        assert!(coins(0, "Amount").is_err());
+        assert!(coins(-1, "Amount").is_err());
+        assert!(coins(MAX_COINS + 1, "Amount").is_err());
+    }
 }

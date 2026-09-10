@@ -6,6 +6,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
 
+use crate::extract::AdminUser;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -68,15 +69,15 @@ async fn health(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
 ///
 /// Returns 200 even when a dependency is down — this endpoint reports, the
 /// orchestrator decides. Only the `status` field flips to `degraded`.
-async fn detailed(State(state): State<AppState>) -> Json<DetailedHealth> {
+async fn detailed(State(state): State<AppState>, _staff: AdminUser) -> Json<DetailedHealth> {
     let database = match sqlx::query("SELECT 1").execute(&state.db).await {
         Ok(_) => Dependency {
             reachable: true,
             error: None,
         },
-        Err(error) => Dependency {
+        Err(_) => Dependency {
             reachable: false,
-            error: Some(error.to_string()),
+            error: None,
         },
     };
 

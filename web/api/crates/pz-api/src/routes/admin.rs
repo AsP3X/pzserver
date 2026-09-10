@@ -13,7 +13,7 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
-use crate::extract::AdminUser;
+use crate::extract::{AdminUser, OperatorUser};
 use crate::services::admin;
 use crate::services::audit;
 use crate::services::automations;
@@ -123,7 +123,7 @@ pub fn file_routes() -> Router<AppState> {
 
 async fn wipe_server(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<WipeRequest>,
 ) -> ApiResult<Json<WipeResult>> {
     Ok(Json(wipe::run(&state, body).await?))
@@ -297,7 +297,7 @@ struct AccessBody {
 
 async fn access(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(username): Path<String>,
     Json(body): Json<AccessBody>,
 ) -> ApiResult<Json<CommandReply>> {
@@ -341,7 +341,7 @@ struct ItemMove {
 
 async fn give_item(
     State(state): State<AppState>,
-    AdminUser(staff): AdminUser,
+    OperatorUser(staff): OperatorUser,
     Path(username): Path<String>,
     Json(body): Json<ItemMove>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -367,7 +367,7 @@ async fn give_item(
 
 async fn take_item(
     State(state): State<AppState>,
-    AdminUser(staff): AdminUser,
+    OperatorUser(staff): OperatorUser,
     Path(username): Path<String>,
     Json(body): Json<ItemMove>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -398,7 +398,10 @@ struct MessageBody {
     message: Option<String>,
 }
 
-async fn start(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<Json<CommandReply>> {
+async fn start(
+    State(state): State<AppState>,
+    _staff: OperatorUser,
+) -> ApiResult<Json<CommandReply>> {
     admin::start(&state).await?;
     Ok(Json(CommandReply {
         output: "starting".to_owned(),
@@ -407,7 +410,7 @@ async fn start(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<Js
 
 async fn stop(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     body: Option<Json<MessageBody>>,
 ) -> ApiResult<Json<CommandReply>> {
     let message = body.and_then(|Json(body)| body.message);
@@ -419,7 +422,7 @@ async fn stop(
 
 async fn restart(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     body: Option<Json<MessageBody>>,
 ) -> ApiResult<Json<CommandReply>> {
     let message = body.and_then(|Json(body)| body.message);
@@ -429,7 +432,10 @@ async fn restart(
     }))
 }
 
-async fn save(State(state): State<AppState>, _staff: AdminUser) -> ApiResult<Json<CommandReply>> {
+async fn save(
+    State(state): State<AppState>,
+    _staff: OperatorUser,
+) -> ApiResult<Json<CommandReply>> {
     Ok(Json(CommandReply {
         output: admin::save_world(&state).await?,
     }))
@@ -457,7 +463,7 @@ struct ConsoleBody {
 
 async fn console(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<ConsoleBody>,
 ) -> ApiResult<Json<CommandReply>> {
     Ok(Json(CommandReply {
@@ -481,7 +487,7 @@ struct ConfigBody {
 
 async fn update_config(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<ConfigBody>,
 ) -> ApiResult<Json<admin::ServerConfig>> {
     admin::write_config(&state, body.updates).await?;
@@ -497,7 +503,7 @@ async fn sandbox(
 
 async fn update_sandbox(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<ConfigBody>,
 ) -> ApiResult<Json<admin::SandboxConfig>> {
     admin::write_sandbox(&state, body.updates).await?;
@@ -527,7 +533,7 @@ struct AddModBody {
 
 async fn add_mod(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<AddModBody>,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(
@@ -580,7 +586,7 @@ struct ReorderBody {
 
 async fn reorder_mods(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<ReorderBody>,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(admin::reorder_mods(&state, &body.mods).await?))
@@ -597,7 +603,7 @@ struct ImportBody {
 
 async fn import_mods(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<ImportBody>,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(
@@ -607,7 +613,7 @@ async fn import_mods(
 
 async fn remove_mod(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(workshop_id): Path<String>,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(admin::remove_mod(&state, &workshop_id).await?))
@@ -615,7 +621,7 @@ async fn remove_mod(
 
 async fn update_mod(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(workshop_id): Path<String>,
 ) -> ApiResult<Json<Vec<admin::ModEntry>>> {
     Ok(Json(admin::update_mod(&state, &workshop_id).await?))
@@ -628,7 +634,7 @@ struct WhitelistSettings {
 
 async fn whitelist_settings(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<WhitelistSettings>,
 ) -> ApiResult<Json<admin::ServerConfig>> {
     let mut updates = BTreeMap::new();
@@ -642,7 +648,7 @@ async fn whitelist_settings(
 
 async fn whitelist_add(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(username): Path<String>,
 ) -> ApiResult<Json<CommandReply>> {
     Ok(Json(CommandReply {
@@ -652,7 +658,7 @@ async fn whitelist_add(
 
 async fn whitelist_remove(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(username): Path<String>,
 ) -> ApiResult<Json<CommandReply>> {
     Ok(Json(CommandReply {
@@ -662,7 +668,7 @@ async fn whitelist_remove(
 
 async fn whitelist_toggle(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(username): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let whitelisted = admin::toggle_whitelist(&state, &username).await?;
@@ -685,7 +691,7 @@ struct PlayerPasswordBody {
 /// Set a player's *game* password. Never touches their website login.
 async fn set_player_password(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(username): Path<String>,
     Json(body): Json<PlayerPasswordBody>,
 ) -> ApiResult<Json<CommandReply>> {
@@ -727,7 +733,7 @@ struct UpdateServerBody {
 /// Reinstall the game from Steam. Takes the server down and brings it back.
 async fn update_server(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<UpdateServerBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     admin::update_game(&state, body.branch.as_deref(), body.message.as_deref()).await?;
@@ -776,7 +782,7 @@ struct LogQuery {
 
 async fn logs(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Query(query): Query<LogQuery>,
 ) -> ApiResult<Json<admin::ContainerLogs>> {
     Ok(Json(
@@ -887,7 +893,7 @@ struct SiteUpdate {
 
 async fn update_site(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<SiteUpdate>,
 ) -> ApiResult<Json<SiteSettings>> {
     Ok(Json(
@@ -956,7 +962,7 @@ struct CreateBackupBody {
 
 async fn create_backup(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<CreateBackupBody>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     if body
@@ -987,7 +993,7 @@ async fn create_backup(
 
 async fn delete_backup(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let filename = backups::delete(&state.db, id).await?;
@@ -1003,7 +1009,7 @@ struct BulkDeleteBody {
 
 async fn delete_backups(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<BulkDeleteBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if body.ids.is_empty() {
@@ -1024,7 +1030,7 @@ struct RollbackBody {
 
 async fn rollback_backup(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(id): Path<Uuid>,
     Json(body): Json<RollbackBody>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
@@ -1142,7 +1148,7 @@ async fn download_backup(
 
 async fn import_world(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     mut multipart: Multipart,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     let dir = backups::imports_dir(&state.config.backup_path);
@@ -1205,7 +1211,7 @@ async fn automations(
 
 async fn create_automation(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<automations::AutomationPatch>,
 ) -> ApiResult<(StatusCode, Json<automations::AutomationView>)> {
     Ok((
@@ -1216,7 +1222,7 @@ async fn create_automation(
 
 async fn update_automation(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(id): Path<Uuid>,
     Json(body): Json<automations::AutomationPatch>,
 ) -> ApiResult<Json<automations::AutomationView>> {
@@ -1225,7 +1231,7 @@ async fn update_automation(
 
 async fn delete_automation(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     automations::delete(&state.db, id).await?;
@@ -1236,7 +1242,7 @@ async fn delete_automation(
 
 async fn run_automation(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<automations::AutomationView>> {
     Ok(Json(automations::run_now(&state, id).await?))
@@ -1275,7 +1281,7 @@ struct RerenderBody {
 
 async fn rerender_tiles(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Json(body): Json<RerenderBody>,
 ) -> ApiResult<(StatusCode, Json<crate::services::map_tile_jobs::Job>)> {
     let job = crate::services::map_tile_jobs::enqueue(&state, body.squares, body.cells).await?;

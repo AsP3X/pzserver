@@ -228,8 +228,8 @@ mod tests {
         assert_eq!(report.verdict, UpdateVerdict::Unknown);
     }
 
-    /// The public shape must never carry the diagnosis: `/health/detailed` is
-    /// unauthenticated in this stack.
+    /// The public shape must never carry the diagnosis: `/health/detailed`
+    /// is staff-only, and even then the JSON must not include OS or SQL errors.
     #[test]
     fn public_view_drops_the_diagnosis() {
         let public = UpdateReport::parse(BEHIND).public();

@@ -805,14 +805,19 @@ pub async fn write_config(state: &AppState, updates: BTreeMap<String, String>) -
         return Ok(());
     }
 
-    for key in updates.keys() {
+    for (key, value) in &updates {
         if config_key_blocked(key) {
             return Err(ApiError::Validation(
                 "That setting cannot be changed from here.".to_owned(),
             ));
         }
-        if key.is_empty() || key.contains('=') || key.contains('\n') {
+        if key.is_empty() || key.contains('=') || key.contains('\n') || key.contains('\r') {
             return Err(ApiError::Validation("Invalid setting name.".to_owned()));
+        }
+        if value.contains('\n') || value.contains('\r') || value.contains('\0') {
+            return Err(ApiError::Validation(
+                "Setting values cannot contain line breaks.".to_owned(),
+            ));
         }
     }
 
@@ -952,13 +957,18 @@ pub async fn write_sandbox(state: &AppState, updates: BTreeMap<String, String>) 
         return Ok(());
     }
 
-    for key in updates.keys() {
-        if key.is_empty() || key.contains('=') || key.contains('\n') {
+    for (key, value) in &updates {
+        if key.is_empty() || key.contains('=') || key.contains('\n') || key.contains('\r') {
             return Err(ApiError::Validation("Invalid setting name.".to_owned()));
         }
         if key == "VERSION" {
             return Err(ApiError::Validation(
                 "That setting cannot be changed from here.".to_owned(),
+            ));
+        }
+        if value.contains('\n') || value.contains('\r') || value.contains('\0') {
+            return Err(ApiError::Validation(
+                "Setting values cannot contain line breaks.".to_owned(),
             ));
         }
     }
@@ -969,6 +979,9 @@ pub async fn write_sandbox(state: &AppState, updates: BTreeMap<String, String>) 
         .map_err(|error| match error {
             SandboxError::UnknownKey(key) => {
                 ApiError::Validation(format!("Unknown sandbox setting: {key}."))
+            }
+            SandboxError::InvalidValue(key) => {
+                ApiError::Validation(format!("That is not a valid value for {key}."))
             }
             other => ApiError::Internal(other.to_string()),
         })

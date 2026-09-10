@@ -122,9 +122,20 @@ impl SandboxVars {
         }
 
         let parsed = Self::parse(contents);
-        for key in updates.keys() {
+        for (key, value) in updates {
             if !parsed.values.contains_key(key) {
                 return Err(SandboxError::UnknownKey(key.clone()));
+            }
+            let field = parsed
+                .fields
+                .iter()
+                .find(|field| field.key == *key)
+                .expect("parsed values and fields share keys");
+            if field.read_only {
+                return Err(SandboxError::InvalidValue(key.clone()));
+            }
+            if !value_ok_for(field, value) {
+                return Err(SandboxError::InvalidValue(key.clone()));
             }
         }
 
@@ -253,7 +264,42 @@ fn format_like(original: &str, new_value: &str) -> String {
     if original.starts_with('"') {
         return format!("\"{}\"", escape_lua(&unquote_input(new_value)));
     }
-    new_value.trim().to_owned()
+    lua_number(new_value).unwrap_or_else(|| original.trim().to_owned())
+}
+
+fn value_ok_for(field: &SandboxField, value: &str) -> bool {
+    match field.kind {
+        SandboxKind::Boolean => {
+            matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "false")
+        }
+        SandboxKind::Number | SandboxKind::Enum => lua_number(value).is_some(),
+        SandboxKind::String => {
+            !value.contains('\0') && !value.contains('\n') && !value.contains('\r')
+        }
+    }
+}
+
+/// A Lua numeric literal, not an expression. `1; os.execute(...)` must not pass.
+fn lua_number(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if !trimmed.parse::<f64>().is_ok_and(f64::is_finite) {
+        return None;
+    }
+    if trimmed.eq_ignore_ascii_case("nan")
+        || trimmed.eq_ignore_ascii_case("inf")
+        || trimmed.eq_ignore_ascii_case("+inf")
+        || trimmed.eq_ignore_ascii_case("-inf")
+        || trimmed.eq_ignore_ascii_case("infinity")
+    {
+        return None;
+    }
+    let ok = trimmed
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'+' | b'e' | b'E'));
+    ok.then(|| trimmed.to_owned())
 }
 
 fn unquote_input(value: &str) -> String {
@@ -266,7 +312,11 @@ fn unquote_input(value: &str) -> String {
 }
 
 fn escape_lua(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', " ")
+        .replace(['\r', '\0'], "")
 }
 
 fn unescape_lua(value: &str) -> String {
@@ -575,6 +625,9 @@ pub enum SandboxError {
     },
     #[error("unknown sandbox setting: {0}")]
     UnknownKey(String),
+
+    #[error("invalid value for sandbox setting: {0}")]
+    InvalidValue(String),
 }
 
 pub fn sandbox_path(ini_path: &Path) -> PathBuf {
@@ -758,6 +811,30 @@ mod tests {
 
         let error = SandboxVars::apply(SAMPLE, &updates).expect_err("unknown");
         assert!(matches!(error, SandboxError::UnknownKey(key) if key == "NoSuchKey"));
+    }
+
+    #[test]
+    fn apply_rejects_a_numeric_field_that_is_not_a_number() {
+        let mut updates = BTreeMap::new();
+        updates.insert("HoursForLootRespawn".to_owned(), "1; extra()".to_owned());
+
+        let error = SandboxVars::apply(SAMPLE, &updates).expect_err("not a number");
+        assert!(matches!(
+            error,
+            SandboxError::InvalidValue(key) if key == "HoursForLootRespawn"
+        ));
+    }
+
+    #[test]
+    fn apply_rejects_a_boolean_that_is_not_true_or_false() {
+        let mut updates = BTreeMap::new();
+        updates.insert("StarterKit".to_owned(), "true, extra()".to_owned());
+
+        let error = SandboxVars::apply(SAMPLE, &updates).expect_err("not a boolean");
+        assert!(matches!(
+            error,
+            SandboxError::InvalidValue(key) if key == "StarterKit"
+        ));
     }
 
     #[test]

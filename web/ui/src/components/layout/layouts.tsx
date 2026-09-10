@@ -9,7 +9,7 @@ import { SiteHeader } from '@/components/layout/site-header'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAdminOnly, useRequireUser } from '@/lib/auth-guards'
 import { useTranslation } from '@/i18n/use-translation'
-import { ADMIN_NAV, PLAYER_NAV } from '@/lib/navigation'
+import { adminNavFor, PLAYER_NAV } from '@/lib/navigation'
 
 /**
  * Anyone. Header, content, footer.
@@ -60,14 +60,14 @@ export function PlayerLayout() {
 /** Staff only. Everything about the server and everyone on it. */
 export function AdminLayout() {
   const { t } = useTranslation()
-  const { allowed, isLoading } = useAdminOnly()
+  const { user, allowed, isLoading } = useAdminOnly()
 
   if (isLoading || !allowed) {
     return <SurfaceSkeleton />
   }
 
   return (
-    <AppShell surface={t('nav.surface_admin')} groups={ADMIN_NAV}>
+    <AppShell surface={t('nav.surface_admin')} groups={adminNavFor(user?.role)}>
       <Outlet />
     </AppShell>
   )

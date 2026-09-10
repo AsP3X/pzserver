@@ -61,6 +61,8 @@ export interface NavItem {
   icon: LucideIcon
   /** Not built yet — shown, but marked and not linked. */
   planned?: boolean
+  /** Hidden from moderators. Matches the API's operator extractor. */
+  operatorsOnly?: boolean
 }
 
 export interface NavGroup {
@@ -126,13 +128,13 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     label: 'nav.group.server',
     items: [
-      { to: '/admin/config', label: 'nav.config', icon: Wrench },
-      { to: '/admin/mods', label: 'nav.mods', icon: Package },
-      { to: '/admin/backups', label: 'nav.backups', icon: Archive },
-      { to: '/admin/automations', label: 'nav.automations', icon: Zap },
-      { to: '/admin/console', label: 'nav.rcon_console', icon: Terminal },
-      { to: '/admin/logs', label: 'nav.server_logs', icon: ScrollText },
-      { to: '/admin/bridge', label: 'nav.bridge', icon: Link2 },
+      { to: '/admin/config', label: 'nav.config', icon: Wrench, operatorsOnly: true },
+      { to: '/admin/mods', label: 'nav.mods', icon: Package, operatorsOnly: true },
+      { to: '/admin/backups', label: 'nav.backups', icon: Archive, operatorsOnly: true },
+      { to: '/admin/automations', label: 'nav.automations', icon: Zap, operatorsOnly: true },
+      { to: '/admin/console', label: 'nav.rcon_console', icon: Terminal, operatorsOnly: true },
+      { to: '/admin/logs', label: 'nav.server_logs', icon: ScrollText, operatorsOnly: true },
+      { to: '/admin/bridge', label: 'nav.bridge', icon: Link2, operatorsOnly: true },
     ],
   },
   {
@@ -141,7 +143,7 @@ export const ADMIN_NAV: NavGroup[] = [
       { to: '/admin/players', label: 'nav.players', icon: Users },
       { to: '/admin/players/map', label: 'nav.player_map', icon: MapPin },
       { to: '/admin/moderation', label: 'nav.moderation', icon: Crosshair },
-      { to: '/admin/whitelist', label: 'nav.whitelist', icon: Shield },
+      { to: '/admin/whitelist', label: 'nav.whitelist', icon: Shield, operatorsOnly: true },
       { to: '/admin/reports', label: 'nav.reports', icon: LifeBuoy },
     ],
   },
@@ -155,12 +157,12 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     label: 'nav.group.shop',
     items: [
-      { to: '/admin/shop', label: 'nav.catalogue', icon: Store },
+      { to: '/admin/shop', label: 'nav.catalogue', icon: Store, operatorsOnly: true },
       { to: '/admin/auctions', label: 'nav.auctions', icon: Tag },
-      { to: '/admin/wallets', label: 'nav.wallets', icon: Coins },
-      { to: '/admin/quests', label: 'nav.flows', icon: GitBranch },
+      { to: '/admin/wallets', label: 'nav.wallets', icon: Coins, operatorsOnly: true },
+      { to: '/admin/quests', label: 'nav.flows', icon: GitBranch, operatorsOnly: true },
       { to: '/admin/shop/promotions', label: 'nav.promotions', icon: Tag, planned: true },
-      { to: '/admin/vault', label: 'nav.vault', icon: Vault },
+      { to: '/admin/vault', label: 'nav.vault', icon: Vault, operatorsOnly: true },
     ],
   },
   {
@@ -173,8 +175,8 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     label: 'nav.group.system',
     items: [
-      { to: '/admin/site', label: 'nav.site_settings', icon: Sliders },
-      { to: '/admin/translations', label: 'nav.translations', icon: Languages },
+      { to: '/admin/site', label: 'nav.site_settings', icon: Sliders, operatorsOnly: true },
+      { to: '/admin/translations', label: 'nav.translations', icon: Languages, operatorsOnly: true },
       { to: '/admin/audit', label: 'nav.audit_log', icon: ScrollText },
     ],
   },
@@ -220,4 +222,20 @@ export const ADMIN_ROLES = ['admin', 'super_admin', 'moderator'] as const
 
 export function canAdminister(role: string | undefined): boolean {
   return (ADMIN_ROLES as readonly string[]).includes(role ?? '')
+}
+
+const OPERATOR_ROLES = ['admin', 'super_admin'] as const
+
+export function canOperate(role: string | undefined): boolean {
+  return (OPERATOR_ROLES as readonly string[]).includes(role ?? '')
+}
+
+/** Admin nav with operator-only entries removed for moderators. */
+export function adminNavFor(role: string | undefined): NavGroup[] {
+  const operator = canOperate(role)
+
+  return ADMIN_NAV.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => operator || !item.operatorsOnly),
+  })).filter((group) => group.items.length > 0)
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{AdminUser, AuthUser};
+use crate::extract::{AdminUser, AuthUser, OperatorUser};
 use crate::services::economy::{
     self, auction, deposit, offers, quests, rewards, store, vault, wallet,
 };
@@ -471,7 +471,7 @@ struct AdjustBody {
 
 async fn adjust_wallet(
     State(state): State<AppState>,
-    _staff: AdminUser,
+    _staff: OperatorUser,
     Path(user_id): Path<Uuid>,
     Json(body): Json<AdjustBody>,
 ) -> ApiResult<Json<wallet::WalletView>> {

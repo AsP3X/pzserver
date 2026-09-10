@@ -903,6 +903,10 @@ fn extract_import(
         entry.starts_with("map_") || entry == "players.db" || entry.starts_with("worldZone-")
     });
 
+    if listing.iter().any(|entry| !zip_entry_safe(entry)) {
+        return Err("that zip has an unsafe path in it".to_owned());
+    }
+
     if !has_saves && !flat {
         if has_server || has_db {
             return Err("that zip has config but no save".to_owned());
@@ -939,12 +943,27 @@ fn extract_import(
     result
 }
 
+fn zip_entry_safe(name: &str) -> bool {
+    let path = name.replace('\\', "/");
+    let path = path.trim_end_matches('/');
+    if path.is_empty() || path.starts_with('/') || path.contains('\0') {
+        return false;
+    }
+    !path
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+}
+
 fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     for entry in std::fs::read_dir(from).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let dest = to.join(entry.file_name());
         let source = entry.path();
-        if source.is_dir() {
+        let meta = std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+        if meta.file_type().is_symlink() {
+            return Err("that zip contains a symbolic link".to_owned());
+        }
+        if meta.is_dir() {
             std::fs::create_dir_all(&dest).map_err(|error| error.to_string())?;
             copy_tree(&source, &dest)?;
         } else {
@@ -1143,5 +1162,44 @@ mod tests {
             outcome.message(),
             "Deleted 3 of 5 — 2 could not be removed."
         );
+    }
+
+    #[test]
+    fn archive_entry_paths_stay_inside_the_archive() {
+        assert!(sanitize_entry_path("Server/ZomboidServer.ini").is_ok());
+        assert!(sanitize_entry_path("Saves/Multiplayer/ZomboidServer/map.bin").is_ok());
+
+        for hostile in [
+            "",
+            "/etc/passwd",
+            "../etc/passwd",
+            "Saves/../../etc/passwd",
+            "Saves//map.bin",
+            "Saves/./map.bin",
+            "foo\0bar.ini",
+        ] {
+            assert!(
+                sanitize_entry_path(hostile).is_err(),
+                "{hostile} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn zip_entries_cannot_climb_out() {
+        assert!(zip_entry_safe("Saves/Multiplayer/world/map.bin"));
+        assert!(zip_entry_safe("Server/ZomboidServer.ini"));
+        assert!(zip_entry_safe("Saves/"));
+
+        for hostile in [
+            "",
+            "/etc/passwd",
+            "../secret",
+            "Saves/../../etc/passwd",
+            "..\\windows\\system32",
+            "Saves//map.bin",
+        ] {
+            assert!(!zip_entry_safe(hostile), "{hostile} should be refused");
+        }
     }
 }

@@ -190,11 +190,7 @@ pub async fn credit_tx(
     reference_id: Option<Uuid>,
 ) -> ApiResult<WalletTransaction> {
     let source = super::wallet_source(source)?;
-    if amount < 1 {
-        return Err(ApiError::Validation(
-            "Amount must be at least 1 coin.".to_owned(),
-        ));
-    }
+    let amount = super::coins(amount, "Amount")?;
     ensure_wallet(tx, user_id).await?;
     sqlx::query(
         r#"UPDATE wallets SET
@@ -230,11 +226,7 @@ pub async fn debit_tx(
     reference_id: Option<Uuid>,
 ) -> ApiResult<WalletTransaction> {
     let source = super::wallet_source(source)?;
-    if amount < 1 {
-        return Err(ApiError::Validation(
-            "Amount must be at least 1 coin.".to_owned(),
-        ));
-    }
+    let amount = super::coins(amount, "Amount")?;
     ensure_wallet(tx, user_id).await?;
     let updated = sqlx::query(
         r#"UPDATE wallets SET

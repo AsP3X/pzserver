@@ -114,7 +114,7 @@ impl ServerIni {
 
                 let key = key.trim();
                 match remaining.remove(key) {
-                    Some(value) => format!("{key}={value}"),
+                    Some(value) => format!("{key}={}", ini_value(&value)),
                     None => line.to_owned(),
                 }
             })
@@ -131,7 +131,7 @@ impl ServerIni {
                 lines.push(String::new());
             }
             for (key, value) in remaining {
-                lines.push(format!("{key}={value}"));
+                lines.push(format!("{key}={}", ini_value(&value)));
             }
         }
 
@@ -180,6 +180,15 @@ impl ServerIni {
                 source,
             })
     }
+}
+
+/// One ini value, never a second line. A newline here would become a new
+/// `Key=` the next time the file is parsed.
+fn ini_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| *ch != '\n' && *ch != '\r' && *ch != '\0')
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -274,5 +283,34 @@ Password=
         let next = ServerIni::apply(SAMPLE, &updates);
 
         assert!(next.contains("NightLength=3"));
+    }
+
+    #[test]
+    fn a_value_cannot_open_another_key() {
+        let mut updates = BTreeMap::new();
+        updates.insert(
+            "PublicName".to_owned(),
+            "x\nRCONPassword=injected".to_owned(),
+        );
+
+        let next = ServerIni::apply("PublicName=old\nRCONPassword=secret\n", &updates);
+
+        let rcon = next
+            .lines()
+            .find(|line| line.starts_with("RCONPassword="))
+            .expect("RCONPassword");
+        assert_eq!(rcon, "RCONPassword=secret");
+        assert_eq!(
+            next.lines()
+                .filter(|line| line.starts_with("RCONPassword="))
+                .count(),
+            1
+        );
+
+        let public = next
+            .lines()
+            .find(|line| line.starts_with("PublicName="))
+            .expect("PublicName");
+        assert_eq!(public, "PublicName=xRCONPassword=injected");
     }
 }
